@@ -9,13 +9,13 @@ import pandas as pd
 from sliderule import sliderule, icesat2
 from datetime import datetime, timedelta
 from shapely.geometry import Polygon
-import config
+from . import config
 import rasterio
 from rasterio.mask import mask
 import rasterio.features
 import subprocess
 from shutil import which
-import asp_binder_utils as asp_utils
+from . import asp_binder_utils as asp_utils
 from distutils.spawn import find_executable
 import glob
 import pyTMD

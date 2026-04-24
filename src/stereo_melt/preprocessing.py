@@ -19,7 +19,7 @@ import os
 import boto3
 from botocore.config import Config
 from botocore import UNSIGNED
-import config
+from . import config
 from datetime import datetime
 from sliderule import raster
 import sliderule

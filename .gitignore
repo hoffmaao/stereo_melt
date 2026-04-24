@@ -91,3 +91,8 @@ credentials.json
 # Claude Code local settings (if any land in repo)
 # ---------------------------------------------------------------------------
 .claude/
+
+# ---------------------------------------------------------------------------
+# Vendored reference repos (clones for reading only, not part of this package)
+# ---------------------------------------------------------------------------
+vendor/
