@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stereo_melt"
+version = "0.1.0"
+description = "Basal melt rate beneath Antarctic ice shelves from repeat stereo DEMs"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Andrew Hoffman" }]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "xarray",
+    "rioxarray",
+    "rasterio",
+    "geopandas",
+    "shapely",
+    "pyproj",
+    "matplotlib",
+    "pdemtools>=0.8",
+    "pyTMD",
+    "sliderule",
+    "cdsapi",
+    "h5py",
+    "netCDF4",
+    "boto3",
+    "contextily",
+    "pooch",
+    "requests",
+    "tqdm",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+gpu = [
+    # GTX 1080 Ti + CUDA 11.2 driver on this host; use cupy-cuda11x.
+    "cupy-cuda11x",
+]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "ipykernel",
+    "jupyter",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
