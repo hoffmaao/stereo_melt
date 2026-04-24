@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.interpolate import griddata, RegularGridInterpolator
 from scipy.ndimage import zoom
-from .geospatial_operations import project_to_latlon, project_to_epsg3031
+from ..geospatial_operations import project_to_latlon, project_to_epsg3031
 
 
 class Corrections:
