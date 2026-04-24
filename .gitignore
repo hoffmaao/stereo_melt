@@ -1,0 +1,93 @@
+# ---------------------------------------------------------------------------
+# External data — not version controlled
+# These are large inputs downloaded/generated from upstream sources.
+# Document provenance and download commands in scripts/, not git history.
+# ---------------------------------------------------------------------------
+data/
+CATS2008/
+CATS2008.zip
+
+# ---------------------------------------------------------------------------
+# Pipeline outputs
+# ---------------------------------------------------------------------------
+results/
+processed/
+strips/*_strips.csv       # regenerable from pdt.search
+plots/
+correction_plots/
+velocity_plots/
+*_aligned/
+ASP_aligned/
+
+# Intermediate shapefiles written by the pipeline (not inputs)
+low_velocity_strip.*
+low_velocity_polygons.*
+rock_polygons.*
+
+# ---------------------------------------------------------------------------
+# Logs / misc runtime artifacts
+# ---------------------------------------------------------------------------
+nohup.out
+*.log
+*.out
+!requirements*.txt
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Editable installs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ---------------------------------------------------------------------------
+# Virtual envs (conda env lives outside repo; these are just in case)
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Jupyter
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ---------------------------------------------------------------------------
+# IDE / editor
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Secrets — never commit
+# ---------------------------------------------------------------------------
+.env
+.cdsapirc
+*.pem
+*.key
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Claude Code local settings (if any land in repo)
+# ---------------------------------------------------------------------------
+.claude/
