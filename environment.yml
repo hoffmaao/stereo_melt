@@ -1,0 +1,96 @@
+# Reproducible conda environment for the stereo_melt monorepo (all basins +
+# the stereo_melt library). Authored 2026-07-06 from the validated, known-good
+# env after a stray `pip install pyshtools` bumped numpy to 2.2 and broke the
+# pdemtools/numba import chain (see memory: feedback-numpy-pin-env).
+#
+# Design: pin the top-level scientific/geo/altimetry stack to the versions the
+# pipeline was validated on; let the solver fill transitive deps. The heavy
+# binary stack (GDAL, PROJ, HDF5, rasterio, geopandas, numba, pdemtools, pyTMD)
+# comes from conda-forge; pip carries the GPU backend, ECMWF/CDS tooling, the
+# SlideRule/pointCollection/pygeotools altimetry libs, the CPU torch build, and
+# the two editable local packages.
+#
+# HARD CONSTRAINT: numpy<2.0. numba (pulled by pdemtools) requires numpy<2.1;
+# the pipeline is validated on 1.26.4. Do NOT add astropy>=6 / pyshtools here —
+# they demand numpy>=2.0 and cannot coexist with pdemtools. Put that work in a
+# separate env.
+#
+# Build (run from the repo root, /wd2/projects/stereo_melt):
+#   conda env create -f environment.yml            # -> env named stereo_melt
+#   # (staging build used `-n stereo_melt_v2` to avoid clobbering the live env)
+# The `-e` local installs at the bottom are resolved relative to this file.
+
+name: stereo_melt
+
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  # --- interpreter + build tooling ---
+  - python=3.12.8
+  - pip
+
+  # --- core scientific stack (numpy HARD-CAPPED <2.0; see header) ---
+  - numpy=1.26.4
+  - scipy=1.14.1
+  - pandas=2.2.2
+  - xarray=2024.11.0
+  - numba=0.60.0
+
+  # --- geospatial binary stack (conda-forge builds GDAL/PROJ/HDF5 correctly) ---
+  - gdal=3.10.0
+  - proj=9.5.1
+  - rasterio=1.4.3
+  - rioxarray=0.17.0
+  - geopandas=1.0.1
+  - pyproj=3.7.0
+  - shapely=2.0.6
+  - hdf5=1.14.3
+  - h5py=3.12.1
+  - netcdf4=1.7.2
+
+  # --- domain libraries + IO/plotting ---
+  - pdemtools=0.8.5          # REMA ingestion + geoid; pulls numba (the numpy<2.1 constraint)
+  - pytmd=2.2.0              # CATS2008 tides
+  - matplotlib=3.10.0
+  - contextily=1.6.2
+  - pygmt=0.14.0            # imported at top of io/rema.py; pulls the GMT 6.5 C library
+  - gmt=6.5.0
+  - boto3=1.35.90            # PGC open-data S3 strip pulls
+  - pooch=1.9.0
+  - requests=2.32.3
+  - pyyaml=6.0.2
+  - tqdm=4.67.1
+  - future                  # declared by read-cryosat-2 (was missing in the old env)
+
+  # --- dev tooling (pyproject [dev]) ---
+  - pytest
+  - pytest-xdist
+  - ipykernel
+  - jupyter
+  - ruff
+  - black
+
+  # --- pip layer: GPU backend, data-access tooling, CPU torch, local packages ---
+  - pip:
+      # GPU backend (GTX 1080 Ti / CUDA 11.x on this host)
+      - cupy-cuda11x==13.6.0
+
+      # altimetry + data access (pip-only, or newer than conda-forge)
+      - sliderule==5.4.0
+      - pygeotools==1.1.1
+      # ERA5/IBE pull goes through cdsapi directly (corrections/ibe.py); the repo
+      # does NOT import era5cli, so it's dropped — its cdsapi==0.5.1 hard-pin
+      # conflicts with the 0.7.x CDS backend the pipeline actually uses. cdsapi
+      # pulls its own ecmwf-datastores-client / multiurl backend.
+      - cdsapi==0.7.7
+
+      # torch: CPU build (PINN experiments run on CPU here)
+      - --extra-index-url https://download.pytorch.org/whl/cpu
+      - torch==2.6.0
+
+      # editable local packages / vendored clones (paths relative to repo root)
+      - -e ./vendor/pointCollection
+      - -e ./vendor/read-cryosat-2
+      - -e ./stereo_melt

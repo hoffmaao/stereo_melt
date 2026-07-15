@@ -18,6 +18,31 @@ correction_plots/
 velocity_plots/
 *_aligned/
 ASP_aligned/
+tests/figures/            # demo / sanity-check outputs; regenerable
+stereo_melt/tests/figures/
+stereo_melt/tests/*.png   # gate/sanity plots written next to the scripts
+beardmore/plots/
+beardmore/processed/
+beardmore/results/
+
+# ---------------------------------------------------------------------------
+# Literature / papers / proposals — local-only reference material
+# ---------------------------------------------------------------------------
+literature/
+
+# Stray reference material / bulk downloads dropped at the workspace root.
+# Root-anchored so nothing inside the package is caught.
+/*.pdf
+/*.zip
+/._*
+
+# ---------------------------------------------------------------------------
+# Figures — regenerable pipeline output (matches the plots/ rule above)
+# ---------------------------------------------------------------------------
+figures/
+*/figures/
+scripts/deletable_strips.txt
+scripts.tar.gz
 
 # Intermediate shapefiles written by the pipeline (not inputs)
 low_velocity_strip.*
@@ -31,6 +56,60 @@ nohup.out
 *.log
 *.out
 !requirements*.txt
+
+# ---------------------------------------------------------------------------
+# Data files — type-level backstop.
+# The data/ , processed/ , results/ , strips/ rules above already cover the
+# bulk caches by location; these catch a stray granule or raster that lands
+# anywhere else. Input geometry (AOI shapefiles) is deliberately NOT listed
+# here — see the shapefile rules above, which name the pipeline-written ones.
+# ---------------------------------------------------------------------------
+# Rasters / DEMs
+*.tif
+*.tiff
+*.vrt
+*.img
+*.jp2
+*.jpx
+
+# Granules / gridded cubes
+*.h5
+*.hdf5
+*.he5
+*.hdf
+*.nc
+*.nc4
+*.zarr/
+*.grib
+*.grib2
+
+# Serialized arrays / tables
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.feather
+*.parquet
+
+# Point clouds / geodesy grids
+*.las
+*.laz
+*.xyz
+*.grd
+*.gmt
+
+# Archives
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+*.bz2
+*.xz
+*.7z
+*.rar
+
+# Run logs (the *.log rule above misses sidecar CSVs written next to them)
+logs/
 
 # ---------------------------------------------------------------------------
 # Python
