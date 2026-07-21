@@ -19,8 +19,8 @@ This module provides the kinematic building blocks consumed by
   in Shean 2019 Eq. 4.
 
 The flux divergence goes through a pluggable :class:`DivergenceEstimator`
-protocol so a learned Helmholtz surrogate (e.g. FluxNet) can slot in
-without touching the melt-rate solver.
+protocol so a learned Helmholtz flux surrogate can slot in without
+touching the melt-rate solver.
 
 All array arithmetic honors the active backend selected in
 :mod:`stereo_melt.backend` (numpy by default, cupy when
@@ -241,9 +241,8 @@ class DivergenceEstimator(Protocol):
     Any callable ``(H, vx, vy) -> DataArray`` that returns
     :math:`\nabla\!\cdot(H u)` on the input grid satisfies this
     interface. The default is :class:`FiniteDifferenceDivergence`; a
-    learned surrogate (e.g. FluxNet) would implement the same call
-    signature and be passed to :func:`flux_divergence` via
-    ``estimator=...``.
+    learned flux surrogate would implement the same call signature and
+    be passed to :func:`flux_divergence` via ``estimator=...``.
     """
 
     def __call__(self, H: xr.DataArray, vx: xr.DataArray, vy: xr.DataArray) -> xr.DataArray: ...

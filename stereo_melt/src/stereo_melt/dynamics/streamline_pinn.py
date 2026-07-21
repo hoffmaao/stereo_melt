@@ -24,10 +24,10 @@ Shean Eq. 10 in streamline coordinates:
 where :math:`\hat H` is the hydrostatic inversion of :math:`\hat h` and
 forcings :math:`(\nabla\!\cdot\mathbf{u}, \dot a)` are sampled at the
 observation pixel. Mass balance is exactly satisfied by construction —
-no PDE-residual loss term, only data loss on :math:`\hat h`. This
-mirrors FluxNet's "physics in the architecture, not the loss" pattern
-(Bente et al. 2026, ``vendor/FluxNet/models.py``) translated to a
-conservation law instead of a Helmholtz decomposition.
+no PDE-residual loss term, only data loss on :math:`\hat h`. Physics
+enters through the architecture rather than a soft penalty: the
+conservation law is embedded in the forward map, so the network only
+has to fit the freeboard while mass balance holds automatically.
 
 v1 assumptions:
 - stationary melt rate (no absolute-time input; time-averaged forcings)
@@ -57,13 +57,13 @@ __all__ = [
 
 
 # ----------------------------------------------------------------------
-# Architecture (lifted from vendor/FluxNet/models.py with input dim 2→3,
-# single h_hat head, optional Fourier feature embedding on τ).
+# Architecture: SiLU residual MLP with 3-D input (streamline labels),
+# a single h_hat head, and an optional Fourier-feature embedding on τ.
 # ----------------------------------------------------------------------
 
 
 class _ResBlock(nn.Module):
-    """SiLU residual block — same as FluxNet's _ResBlock."""
+    """SiLU residual block."""
 
     def __init__(self, hidden_dim: int) -> None:
         super().__init__()

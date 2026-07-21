@@ -99,9 +99,13 @@ correction:
     products 2026-06-13, survives as an optional `melt_rate_linear_inverse`
     extra in some `run_melt` drivers and the stationary/pseudospectral
     diagnostics. NOT the budget linear inverse.
-  Plus `pseudospectral*.py` (spectral Lagrangian family; FFT stages honor
-  cupy), `velocity_fusion.py` (EOF+GP Kalman fusion),
-  `parcel_frame_inverse.py` (opt-in).
+  Plus `bridging_restoration.py` (bounded complex 1/T(k; α_eff) filter that
+  restores bridging-damped along-flow melt structure on the Eulerian-family
+  outputs; band-limited ≥2.5H, mirror-padded, α calibrated ×0.34 vs E1b —
+  see `../literature/stubblefield_applicability_prefactor.md`; gate
+  `tests/gate_bridging_restoration.py`), `pseudospectral*.py` (spectral
+  Lagrangian family; FFT stages honor cupy), `velocity_fusion.py` (EOF+GP
+  Kalman fusion), `parcel_frame_inverse.py` (opt-in).
 - **`constants.py`** — ρ_i=918, ρ_w=1027.
 
 There is **no library-level study config** — all windows/AOIs/paths live in
@@ -117,8 +121,8 @@ manuscript-level prose and derivations live in `../literature/methods.md`
 ## Directories outside the package
 
 - `../legacy/` — pre-refactor scripts; not a working baseline, no compat shims.
-- `../vendor/` — read-only reference clones (FluxNet; Shean-era `ndinterp.py`
-  vendor checks). Not dependencies.
+- `../vendor/` — read-only reference clones (a learned-flux-surrogate net;
+  Shean-era `ndinterp.py` vendor checks). Not dependencies.
 - `tests/figures/`, `data/` etc. — gitignored.
 
 ## Conventions
