@@ -1,5 +1,11 @@
 r"""Ice-shelf dynamics: linearized forward + inverse models relating basal melt to topography."""
 
+from .bridging_restoration import (
+    bridging_inverse,
+    bridging_inverse_filter,
+    bridging_restoration,
+    bridging_restoration_filter,
+)
 from .budget_linear_inverse import (
     linear_inverse_budget_melt_rate,
     linear_inverse_eulerian_budget_melt_rate,
@@ -38,6 +44,10 @@ from .pseudospectral_lagrangian_variable_H import (
 __all__ = [
     "LinearPerturbation",
     "LinearizedHForwardOp",
+    "bridging_inverse",
+    "bridging_inverse_filter",
+    "bridging_restoration",
+    "bridging_restoration_filter",
     "PerturbationForwardOp",
     "PerturbationForwardOpDCT",
     "cg_invert",

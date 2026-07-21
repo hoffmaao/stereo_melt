@@ -46,8 +46,47 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
   −11.9 m vs −19.6 m pure-advection = 39% dynamic recovery; dh/dH = 0.0999 vs
   hydrostatic 0.1010. QC `scripts/e1b_qc.py`, differencing
   `scripts/e1b_diff.py`, figures `scripts/e1b_figures.py` → `figures/`.
-- **E2a/E2b** — Elmer/Ice floating shelf / reduced-MISMIP+ contact: planned,
-  `sif/` empty.
+- **E2a** — Elmer/Ice 3D floating shelf (`e2a/{params,mesh,sif}.py`,
+  `scripts/run_e2a.py`; runs land in `runs/<name>/`, sif copies in `sif/`).
+  **Science campaign COMPLETE 07-19**: cosx/cosy single-k runs, steady +
+  sine-modulated Gaussian channels at requalified dt=0.25, and the
+  survey-realistic DEM-stack tier (`scripts/make_dem_stack.py` →
+  `score_dem_stack_tilt.py` → `run_dem_stack_melt.py`, with `--sweep`
+  time-series and `--solvers full` bridging modes). Findings consolidated in
+  `../literature/bridging_approximation_assessment.md`. Beware the dt
+  time-splitting artifact (surface amp ≈ 0.97·dt for along-flow-oscillating
+  forcing): requalify any short-λ axis-x surface metric with a dt pair.
+  **Why 3D:** the bridging kernel is isotropic in |k| (`linear_perturbation.py`
+  :215) and hardcodes `alpha=0` (`budget_linear_inverse.py:588`), so it *must*
+  correct across-flow and along-flow channels of equal width identically —
+  3D Stokes with through-flow will not, and a 2D flowline cannot pose the
+  question. Forcing is a **zero-mean cosine at a single |k|**, not a Gaussian:
+  E1b's lambda~20H Gaussian sat on the kernel's flat k->0 floor (+3.85%), which
+  `_pooled_kernel_correction` median-subtracts (`:598`) — which is why the 07-16
+  score saw a ~1% correction. Probe **lambda/H ~ 3-5** (knee is lambda~2*pi*H,
+  net correction peaks ~3H at ~28% of hydrostatic) at **<= 200 m posting**.
+- **E2b** — reduced-MISMIP+ contact: planned, unauthored. `Tests/GL_MISMIP` in
+  the container is the crib (it is E2a's crib too, plus the contact stack).
+
+## Elmer container facts (verified 07-17)
+
+- The image ships the **full Elmer/Ice source tree** at `/home/glacier/elmerice`
+  including `builddir/elmerice/Tests/` — use it as the syntax authority rather
+  than guessing. `Tests/GL_MISMIP` = floating BCs (SeaPressure/SeaSpring USFs,
+  Zs/Zb FreeSurface pair) + contact; `Tests/Damage` = runtime extrusion + `.grd`.
+- **BC tags:** the `.grd` footprint gives 1=y0, 2=x=LX (front), 3=y=LY,
+  4=x=0 (inflow); `Extruded Mesh Levels` appends **5=base, 6=top**. Bind them
+  explicitly with `Target Boundaries` — do not rely on positional defaults.
+- **Melt sign:** `FreeSurfaceSolver.F90:1196` integrates
+  `dZ/dt + u.grad(Z) - w = Accumulation` for *both* surfaces, so
+  **`Zb Accumulation > 0` raises the base = melt** (same as Stubblefield/E1b).
+  Derived from source, **not yet confirmed by a run** — `run_e2a.py --check-sign`
+  exists for exactly that and should be run before any melt result is believed.
+- **Perf:** `Nonlinear System Max Iterations = 1` is *exact* for Newtonian
+  (Stokes is linear; iter 2 reproduces the Result Norm to 17 digits) and halves
+  the step. `Stabilized` matches `Bubbles` to ~2e-9 at 4x cheaper assembly. The
+  remaining cost is the **linear solve** (~41 s at only 54k dof under MUMPS
+  direct) — the open lever is iterative GCR+ILU1 or MPI-under-proot (unproven).
 
 ## Fork gotchas (all through-flow-specific; vendored closed box unaffected)
 

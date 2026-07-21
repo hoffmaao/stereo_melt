@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.smb import smb_over_window
 from stereo_melt.melt import (
@@ -206,7 +207,10 @@ def load_smb_on_grid(stack: xr.DataArray) -> xr.DataArray:
 # ----------------------------------------------------------------------
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # A norm (e.g. the melt SymLogNorm) carries its own range; matplotlib
+    # rejects norm together with vmin/vmax, so drop them when norm is given.
+    lim = {} if norm is not None else dict(vmin=vmin, vmax=vmax)
     im = ax.imshow(
         da.values,
         extent=[
@@ -217,9 +221,9 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        norm=norm,
         aspect="equal",
+        **lim,
     )
     return im
 
@@ -264,18 +268,21 @@ def plot_melt_comparison(
     """QC: side-by-side Eulerian vs Lagrangian vs linear-inverse melt."""
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
 
-    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
-    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
-    fig.colorbar(im0, ax=axes[0, 0], fraction=0.045)
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
 
-    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap=mcmap, norm=mnorm)
+    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
+    add_melt_colorbar(fig, im0, ax=axes[0, 0], fraction=0.045)
+
+    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=mcmap, norm=mnorm)
     axes[0, 1].set_title("Lagrangian melt_rate (m ice/yr)")
-    fig.colorbar(im1, ax=axes[0, 1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
     if linv is not None:
-        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap=mcmap, norm=mnorm)
         axes[0, 2].set_title("Linear inverse (Lagrangian-frame Stubblefield)")
-        fig.colorbar(im2, ax=axes[0, 2], fraction=0.045)
+        add_melt_colorbar(fig, im2, ax=axes[0, 2], fraction=0.045)
     else:
         axes[0, 2].set_visible(False)
 
