@@ -87,10 +87,16 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import torch
+import xarray as xr
+from scipy.ndimage import gaussian_filter
 
-from ..constants import rhoi, rhow
-from .linear_perturbation import (
+# torch is imported *after* the numpy/xarray/scipy C-extensions so its bundled
+# libstdc++ does not shadow theirs (see tests/gate_stubblefield_forward.py).
+import torch  # noqa: E402
+
+from ..constants import rhoi, rhow  # noqa: E402
+from ..freeboard import freeboard_to_thickness  # noqa: E402
+from .linear_perturbation import (  # noqa: E402
     G_GRAVITY,
     SECONDS_PER_YEAR,
     LinearPerturbation,
@@ -103,8 +109,17 @@ __all__ = [
     "GridMelt",
     "SirenMelt",
     "variational_melt_inverse",
+    "variational_melt_rate",
     "MeltInverseResult",
 ]
+
+
+def _nan_gauss(a: np.ndarray, sigma: float) -> np.ndarray:
+    """NaN-aware Gaussian smoothing (smooth value / smooth mask)."""
+    m = np.isfinite(a)
+    a0 = np.where(m, a, 0.0)
+    return gaussian_filter(a0, sigma) / np.maximum(
+        gaussian_filter(m.astype(float), sigma), 1e-6)
 
 
 def stubblefield_forward_multiplier(
@@ -214,9 +229,10 @@ class SirenMelt(torch.nn.Module):
 class MeltInverseResult:
     """Output of :func:`variational_melt_inverse`."""
 
-    melt: np.ndarray          # (ny, nx) recovered basal melt, m/yr
-    loss_history: list        # data-misfit term per recorded iteration
+    melt: np.ndarray                    # (ny, nx) recovered basal melt, m/yr
+    loss_history: list                  # data-misfit term per recorded iteration
     n_iter: int
+    dzs_fit: np.ndarray | None = None   # (ny, nx) modeled surface anomaly, m
 
 
 def variational_melt_inverse(
@@ -301,5 +317,166 @@ def variational_melt_inverse(
             print(f"    it {it:5d}  data {data.item():.3e}  reg {reg.item():.3e}",
                   flush=True)
 
-    melt = rep_net().detach().cpu().numpy()
-    return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters)
+    with torch.no_grad():
+        m_final = rep_net()
+        melt = m_final.cpu().numpy()
+        dzs_fit = fwd(m_final).cpu().numpy()
+    return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters,
+                             dzs_fit=dzs_fit)
+
+
+def variational_melt_rate(
+    h_stack: xr.DataArray,
+    vx: xr.DataArray,
+    vy: xr.DataArray,
+    floating_mask: xr.DataArray | None = None,
+    d: xr.DataArray | float = 0.0,
+    *,
+    rep: str = "grid",
+    eta_bar: float = 1e14,
+    alpha_scale: float = 0.34,
+    lam: float = 1e-4,
+    iters: int = 4000,
+    lr: float = 3e-3,
+    sigma_hp_H: float = 5.0,
+    rho_w: float = rhow,
+    rho_i: float = rhoi,
+    g: float = G_GRAVITY,
+    siren_kwargs: dict | None = None,
+    log_every: int = 0,
+) -> xr.Dataset:
+    r"""Basal melt rate from the surface anomaly by variational forward-fit.
+
+    Driver-facing xarray wrapper around :func:`variational_melt_inverse`:
+    strip-robust time-**median** surface -> high-pass control anomaly (remove the
+    ``> sigma_hp_H * H_ref`` regional shape) -> fit melt through the Stubblefield
+    forward operator on the floating bbox -> Shean sign (negative = melt).
+
+    Unlike
+    :func:`~stereo_melt.dynamics.stubblefield_inverse.stubblefield_inverse_melt_rate`
+    (a direct Fourier division that over-lifts across-flow ridges), this puts the
+    bridging transfer in the *forward* model and fits, so along-flow, oblique, and
+    across-flow melt come through one operator with no angular weight.
+
+    First-order on real stacks: the operator uses a single reference thickness
+    ``H_ref`` and a single mean velocity ``(u0x, u0y)`` -- those scalar arguments
+    are the seam where a future per-tile / spatially-varying advection upgrade
+    plugs in. It is DC-blind (the operator zeros ``k=0``): the recovered field is a
+    channel-scale pattern correction, **not** a mass-budget melt, and is not
+    interchangeable with the Eulerian/Lagrangian solvers.
+
+    Parameters
+    ----------
+    h_stack : xarray.DataArray ``(time, y, x)``
+        Geoid-referenced, corrected surface-elevation stack, meters.
+    vx, vy : xarray.DataArray
+        Column-averaged velocity (m/yr); the time/shelf mean sets the advection.
+    floating_mask : xarray.DataArray, optional
+        Floating-ice mask; the inversion is reported only there.
+    d : firn air content (m), for the reference thickness.
+    rep, eta_bar, alpha_scale, lam, iters, lr :
+        Passed through to :func:`variational_melt_inverse` (see there and the
+        module docstring; ``eta_bar``/``alpha_scale`` are per-geometry study
+        parameters, not constants).
+
+    Returns
+    -------
+    xarray.Dataset
+        ``melt_rate`` (m ice/yr, Shean sign), the observed high-passed surface
+        anomaly ``dzs_obs`` and the operator's fit to it ``dzs_fit``, plus
+        ``H_ref_m``, ``t_r_yr``, ``u0x_myr``/``u0y_myr``, ``eta_bar``,
+        ``alpha_scale``, ``lam``, ``iters``, ``rep`` and the fit-quality attrs
+        ``fit_rms_resid_m`` / ``fit_rms_obs_m`` / ``fit_var_explained``. On a real
+        shelf there is no truth, so how much of ``dzs_obs`` the operator can
+        reproduce is the only available self-diagnostic: a low
+        ``fit_var_explained`` means the surface structure is not something this
+        (single-``H``, single-mean-``u``, steady) operator can make from *any*
+        melt field, and the recovered melt should be read with that caveat.
+    """
+    # strip-robust surface (median over time, not mean)
+    h_med = h_stack.median("time", skipna=True)
+    if floating_mask is not None:
+        h_med = h_med.where(floating_mask)
+    res = float(abs(h_stack["x"].values[1] - h_stack["x"].values[0]))
+
+    fl = np.isfinite(h_med.values)
+    if floating_mask is not None:
+        fl &= floating_mask.values.astype(bool)
+    if not fl.any():
+        raise ValueError("no finite floating-shelf surface for the variational inverse")
+
+    H_ref = float(freeboard_to_thickness(float(np.nanmean(h_med.values[fl])), d=0.0,
+                                         rho_w=rho_w, rho_i=rho_i))
+    if isinstance(d, xr.DataArray):
+        H_ref = float(np.nanmean(
+            freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values[fl]))
+    if not np.isfinite(H_ref) or H_ref <= 0:
+        raise ValueError(f"derived H_ref={H_ref} is not positive finite")
+    t_r_yr = (2.0 * eta_bar / (rho_i * g * H_ref)) / SECONDS_PER_YEAR
+
+    # advection from the mean flow
+    vxm = vx.mean("time") if "time" in vx.dims else vx
+    vym = vy.mean("time") if "time" in vy.dims else vy
+    flda = xr.DataArray(fl, dims=h_med.dims, coords=h_med.coords)
+    u0x = float(vxm.where(flda).mean(skipna=True))
+    u0y = float(vym.where(flda).mean(skipna=True))
+    u0x = 0.0 if not np.isfinite(u0x) else u0x
+    u0y = 0.0 if not np.isfinite(u0y) else u0y
+
+    # crop to the floating bbox; build the DC-blind control anomaly
+    ys, xs = np.where(fl)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    hm = h_med.values[y0:y1, x0:x1]
+    fl_crop = fl[y0:y1, x0:x1]
+    dzs = hm - _nan_gauss(hm, sigma_hp_H * H_ref / res)
+    fit_mask = np.isfinite(dzs) & fl_crop
+    dzs = np.where(np.isfinite(dzs), dzs, 0.0)
+
+    result = variational_melt_inverse(
+        dzs, fit_mask, res, res, H_ref, u0x, u0y,
+        rep=rep, eta_bar=eta_bar, alpha_scale=alpha_scale, lam=lam,
+        iters=iters, lr=lr, rho_i=rho_i, rho_w=rho_w, g=g,
+        siren_kwargs=siren_kwargs, log_every=log_every)
+
+    def _embed(crop: np.ndarray, name: str) -> xr.DataArray:
+        """Place a bbox-cropped field back on the full grid, masked to the fit."""
+        full = np.full(h_med.shape, np.nan, dtype=np.float64)
+        full[y0:y1, x0:x1] = np.where(fit_mask, crop, np.nan)
+        full[~fl] = np.nan
+        return xr.DataArray(full, dims=h_med.dims, coords=h_med.coords, name=name)
+
+    # Stubblefield m>0 = melt -> Shean negate; report only where fit
+    melt = _embed(-result.melt, "melt_rate")
+
+    # Fit quality: with no truth on a real shelf, the share of the observed
+    # high-passed surface the operator reproduces is the only self-diagnostic.
+    resid = (result.dzs_fit - dzs)[fit_mask]
+    obs = dzs[fit_mask]
+    rms_resid = float(np.sqrt(np.mean(resid ** 2)))
+    rms_obs = float(np.sqrt(np.mean(obs ** 2)))
+    var_expl = float(1.0 - np.var(resid) / np.var(obs)) if np.var(obs) > 0 else np.nan
+
+    return xr.Dataset(
+        {
+            "melt_rate": melt,
+            "dzs_obs": _embed(dzs, "dzs_obs"),
+            "dzs_fit": _embed(result.dzs_fit, "dzs_fit"),
+        },
+        attrs={
+            "fit_rms_resid_m": rms_resid,
+            "fit_rms_obs_m": rms_obs,
+            "fit_var_explained": var_expl,
+            "fit_n_cells": int(fit_mask.sum()),
+            "equation": "Stubblefield 2023 forward-fit: min ||Forward(m)-dzs||^2 + lam||m||^2",
+            "units": "m ice yr^-1; Shean convention: negative melt_rate = melt, positive = accretion",
+            "method": f"variational forward-operator inverse ({rep}); DC-blind channel correction",
+            "rho_w": rho_w, "rho_i": rho_i, "eta_bar": eta_bar,
+            "H_ref_m": H_ref, "t_r_yr": t_r_yr,
+            "u0x_myr": u0x, "u0y_myr": u0y,
+            "alpha_scale": alpha_scale, "lam": lam, "iters": iters, "rep": rep,
+            "sigma_hp_H": sigma_hp_H,
+            # aliases so this Dataset slots into run_melt's linv plot/save plumbing
+            "gamma_dimless": 0.0, "tr_yr": t_r_yr,
+            "note": "first-order (single H, single mean u); pattern diagnostic, not mass-budget melt",
+        },
+    )
