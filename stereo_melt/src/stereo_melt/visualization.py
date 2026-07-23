@@ -426,3 +426,78 @@ def plot_alignment_diagnostics(
     plt.close(fig)
     print(f"  wrote {output_path}")
     return summary
+
+
+def plot_variational_fit(
+    ds: xr.Dataset,
+    output_path: Path,
+    title: str = "Forward-fit melt inverse",
+    vmax_melt: float = 10.0,
+    dpi: int = 150,
+) -> None:
+    """QC panel for :func:`~stereo_melt.dynamics.stubblefield_forward.variational_melt_rate`.
+
+    Four panels: the observed high-passed surface anomaly, the operator's fit to
+    it, their residual, and the recovered melt. On a real shelf there is no melt
+    truth, so the obs/fit/residual triple *is* the validation available -- if the
+    operator cannot reproduce the observed surface structure, the recovered melt
+    in the fourth panel is not supported by the data.
+
+    Parameters
+    ----------
+    ds
+        Dataset from ``variational_melt_rate`` (needs ``dzs_obs``, ``dzs_fit``,
+        ``melt_rate`` and the ``fit_*`` attrs).
+    output_path
+        PNG path to write.
+    vmax_melt
+        Symmetric-log colour limit for the melt panel, m ice/yr.
+    """
+    from .colormaps import add_melt_colorbar, melt_cmap, melt_norm
+
+    x = ds["x"].values
+    y = ds["y"].values
+    extent = (float(x.min()), float(x.max()), float(y.min()), float(y.max()))
+
+    obs = ds["dzs_obs"].values
+    fit = ds["dzs_fit"].values
+    resid = fit - obs
+    finite = obs[np.isfinite(obs)]
+    a = float(np.percentile(np.abs(finite), 98)) if finite.size else 1.0
+
+    fig, axes = plt.subplots(1, 4, figsize=(20, 5.2), constrained_layout=True)
+    for ax, field, ttl in (
+        (axes[0], obs, "observed anomaly $\\delta z_s$"),
+        (axes[1], fit, "operator fit"),
+        (axes[2], resid, "residual (fit $-$ obs)"),
+    ):
+        im = ax.imshow(field, extent=extent, origin="upper", cmap="RdBu_r",
+                       vmin=-a, vmax=a)
+        ax.set_title(f"{ttl}  [m]", fontsize=11)
+        fig.colorbar(im, ax=ax, shrink=0.85)
+
+    imm = axes[3].imshow(ds["melt_rate"].values, extent=extent, origin="upper",
+                         cmap=melt_cmap(), norm=melt_norm(vmax_melt))
+    axes[3].set_title("recovered melt (negative = melt)", fontsize=11)
+    add_melt_colorbar(fig, imm, ax=axes[3], shrink=0.85)
+
+    for ax in axes:
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    ve = ds.attrs.get("fit_var_explained", float("nan"))
+    rr = ds.attrs.get("fit_rms_resid_m", float("nan"))
+    ro = ds.attrs.get("fit_rms_obs_m", float("nan"))
+    fig.suptitle(
+        f"{title}   |   variance explained {ve:.2f}   "
+        f"rms residual {rr:.3f} m of {ro:.3f} m observed   |   "
+        f"$\\bar\\eta$={ds.attrs.get('eta_bar', float('nan')):.2g} Pa s, "
+        f"$H_{{ref}}$={ds.attrs.get('H_ref_m', float('nan')):.0f} m, "
+        f"rep={ds.attrs.get('rep', '?')}",
+        fontsize=13,
+    )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  wrote {output_path}")

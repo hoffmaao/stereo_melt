@@ -106,6 +106,7 @@ from .linear_perturbation import (  # noqa: E402
 __all__ = [
     "stubblefield_forward_multiplier",
     "StubblefieldForward",
+    "BlendedStubblefieldForward",
     "GridMelt",
     "SirenMelt",
     "variational_melt_inverse",
@@ -182,6 +183,155 @@ class StubblefieldForward(torch.nn.Module):
         return dzs.real[:self.ny, :self.nx]
 
 
+def _kmeans_geometry(
+    feats: np.ndarray, n_bins: int, iters: int = 40
+) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic 1-D-seeded Lloyd clustering of standardized ``(H, ux, uy)``.
+
+    Seeded from evenly spaced quantiles along the first principal component (no
+    RNG), so a given geometry always yields the same bins -- a solver that
+    silently changed its operator between runs would be unusable for A/B work.
+    Returns the per-cell label and the ``(n_bins, 3)`` centroids in feature units.
+    """
+    mu = feats.mean(0)
+    sd = feats.std(0)
+    sd[sd <= 0] = 1.0
+    z = (feats - mu) / sd
+    # principal direction via the power method on the covariance (no scipy/sklearn)
+    C = np.cov(z.T) + 1e-12 * np.eye(z.shape[1])
+    v = np.ones(z.shape[1]) / math.sqrt(z.shape[1])
+    for _ in range(100):
+        v = C @ v
+        v /= max(np.linalg.norm(v), 1e-30)
+    proj = z @ v
+    qs = np.quantile(proj, (np.arange(n_bins) + 0.5) / n_bins)
+    cent = np.stack([z[np.argmin(np.abs(proj - q))] for q in qs])
+
+    lab = np.zeros(len(z), dtype=int)
+    for _ in range(iters):
+        d = ((z[:, None, :] - cent[None, :, :]) ** 2).sum(-1)
+        new = d.argmin(1)
+        if np.array_equal(new, lab):
+            break
+        lab = new
+        for b in range(n_bins):
+            sel = lab == b
+            if sel.any():
+                cent[b] = z[sel].mean(0)
+    return lab, cent * sd + mu
+
+
+class BlendedStubblefieldForward(torch.nn.Module):
+    r"""Spatially varying forward operator: globally applied multipliers, blended.
+
+    :class:`StubblefieldForward` applies one multiplier built from a single
+    reference thickness and a single mean velocity. That is defensible on a
+    synthetic twin with uniform flow, but not on a real shelf: Pine Island spans
+    roughly 300 to 4000 m/yr, so one :math:`\alpha \propto u\,t_r/H` is wrong
+    nearly everywhere.
+
+    **Why not tiles.** The obvious fix -- cut the domain into tiles, give each its
+    own :math:`M_h`, overlap-add -- is wrong here, because this operator is not
+    spatially compact. Long-wavelength modes relax slowly under viscous bridging,
+    so they advect far downstream before they damp: the impulse response falls to
+    5% of peak only after ~8 km at 200 m/yr but ~75 km at 2000 m/yr and ~150 km at
+    4000 m/yr. Any tile small enough to localize the geometry truncates that tail
+    (a measured 47% forward error at 2000 m/yr, spatially uniform, and *not*
+    removable by high-passing).
+
+    So instead of localizing the *melt*, this localizes the *operator*: each
+    multiplier is applied to the **whole** domain -- preserving the full
+    downstream tail -- and the global responses are recombined with smooth
+    spatial weights,
+
+    .. math:: \delta z_s(x) = \sum_b w_b(x)\,\big[\mathcal{F}^{-1} M_b
+              \mathcal{F} m\big](x), \qquad \sum_b w_b(x) = 1.
+
+    Geometry is clustered into ``n_bins`` groups of similar :math:`(H, u_x, u_y)`
+    (deterministically, see :func:`_kmeans_geometry`), each contributing one
+    multiplier, and the hard bin indicators are Gaussian-smoothed over
+    ``blend_px`` and renormalized so the weights are an exact partition of unity.
+    With a spatially constant geometry every cell lands in one bin, so the result
+    is **bit-identical** to :class:`StubblefieldForward`.
+
+    Cost is one forward FFT plus ``n_bins`` inverse FFTs per call -- cheaper than
+    a correctly haloed tiling, and independent of how finely the geometry varies.
+
+    Parameters
+    ----------
+    ny, nx, dx, dy :
+        Grid shape and posting (m).
+    H_field, ux_field, uy_field : (ny, nx) arrays
+        Local thickness (m) and velocity (m/yr). Non-finite cells (off-shelf) do
+        not vote on the clustering and take the nearest valid weights.
+    n_bins :
+        Number of distinct multipliers. Cost is linear in it.
+    blend_px :
+        Gaussian sigma (pixels) used to soften the bin indicators.
+    """
+
+    def __init__(
+        self,
+        ny: int,
+        nx: int,
+        dx: float,
+        dy: float,
+        H_field: np.ndarray,
+        ux_field: np.ndarray,
+        uy_field: np.ndarray,
+        *,
+        n_bins: int = 6,
+        blend_px: float = 8.0,
+        **mult_kwargs,
+    ):
+        super().__init__()
+        self.ny, self.nx = int(ny), int(nx)
+
+        H_field = np.asarray(H_field, dtype=float)
+        ux_field = np.asarray(ux_field, dtype=float)
+        uy_field = np.asarray(uy_field, dtype=float)
+        valid = (np.isfinite(H_field) & np.isfinite(ux_field)
+                 & np.isfinite(uy_field) & (H_field > 0))
+        if not valid.any():
+            raise ValueError("no finite (H, ux, uy) cells for the blended operator")
+
+        feats = np.stack([H_field[valid], ux_field[valid], uy_field[valid]], axis=1)
+        n_bins = max(1, min(int(n_bins), len(np.unique(feats, axis=0))))
+        if n_bins == 1:
+            lab_v = np.zeros(len(feats), dtype=int)
+            cent = feats.mean(0, keepdims=True)
+        else:
+            lab_v, cent = _kmeans_geometry(feats, n_bins)
+        self.n_bins = n_bins
+        self.bin_geometry = [tuple(float(c) for c in row) for row in cent]
+
+        mults = [stubblefield_forward_multiplier(
+                     2 * self.ny, 2 * self.nx, dx, dy, H_b, ux_b, uy_b,
+                     **mult_kwargs)
+                 for H_b, ux_b, uy_b in self.bin_geometry]
+        self.register_buffer(
+            "M", torch.from_numpy(np.ascontiguousarray(np.stack(mults))))
+
+        # Soft weights: smooth each hard indicator, then renormalize. Off-shelf
+        # cells carry no indicator of their own, so smoothing lets the nearest
+        # on-shelf bins fill them in and the partition of unity still holds.
+        w = np.zeros((n_bins, self.ny, self.nx))
+        for b in range(n_bins):
+            ind = np.zeros((self.ny, self.nx))
+            ind[valid] = (lab_v == b)
+            w[b] = gaussian_filter(ind, blend_px, mode="nearest")
+        tot = w.sum(0)
+        flat = tot < 1e-8            # unreachable by smoothing: fall back to bin 0
+        w[0][flat] = 1.0
+        tot = np.maximum(w.sum(0), 1e-30)
+        self.register_buffer("w", torch.from_numpy(w / tot))
+
+    def forward(self, m: torch.Tensor) -> torch.Tensor:
+        F = torch.fft.fft2(_pad2x(m).to(torch.complex128))
+        resp = torch.fft.ifft2(self.M * F).real[:, :self.ny, :self.nx]
+        return (self.w * resp).sum(0)
+
+
 class GridMelt(torch.nn.Module):
     """Dense per-pixel melt field (the direct representation)."""
 
@@ -233,6 +383,9 @@ class MeltInverseResult:
     loss_history: list                  # data-misfit term per recorded iteration
     n_iter: int
     dzs_fit: np.ndarray | None = None   # (ny, nx) modeled surface anomaly, m
+    # geometry bins actually used (the request is clamped to the number of
+    # distinct geometries present); 1 means the monolithic operator
+    n_bins_used: int = 1
 
 
 def variational_melt_inverse(
@@ -255,6 +408,11 @@ def variational_melt_inverse(
     g: float = G_GRAVITY,
     siren_kwargs: dict | None = None,
     log_every: int = 0,
+    H_field: np.ndarray | None = None,
+    ux_field: np.ndarray | None = None,
+    uy_field: np.ndarray | None = None,
+    n_bins: int | None = None,
+    blend_px: float = 8.0,
 ) -> MeltInverseResult:
     r"""Fit basal melt to an observed surface anomaly through the forward operator.
 
@@ -279,6 +437,14 @@ def variational_melt_inverse(
     log_every :
         If > 0, print the data/reg terms every ``log_every`` iterations (heavy
         fits run under ``nohup``; the log is the only visibility).
+    H_field, ux_field, uy_field, n_bins, blend_px :
+        Set ``n_bins`` to use the spatially varying
+        :class:`BlendedStubblefieldForward` instead of the single-``(H, u)``
+        operator: the geometry fields are clustered into ``n_bins`` multipliers,
+        each applied globally and blended over ``blend_px``. Required on real
+        shelves, where one mean velocity is wrong nearly everywhere. Fields
+        default to constants from the scalars (which reduces to the monolithic
+        operator exactly).
 
     Returns
     -------
@@ -291,11 +457,26 @@ def variational_melt_inverse(
     if rep not in ("grid", "siren"):
         raise ValueError(f"rep must be 'grid' or 'siren', got {rep!r}")
 
-    M_h = stubblefield_forward_multiplier(
-        2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr,
-        eta_bar=eta_bar, alpha_scale=alpha_scale,
-        rho_i=rho_i, rho_w=rho_w, g=g)
-    fwd = StubblefieldForward(M_h, ny, nx)
+    mult_kw = dict(eta_bar=eta_bar, alpha_scale=alpha_scale,
+                   rho_i=rho_i, rho_w=rho_w, g=g)
+    if n_bins is None:
+        M_h = stubblefield_forward_multiplier(
+            2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr, **mult_kw)
+        fwd = StubblefieldForward(M_h, ny, nx)
+    else:
+        def _fld(a, v):
+            return np.full((ny, nx), float(v)) if a is None else np.asarray(a)
+        fwd = BlendedStubblefieldForward(
+            ny, nx, dx, dy, _fld(H_field, H), _fld(ux_field, ux_myr),
+            _fld(uy_field, uy_myr), n_bins=int(n_bins), blend_px=blend_px,
+            **mult_kw)
+        if log_every:
+            gh = np.array([g[0] for g in fwd.bin_geometry])
+            gu = np.hypot([g[1] for g in fwd.bin_geometry],
+                          [g[2] for g in fwd.bin_geometry])
+            print(f"    blended operator: {fwd.n_bins} geometry bins  "
+                  f"H {gh.min():.0f}-{gh.max():.0f} m  "
+                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr", flush=True)
     rep_net = (GridMelt(ny, nx) if rep == "grid"
                else SirenMelt(ny, nx, **(siren_kwargs or {})))
 
@@ -322,7 +503,8 @@ def variational_melt_inverse(
         melt = m_final.cpu().numpy()
         dzs_fit = fwd(m_final).cpu().numpy()
     return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters,
-                             dzs_fit=dzs_fit)
+                             dzs_fit=dzs_fit,
+                             n_bins_used=getattr(fwd, "n_bins", 1))
 
 
 def variational_melt_rate(
@@ -344,6 +526,8 @@ def variational_melt_rate(
     g: float = G_GRAVITY,
     siren_kwargs: dict | None = None,
     log_every: int = 0,
+    n_bins: int | None = None,
+    blend_km: float = 4.0,
 ) -> xr.Dataset:
     r"""Basal melt rate from the surface anomaly by variational forward-fit.
 
@@ -358,12 +542,16 @@ def variational_melt_rate(
     bridging transfer in the *forward* model and fits, so along-flow, oblique, and
     across-flow melt come through one operator with no angular weight.
 
-    First-order on real stacks: the operator uses a single reference thickness
-    ``H_ref`` and a single mean velocity ``(u0x, u0y)`` -- those scalar arguments
-    are the seam where a future per-tile / spatially-varying advection upgrade
-    plugs in. It is DC-blind (the operator zeros ``k=0``): the recovered field is a
-    channel-scale pattern correction, **not** a mass-budget melt, and is not
-    interchangeable with the Eulerian/Lagrangian solvers.
+    Set ``n_bins`` to run the spatially varying
+    :class:`BlendedStubblefieldForward`, which clusters the shelf into that many
+    thickness/velocity geometries and blends their globally applied responses.
+    Without it the operator collapses the shelf to one ``H_ref`` and one mean
+    ``(u0x, u0y)``, which is a synthetic-twin assumption -- on a real shelf
+    spanning a large velocity range it is wrong nearly everywhere, so ``n_bins``
+    is the appropriate setting for production. Either way the operator is
+    DC-blind (it zeros ``k=0``): the recovered field is a channel-scale pattern
+    correction, **not** a mass-budget melt, and is not interchangeable with the
+    Eulerian/Lagrangian solvers.
 
     Parameters
     ----------
@@ -432,11 +620,23 @@ def variational_melt_rate(
     fit_mask = np.isfinite(dzs) & fl_crop
     dzs = np.where(np.isfinite(dzs), dzs, 0.0)
 
+    # Local geometry for the blended operator: thickness and velocity on the same
+    # crop, masked off the shelf so the geometry clustering is not pulled by open
+    # ocean or grounded ice.
+    H_crop = ux_crop = uy_crop = None
+    if n_bins is not None:
+        H_full = freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values
+        H_crop = np.where(fl_crop, H_full[y0:y1, x0:x1], np.nan)
+        ux_crop = np.where(fl_crop, vxm.values[y0:y1, x0:x1], np.nan)
+        uy_crop = np.where(fl_crop, vym.values[y0:y1, x0:x1], np.nan)
+
     result = variational_melt_inverse(
         dzs, fit_mask, res, res, H_ref, u0x, u0y,
         rep=rep, eta_bar=eta_bar, alpha_scale=alpha_scale, lam=lam,
         iters=iters, lr=lr, rho_i=rho_i, rho_w=rho_w, g=g,
-        siren_kwargs=siren_kwargs, log_every=log_every)
+        siren_kwargs=siren_kwargs, log_every=log_every,
+        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop, n_bins=n_bins,
+        blend_px=blend_km * 1000.0 / res)
 
     def _embed(crop: np.ndarray, name: str) -> xr.DataArray:
         """Place a bbox-cropped field back on the full grid, masked to the fit."""
@@ -475,8 +675,14 @@ def variational_melt_rate(
             "u0x_myr": u0x, "u0y_myr": u0y,
             "alpha_scale": alpha_scale, "lam": lam, "iters": iters, "rep": rep,
             "sigma_hp_H": sigma_hp_H,
+            "n_bins": -1 if n_bins is None else int(result.n_bins_used),
+            "blend_km": -1.0 if n_bins is None else float(blend_km),
             # aliases so this Dataset slots into run_melt's linv plot/save plumbing
             "gamma_dimless": 0.0, "tr_yr": t_r_yr,
-            "note": "first-order (single H, single mean u); pattern diagnostic, not mass-budget melt",
+            "note": (
+                (f"blended operator ({result.n_bins_used} geometry bins, "
+                 "globally applied)"
+                 if n_bins else "first-order (single H, single mean u)")
+                + "; pattern diagnostic, not mass-budget melt"),
         },
     )

@@ -44,6 +44,7 @@ from stereo_melt.melt import (
     lagrangian_parcel_lsq_melt_rate,
 )
 from stereo_melt.stack import load_basin_stack
+from stereo_melt.visualization import plot_variational_fit
 
 from pig import config
 
@@ -760,6 +761,61 @@ def main(
             f"{float(linv_mr.quantile(0.75)):.2f}] m ice/yr"
         )
 
+    # Fourth solver: the variational forward-fit inverse (opt-in PIG_VARIATIONAL=1).
+    # Same Stubblefield transfer as `linv` above, but placed in the FORWARD model
+    # and FITTED rather than divided out. On the Elmer/Ice twins the direct
+    # division over-lifts across-flow structure -- it double-counts the advective
+    # dynamics the surface already carries (E2a cosy 1.07 without, 1.54 with) --
+    # while the forward fit recovers along-flow, oblique and across-flow melt
+    # through one operator with no angular weight. eta_bar defaults to the same
+    # 1e13 `linv` uses above, so the A/B against the third panel isolates the
+    # METHOD, not the viscosity. Like `linv` it is DC-blind: a channel-scale
+    # pattern correction, NOT a mass-budget melt, and not interchangeable with
+    # the Eulerian/Lagrangian products.
+    varfit = None
+    if os.environ.get("PIG_VARIATIONAL", "0").strip() == "1":
+        from stereo_melt.dynamics.stubblefield_forward import variational_melt_rate
+
+        print("Running variational forward-fit inverse (4th solver; narrates)...")
+        varfit = variational_melt_rate(
+            stack, vx, vy, floating_mask=floating, d=firn,
+            rep=os.environ.get("PIG_VAR_REP", "grid"),
+            eta_bar=float(os.environ.get("PIG_VAR_ETA_BAR", "1e13")),
+            alpha_scale=float(os.environ.get("PIG_VAR_ALPHA_SCALE", "0.34")),
+            lam=float(os.environ.get("PIG_VAR_LAM", "1e-4")),
+            iters=int(os.environ.get("PIG_VAR_ITERS", "4000")),
+            lr=float(os.environ.get("PIG_VAR_LR", "3e-3")),
+            sigma_hp_H=float(os.environ.get("PIG_VAR_SIGMA_HP_H", "5.0")),
+            log_every=int(os.environ.get("PIG_VAR_LOG_EVERY", "250")),
+            # PIG spans ~300-4000 m/yr, so a single mean u is wrong nearly
+            # everywhere; cluster the shelf into geometry bins instead. Tiling
+            # the melt field is NOT an option here -- the operator's downstream
+            # footprint reaches ~75 km at 2000 m/yr and ~150 km at 4000 m/yr, so
+            # any tile small enough to localize the flow truncates the response.
+            n_bins=int(os.environ.get("PIG_VAR_N_BINS", "8")),
+            blend_km=float(os.environ.get("PIG_VAR_BLEND_KM", "4.0")),
+        )
+        vmr = varfit.melt_rate
+        print(
+            f"  H_ref={varfit.attrs['H_ref_m']:.1f} m  "
+            f"t_r={varfit.attrs['t_r_yr']:.2f} yr  "
+            f"u0=({varfit.attrs['u0x_myr']:.0f}, {varfit.attrs['u0y_myr']:.0f}) m/yr  "
+            f"n_bins={varfit.attrs['n_bins']}  "
+            f"n_fit={varfit.attrs['fit_n_cells']:,} cells"
+        )
+        # No melt truth on a real shelf: how much of the observed high-passed
+        # surface the operator can reproduce is the only self-diagnostic.
+        print(
+            f"  surface fit: var_explained={varfit.attrs['fit_var_explained']:.3f}  "
+            f"rms_resid={varfit.attrs['fit_rms_resid_m']:.3f} m of "
+            f"{varfit.attrs['fit_rms_obs_m']:.3f} m observed"
+        )
+        print(
+            f"  melt_rate: median={float(vmr.median()):.2f}  "
+            f"IQR=[{float(vmr.quantile(0.25)):.2f}, "
+            f"{float(vmr.quantile(0.75)):.2f}] m ice/yr"
+        )
+
     euler_melt = euler.melt_rate.where(floating)
     lagr_melt = lagr.melt_rate.where(floating)
     linv_melt = linv.melt_rate if linv is not None else None
@@ -829,6 +885,16 @@ def main(
             f"{lininv_budget.attrs['max_pair_dt_yr']}yr "
             f"n_pairs={lininv_budget.attrs['n_pairs']}"
         )
+    if varfit is not None:
+        ds_vars["melt_rate_variational"] = varfit.melt_rate.where(floating)
+        ds_vars["variational_dzs_obs"] = varfit.dzs_obs
+        ds_vars["variational_dzs_fit"] = varfit.dzs_fit
+        for _k in ("H_ref_m", "t_r_yr", "u0x_myr", "u0y_myr", "eta_bar",
+                   "alpha_scale", "lam", "iters", "rep", "sigma_hp_H",
+                   "n_bins", "blend_km",
+                   "fit_var_explained", "fit_rms_resid_m", "fit_rms_obs_m",
+                   "fit_n_cells"):
+            ds_attrs[f"variational_{_k}"] = varfit.attrs[_k]
     # Shean-style integrated-flux bracket (diagnostic; does NOT alter the saved
     # field). Integrate over the floating shelf eroded PIG_GL_BUFFER_KM back from
     # grounded ice, with a Lagrangian coverage+rmse quality gate, and bracket the
@@ -916,6 +982,14 @@ def main(
     melt_comparison_png = config.FIGURES_DIR / f"melt_comparison{out_suffix}{win_tag}.png"
     plot_melt_comparison(euler, lagr, linv, melt_comparison_png)
     print(f"  wrote {melt_comparison_png}")
+
+    if varfit is not None:
+        plot_variational_fit(
+            varfit,
+            config.FIGURES_DIR / f"melt_variational_fit{out_suffix}{win_tag}.png",
+            title=(f"Pine Island forward-fit melt inverse — "
+                   f"{config.START_TIME} to {config.END_TIME}"),
+        )
 
     if parcel is not None:
         parcel_png = config.FIGURES_DIR / f"melt_parcel_lsq{out_suffix}{win_tag}.png"
