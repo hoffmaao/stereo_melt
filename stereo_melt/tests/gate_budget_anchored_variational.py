@@ -19,11 +19,19 @@ about the inverse's conditioning, not the operator's fidelity):
   3. BACKWARD COMPAT. With both defaulted on a pure anomaly, the fit reduces to
      the legacy toward-zero pin (``bg_field is None``) and still recovers the
      channel.
+  4. LONG-WAVELENGTH PIN (``anchor_lp_sigma_px``). The 2026-07-25 patch/lam-sweep
+     finding: large-scale surface structure the background basis cannot represent
+     is DATA-FAVORABLY absorbed by long-λ melt modes (the operator maps them to
+     near-plane responses), and no scalar ``lam`` separates that leak from the
+     genuine channel correction. With the low-pass pin, a planted non-plane dome
+     in the surface must leave the recovered melt (nearly) unchanged, while the
+     kernel-band wave-packet channel and the prior-supplied level survive.
 
 Run: ``$PY stereo_melt/tests/gate_budget_anchored_variational.py``
 """
 from __future__ import annotations
 
+import math
 import sys
 
 import numpy as np
@@ -126,6 +134,86 @@ def main() -> int:
         legacy.bg_field is None and _corr(legacy.melt, m_channel) > 0.9,
         f"bg_field={'None' if legacy.bg_field is None else 'set'} "
         f"corr={_corr(legacy.melt, m_channel):.3f}")
+
+    # (4) long-wavelength pin: unmodeled large-scale surface structure must not
+    # leak into melt. Channel = a wave packet at lambda ~ 4H (kernel-band, so
+    # the high-pass side of the pin keeps it); dome = a non-plane domain-scale
+    # surface bump the degree-1 background CANNOT absorb (the leak bait).
+    SIG_LP = 2.0 * H / DX                    # pin sigma: cutoff lambda ~10.7 H
+    # Carrier at the bridging knee (~2*pi*H), where the operator transfer is
+    # usable -- shorter carriers sit deep in the damped band and recover only
+    # partially at these iteration counts, pin or no pin. Envelope wide enough
+    # (10 H) that the packet's spectral support stays above the pin's ramp band.
+    sig_wp = 10.0 * H / DX
+    lam_c = 6.0 * H / DX
+    m_wp = (5.0 * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sig_wp ** 2))
+            * np.cos(2 * np.pi * (xx - cx) / lam_c))
+    m_true2 = m_wp + m_long
+    hm2 = _forward(fwd, m_true2) + bg_true
+    dome = 2.0 * np.exp(-(xs ** 2 + ys ** 2) / (2 * 0.5 ** 2))
+
+    base2 = variational_melt_inverse(hm2, mask, DX, DY, H, U0X, U0Y,
+                                     m_prior=m_long, bg_degree=1, **common)
+    dome2 = variational_melt_inverse(hm2 + dome, mask, DX, DY, H, U0X, U0Y,
+                                     m_prior=m_long, bg_degree=1, **common)
+    pin2 = variational_melt_inverse(hm2, mask, DX, DY, H, U0X, U0Y,
+                                    m_prior=m_long, bg_degree=1,
+                                    anchor_lp_sigma_px=SIG_LP, **common)
+    pin2d = variational_melt_inverse(hm2 + dome, mask, DX, DY, H, U0X, U0Y,
+                                     m_prior=m_long, bg_degree=1,
+                                     anchor_lp_sigma_px=SIG_LP, **common)
+    # short-side cut (band-pass contract): must not harm kernel-band recovery
+    pin2s = variational_melt_inverse(hm2, mask, DX, DY, H, U0X, U0Y,
+                                     m_prior=m_long, bg_degree=1,
+                                     anchor_lp_sigma_px=SIG_LP,
+                                     anchor_short_lambda_px=2.5 * H / DX,
+                                     **common)
+
+    def _rms(a):
+        return float(np.sqrt(np.mean(a ** 2)))
+
+    def _lp_np(a, sigma_px):
+        """Numpy replica of the library's spectral low-pass projector -- the
+        contract subspace itself, so the leak metric cannot mistake legitimate
+        just-above-cutoff signal for long-wavelength content (a Gaussian LP
+        reads 20-40% of it)."""
+        ny_, nx_ = a.shape
+        py, px = ny_ // 2, nx_ // 2
+        f = np.pad(a, ((py, py), (px, px)), mode="reflect")
+        k_c = math.sqrt(2.0 * math.log(2.0)) / (2.0 * math.pi * sigma_px)
+        ky = np.fft.fftfreq(f.shape[0])[:, None]
+        kx = np.fft.rfftfreq(f.shape[1])[None, :]
+        kk = np.hypot(ky, kx)
+        k_lo, k_hi = k_c / 1.2, k_c * 1.2
+        t = np.clip((k_hi - kk) / (k_hi - k_lo), 0.0, 1.0)
+        W = np.where(kk <= k_lo, 1.0, np.where(kk >= k_hi, 0.0,
+                     0.5 - 0.5 * np.cos(math.pi * t)))
+        out = np.fft.irfft2(np.fft.rfft2(f) * W, s=f.shape)
+        return out[py:py + ny_, px:px + nx_]
+
+    leak_unpinned = _rms(dome2.melt - base2.melt)
+    leak_pinned = _rms(pin2d.melt - pin2.melt)
+    lp_dev = _rms(_lp_np(pin2.melt - m_long, SIG_LP))
+    c_base, c_pin = _corr(base2.melt, m_true2), _corr(pin2.melt, m_true2)
+
+    chk("lp-pin: kernel-band channel + level survive the pin",
+        c_pin > 0.85 and c_pin > c_base - 0.10
+        and abs(pin2.melt.mean() - m_long.mean()) < 0.5,
+        f"corr={c_pin:.3f} (unpinned ref {c_base:.3f}) "
+        f"mean={pin2.melt.mean():.3f} prior={m_long.mean():.3f}")
+    chk("lp-pin: long-wavelength melt owned by the prior",
+        lp_dev < 0.15,
+        f"rms(LPproj(melt-prior))={lp_dev:.3f} m/yr (pin sigma {SIG_LP:.0f} px)")
+    chk("lp-pin: unmodeled dome does not leak into melt",
+        leak_pinned < 0.3 * leak_unpinned and leak_pinned < 0.3,
+        f"dome-induced melt change: pinned {leak_pinned:.3f} "
+        f"vs unpinned {leak_unpinned:.3f} m/yr")
+    c_pin_s = _corr(pin2s.melt, m_true2)
+    chk("band-pin: short-side cut does not harm the kernel band",
+        c_pin_s > c_pin - 0.03
+        and abs(pin2s.melt.mean() - m_long.mean()) < 0.5,
+        f"corr={c_pin_s:.3f} (long-only {c_pin:.3f}) "
+        f"mean={pin2s.melt.mean():.3f}")
 
     ok = all(c for _, c, _ in checks)
     print("=" * 72)
