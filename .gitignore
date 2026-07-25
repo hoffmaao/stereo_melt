@@ -175,3 +175,8 @@ credentials.json
 # Vendored reference repos (clones for reading only, not part of this package)
 # ---------------------------------------------------------------------------
 vendor/
+
+# ---------------------------------------------------------------------------
+# elmer_synth synthetic-experiment run outputs (large; regenerable)
+# ---------------------------------------------------------------------------
+elmer_synth/runs/

@@ -71,6 +71,7 @@ from stereo_melt.dynamics import (
     linear_inverse_eulerian_budget_melt_rate,
 )
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.io.bedmachine import load_firn_on_grid
 
 from beardmore_shelf import config
@@ -139,12 +140,91 @@ def band_row(name, field, count, band_mask):
     )
 
 
+def _render_compare_figure(melt_panels, aux_panels, out_png, tag) -> None:
+    """Draw the 8-panel comparison (4 melt maps + 4 aux) and save.
+
+    Melt panels use the shared LADDIE symmetric-log melt colormap
+    (``stereo_melt.colormaps``, negative = melt -> warm); aux panels keep
+    their own linear maps. Shared by the solve path and ``--replot``.
+    """
+    fig, axes = plt.subplots(2, 4, figsize=(19, 10), constrained_layout=True)
+    mcmap, mnorm = melt_cmap(), melt_norm(vmax=10.0)
+    for ax, (name, v) in zip(axes[0], melt_panels):
+        im = ax.imshow(v, cmap=mcmap, norm=mnorm, interpolation="nearest")
+        ax.set_title(name, fontsize=10)
+        add_melt_colorbar(fig, im, ax=ax, shrink=0.75)
+    for ax, (name, v, cmap, vmax) in zip(axes[1], aux_panels):
+        kw = dict(vmin=-vmax, vmax=vmax) if vmax else {}
+        im = ax.imshow(v, cmap=cmap, interpolation="nearest", **kw)
+        ax.set_title(name, fontsize=10)
+        fig.colorbar(im, ax=ax, shrink=0.75)
+    for ax in axes.ravel():
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for c0, c1, r0, r1 in BANDS.values():
+            ax.add_patch(Rectangle((c0, r0), c1 - c0, r1 - r0,
+                                   fill=False, ec="k", lw=0.8, ls="--"))
+    fig.suptitle(
+        f"Beardmore_Shelf {tag} — Eulerian + budget linear inverses vs production "
+        "path solver (m ice/yr, negative = melt; dashed = under-constrained bands)",
+        fontsize=11,
+    )
+    fig.savefig(out_png, dpi=110)
+    plt.close(fig)
+    print(f"  wrote {out_png}")
+
+
+def _replot_from_disk(tag, out_tag, ref_nc) -> None:
+    """Rebuild ``compare_budget_inverse_{out_tag}.png`` from the saved
+    eul/path/REF products (no solve), using the current colormap."""
+    eul_nc = (
+        config.PROCESSED_DIR
+        / f"beardmore_shelf_lininv_budget_{out_tag}_eul_{config.START_TIME}_{config.END_TIME}.nc"
+    )
+    pth_nc = (
+        config.PROCESSED_DIR
+        / f"beardmore_shelf_lininv_budget_{out_tag}_path_{config.START_TIME}_{config.END_TIME}.nc"
+    )
+    for f in (eul_nc, pth_nc, ref_nc):
+        if not f.exists():
+            raise SystemExit(f"--replot: missing product {f}")
+    print(f"Replot from:\n  {eul_nc.name}\n  {pth_nc.name}\n  {ref_nc.name}")
+    eul = xr.open_dataset(eul_nc)
+    pth = xr.open_dataset(pth_nc)
+    base = xr.open_dataset(ref_nc)
+    flo = np.asarray(load_floating_mask(eul).values, bool)
+    lag_v = np.asarray(base["melt_rate_lagrangian"].values, float)
+    ref_count = np.asarray(base["lagrangian_count"].values, float)
+    eul_count = np.asarray(eul["count"].values, float)
+    pth_count = np.asarray(pth["count"].values, float)
+    melt_panels = [
+        ("Lagrangian path (REF)", lag_v),
+        ("Eulerian (robust dh/dt)", np.asarray(eul.melt_rate_hydro.values, float)),
+        ("lininv EULERIAN", np.asarray(eul.melt_rate.values, float)),
+        ("lininv PATH", np.asarray(pth.melt_rate.values, float)),
+    ]
+    aux_panels = [
+        ("REF path deposit count", ref_count, "viridis", None),
+        ("epoch count (dh/dt regression)", np.where(flo, eul_count, np.nan),
+         "viridis", None),
+        ("lininv_eul nonhydro corr", np.asarray(eul.nonhydro_corr.values, float),
+         "PuOr", 5),
+        ("lininv_path pair count", np.where(flo, pth_count, np.nan),
+         "viridis", None),
+    ]
+    out_png = config.FIGURES_DIR / f"compare_budget_inverse_{out_tag}.png"
+    _render_compare_figure(melt_panels, aux_panels, out_png, tag)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--res", type=int, default=config.RES)
     p.add_argument("--tag", type=str, default=None,
                    help="variant tag matching a `--tag` build/tilt run; "
                         "carried into input/output names")
+    p.add_argument("--replot", action="store_true",
+                   help="skip the solve; rebuild the figure from the saved "
+                        "eul/path/REF products with the current colormap")
     args = p.parse_args()
     tag = f"{args.res}m" + (f"_{args.tag}" if args.tag else "")
     out_tag = os.environ.get("LININV_OUT_TAG", tag)
@@ -154,6 +234,10 @@ def main() -> None:
         config.PROCESSED_DIR
         / f"beardmore_shelf_melt_path_{tag}_{config.START_TIME}_{config.END_TIME}.nc"
     )
+
+    if args.replot:
+        _replot_from_disk(tag, out_tag, ref_nc)
+        return
 
     print(f"Loading curated {tag} stack...")
     stack = load_stack_res(args.res, tag=args.tag)
@@ -326,17 +410,12 @@ def main() -> None:
     print(f"Saved -> {pth_nc}")
 
     # ---- figure -----------------------------------------------------------
-    fig, axes = plt.subplots(2, 4, figsize=(19, 10), constrained_layout=True)
     melt_panels = [
         ("Lagrangian path (REF)", lag_v),
         ("Eulerian (robust dh/dt)", np.asarray(eul.melt_rate_hydro.values, float)),
         ("lininv EULERIAN", np.asarray(eul.melt_rate.values, float)),
         ("lininv PATH", np.asarray(pth.melt_rate.values, float)),
     ]
-    for ax, (name, v) in zip(axes[0], melt_panels):
-        im = ax.imshow(v, cmap="RdBu_r", vmin=-10, vmax=10, interpolation="nearest")
-        ax.set_title(name, fontsize=10)
-        fig.colorbar(im, ax=ax, shrink=0.75)
     aux_panels = [
         ("REF path deposit count", ref_count, "viridis", None),
         ("epoch count (dh/dt regression)", np.where(flo, eul_count, np.nan),
@@ -346,26 +425,8 @@ def main() -> None:
         ("lininv_path pair count", np.where(flo, pth_count, np.nan),
          "viridis", None),
     ]
-    for ax, (name, v, cmap, vmax) in zip(axes[1], aux_panels):
-        kw = dict(vmin=-vmax, vmax=vmax) if vmax else {}
-        im = ax.imshow(v, cmap=cmap, interpolation="nearest", **kw)
-        ax.set_title(name, fontsize=10)
-        fig.colorbar(im, ax=ax, shrink=0.75)
-    for ax in axes.ravel():
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for c0, c1, r0, r1 in BANDS.values():
-            ax.add_patch(Rectangle((c0, r0), c1 - c0, r1 - r0,
-                                   fill=False, ec="k", lw=0.8, ls="--"))
-    fig.suptitle(
-        f"Beardmore_Shelf {tag} — Eulerian + budget linear inverses vs production "
-        "path solver (m ice/yr, negative = melt; dashed = under-constrained bands)",
-        fontsize=11,
-    )
     out_png = config.FIGURES_DIR / f"compare_budget_inverse_{out_tag}.png"
-    fig.savefig(out_png, dpi=110)
-    plt.close(fig)
-    print(f"  wrote {out_png}")
+    _render_compare_figure(melt_panels, aux_panels, out_png, tag)
     print(f"DONE in {(time.time() - t0) / 60:.1f} min")
 
 

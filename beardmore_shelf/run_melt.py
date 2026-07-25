@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.smb import smb_over_window
 from stereo_melt.melt import (
@@ -41,6 +42,7 @@ from stereo_melt.melt import (
     linear_inverse_lagrangian_melt_rate,
 )
 from stereo_melt.stack import load_basin_stack
+from stereo_melt.visualization import plot_variational_fit
 
 from beardmore_shelf import config
 
@@ -206,7 +208,10 @@ def load_smb_on_grid(stack: xr.DataArray) -> xr.DataArray:
 # ----------------------------------------------------------------------
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # A norm (e.g. the melt SymLogNorm) carries its own range; matplotlib
+    # rejects norm together with vmin/vmax, so drop them when norm is given.
+    lim = {} if norm is not None else dict(vmin=vmin, vmax=vmax)
     im = ax.imshow(
         da.values,
         extent=[
@@ -217,9 +222,9 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        norm=norm,
         aspect="equal",
+        **lim,
     )
     return im
 
@@ -264,18 +269,21 @@ def plot_melt_comparison(
     """QC: side-by-side Eulerian vs Lagrangian vs linear-inverse melt."""
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
 
-    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
-    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
-    fig.colorbar(im0, ax=axes[0, 0], fraction=0.045)
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
 
-    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap=mcmap, norm=mnorm)
+    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
+    add_melt_colorbar(fig, im0, ax=axes[0, 0], fraction=0.045)
+
+    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=mcmap, norm=mnorm)
     axes[0, 1].set_title("Lagrangian melt_rate (m ice/yr)")
-    fig.colorbar(im1, ax=axes[0, 1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
     if linv is not None:
-        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap=mcmap, norm=mnorm)
         axes[0, 2].set_title("Linear inverse (Lagrangian-frame Stubblefield)")
-        fig.colorbar(im2, ax=axes[0, 2], fraction=0.045)
+        add_melt_colorbar(fig, im2, ax=axes[0, 2], fraction=0.045)
     else:
         axes[0, 2].set_visible(False)
 
@@ -414,6 +422,59 @@ def main() -> None:
             f"{float(linv_mr.quantile(0.75)):.2f}] m ice/yr"
         )
 
+    # Fourth solver: the variational forward-fit inverse (opt-in via
+    # BEARDMORE_SHELF_VARIATIONAL=1). The Stubblefield transfer goes in the
+    # FORWARD model and is FITTED rather than inverted: on the Elmer/Ice twins a
+    # direct division over-lifts across-flow structure (it double-counts the
+    # advective dynamics the surface already carries), while one forward fit
+    # recovers along-flow, oblique and across-flow melt with no angular weight.
+    # eta_bar defaults to the 1e14 the `linv` solver above uses, so the A/B
+    # isolates the METHOD, not the viscosity. DC-blind like `linv`: a
+    # channel-scale pattern correction, NOT a mass-budget melt.
+    varfit = None
+    if os.environ.get("BEARDMORE_SHELF_VARIATIONAL", "0").strip() == "1":
+        from stereo_melt.dynamics.stubblefield_forward import variational_melt_rate
+
+        print("Running variational forward-fit inverse (4th solver; narrates)...")
+        _env = os.environ.get
+        varfit = variational_melt_rate(
+            stack, vx, vy, floating_mask=floating, d=firn,
+            rep=_env("BEARDMORE_SHELF_VAR_REP", "grid"),
+            eta_bar=float(_env("BEARDMORE_SHELF_VAR_ETA_BAR", "1e14")),
+            alpha_scale=float(_env("BEARDMORE_SHELF_VAR_ALPHA_SCALE", "0.34")),
+            lam=float(_env("BEARDMORE_SHELF_VAR_LAM", "1e-4")),
+            iters=int(_env("BEARDMORE_SHELF_VAR_ITERS", "4000")),
+            lr=float(_env("BEARDMORE_SHELF_VAR_LR", "3e-3")),
+            sigma_hp_H=float(_env("BEARDMORE_SHELF_VAR_SIGMA_HP_H", "5.0")),
+            log_every=int(_env("BEARDMORE_SHELF_VAR_LOG_EVERY", "250")),
+            # One mean velocity is wrong nearly everywhere on a real shelf, so
+            # cluster the geometry into bins whose multipliers are each applied
+            # globally. Applying them to tiles instead would truncate the
+            # operator's long downstream tail (see BlendedStubblefieldForward).
+            n_bins=int(_env("BEARDMORE_SHELF_VAR_N_BINS", "8")),
+            blend_km=float(_env("BEARDMORE_SHELF_VAR_BLEND_KM", "4.0")),
+        )
+        vmr = varfit.melt_rate
+        print(
+            f"  H_ref={varfit.attrs['H_ref_m']:.1f} m  "
+            f"t_r={varfit.attrs['t_r_yr']:.2f} yr  "
+            f"u0=({varfit.attrs['u0x_myr']:.0f}, {varfit.attrs['u0y_myr']:.0f}) m/yr  "
+            f"n_bins={varfit.attrs['n_bins']}  "
+            f"n_fit={varfit.attrs['fit_n_cells']:,} cells"
+        )
+        # No melt truth on a real shelf: how much of the observed high-passed
+        # surface the operator can reproduce is the only self-diagnostic.
+        print(
+            f"  surface fit: var_explained={varfit.attrs['fit_var_explained']:.3f}  "
+            f"rms_resid={varfit.attrs['fit_rms_resid_m']:.3f} m of "
+            f"{varfit.attrs['fit_rms_obs_m']:.3f} m observed"
+        )
+        print(
+            f"  melt_rate: median={float(vmr.median()):.2f}  "
+            f"IQR=[{float(vmr.quantile(0.25)):.2f}, "
+            f"{float(vmr.quantile(0.75)):.2f}] m ice/yr"
+        )
+
     euler_melt = euler.melt_rate.where(floating)
     lagr_melt = lagr.melt_rate.where(floating)
     linv_melt = linv.melt_rate if linv is not None else None
@@ -453,11 +514,29 @@ def main() -> None:
         ds_attrs["linear_inverse_H_ref_m"] = linv.attrs["H_ref_m"]
         ds_attrs["linear_inverse_gamma_dimless"] = linv.attrs["gamma_dimless"]
         ds_attrs["linear_inverse_tr_yr"] = linv.attrs["tr_yr"]
+    if varfit is not None:
+        ds_vars["melt_rate_variational"] = varfit.melt_rate.where(floating)
+        ds_vars["variational_dzs_obs"] = varfit.dzs_obs
+        ds_vars["variational_dzs_fit"] = varfit.dzs_fit
+        for _k in ("H_ref_m", "t_r_yr", "u0x_myr", "u0y_myr", "eta_bar",
+                   "alpha_scale", "lam", "iters", "rep", "sigma_hp_H",
+                   "n_bins", "blend_km",
+                   "fit_var_explained", "fit_rms_resid_m", "fit_rms_obs_m",
+                   "fit_n_cells"):
+            ds_attrs[f"variational_{_k}"] = varfit.attrs[_k]
     ds_out = xr.Dataset(ds_vars, attrs=ds_attrs)
     ds_out.to_netcdf(out_nc)
 
     plot_melt_comparison(euler, lagr, linv, config.FIGURES_DIR / "melt_comparison.png")
     print(f"  wrote {config.FIGURES_DIR / 'melt_comparison.png'}")
+
+    if varfit is not None:
+        plot_variational_fit(
+            varfit,
+            config.FIGURES_DIR / "melt_variational_fit.png",
+            title=(f"Beardmore shelf forward-fit melt inverse — "
+                   f"{config.START_TIME} to {config.END_TIME}"),
+        )
 
 
 if __name__ == "__main__":

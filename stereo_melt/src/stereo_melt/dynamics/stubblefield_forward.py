@@ -87,10 +87,16 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import torch
+import xarray as xr
+from scipy.ndimage import gaussian_filter
 
-from ..constants import rhoi, rhow
-from .linear_perturbation import (
+# torch is imported *after* the numpy/xarray/scipy C-extensions so its bundled
+# libstdc++ does not shadow theirs (see tests/gate_stubblefield_forward.py).
+import torch  # noqa: E402
+
+from ..constants import rhoi, rhow  # noqa: E402
+from ..freeboard import freeboard_to_thickness  # noqa: E402
+from .linear_perturbation import (  # noqa: E402
     G_GRAVITY,
     SECONDS_PER_YEAR,
     LinearPerturbation,
@@ -100,11 +106,47 @@ from .linear_perturbation import (
 __all__ = [
     "stubblefield_forward_multiplier",
     "StubblefieldForward",
+    "BlendedStubblefieldForward",
     "GridMelt",
     "SirenMelt",
     "variational_melt_inverse",
+    "variational_melt_rate",
     "MeltInverseResult",
 ]
+
+
+def _nan_gauss(a: np.ndarray, sigma: float) -> np.ndarray:
+    """NaN-aware Gaussian smoothing (smooth value / smooth mask)."""
+    m = np.isfinite(a)
+    a0 = np.where(m, a, 0.0)
+    return gaussian_filter(a0, sigma) / np.maximum(
+        gaussian_filter(m.astype(float), sigma), 1e-6)
+
+
+def _poly_basis(
+    ny: int, nx: int, degree: int, extra: np.ndarray | None = None
+) -> np.ndarray:
+    """Low-order polynomial background basis on a ``(ny, nx)`` grid.
+
+    Columns are the monomials ``x^i y^j`` with ``i + j <= degree`` over
+    coordinates normalized to ``[-1, 1]`` (so ``degree=0`` -> DC only,
+    ``degree=1`` -> plane ``{1, x, y}``, ``degree=2`` -> quadratic, 6 columns).
+    Returns an ``(ny*nx, p)`` array (row-major, matching ``.ravel()``). Optional
+    ``extra`` regressors (e.g. a hydrostatic reference surface), shape
+    ``(ny, nx)`` or ``(ny, nx, k)``, are appended with non-finite cells zeroed.
+    """
+    yy, xx = np.mgrid[0:ny, 0:nx].astype(float)
+    xs = xx / max(nx - 1, 1) * 2.0 - 1.0
+    ys = yy / max(ny - 1, 1) * 2.0 - 1.0
+    cols = [(xs ** i) * (ys ** (total - i))
+            for total in range(int(degree) + 1) for i in range(total + 1)]
+    B = np.stack([c.ravel() for c in cols], axis=1)
+    if extra is not None:
+        ex = np.asarray(extra, dtype=float)
+        ex = ex[..., None] if ex.ndim == 2 else ex
+        ex = np.where(np.isfinite(ex), ex, 0.0).reshape(ny * nx, -1)
+        B = np.concatenate([B, ex], axis=1)
+    return B
 
 
 def stubblefield_forward_multiplier(
@@ -167,6 +209,155 @@ class StubblefieldForward(torch.nn.Module):
         return dzs.real[:self.ny, :self.nx]
 
 
+def _kmeans_geometry(
+    feats: np.ndarray, n_bins: int, iters: int = 40
+) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic 1-D-seeded Lloyd clustering of standardized ``(H, ux, uy)``.
+
+    Seeded from evenly spaced quantiles along the first principal component (no
+    RNG), so a given geometry always yields the same bins -- a solver that
+    silently changed its operator between runs would be unusable for A/B work.
+    Returns the per-cell label and the ``(n_bins, 3)`` centroids in feature units.
+    """
+    mu = feats.mean(0)
+    sd = feats.std(0)
+    sd[sd <= 0] = 1.0
+    z = (feats - mu) / sd
+    # principal direction via the power method on the covariance (no scipy/sklearn)
+    C = np.cov(z.T) + 1e-12 * np.eye(z.shape[1])
+    v = np.ones(z.shape[1]) / math.sqrt(z.shape[1])
+    for _ in range(100):
+        v = C @ v
+        v /= max(np.linalg.norm(v), 1e-30)
+    proj = z @ v
+    qs = np.quantile(proj, (np.arange(n_bins) + 0.5) / n_bins)
+    cent = np.stack([z[np.argmin(np.abs(proj - q))] for q in qs])
+
+    lab = np.zeros(len(z), dtype=int)
+    for _ in range(iters):
+        d = ((z[:, None, :] - cent[None, :, :]) ** 2).sum(-1)
+        new = d.argmin(1)
+        if np.array_equal(new, lab):
+            break
+        lab = new
+        for b in range(n_bins):
+            sel = lab == b
+            if sel.any():
+                cent[b] = z[sel].mean(0)
+    return lab, cent * sd + mu
+
+
+class BlendedStubblefieldForward(torch.nn.Module):
+    r"""Spatially varying forward operator: globally applied multipliers, blended.
+
+    :class:`StubblefieldForward` applies one multiplier built from a single
+    reference thickness and a single mean velocity. That is defensible on a
+    synthetic twin with uniform flow, but not on a real shelf: Pine Island spans
+    roughly 300 to 4000 m/yr, so one :math:`\alpha \propto u\,t_r/H` is wrong
+    nearly everywhere.
+
+    **Why not tiles.** The obvious fix -- cut the domain into tiles, give each its
+    own :math:`M_h`, overlap-add -- is wrong here, because this operator is not
+    spatially compact. Long-wavelength modes relax slowly under viscous bridging,
+    so they advect far downstream before they damp: the impulse response falls to
+    5% of peak only after ~8 km at 200 m/yr but ~75 km at 2000 m/yr and ~150 km at
+    4000 m/yr. Any tile small enough to localize the geometry truncates that tail
+    (a measured 47% forward error at 2000 m/yr, spatially uniform, and *not*
+    removable by high-passing).
+
+    So instead of localizing the *melt*, this localizes the *operator*: each
+    multiplier is applied to the **whole** domain -- preserving the full
+    downstream tail -- and the global responses are recombined with smooth
+    spatial weights,
+
+    .. math:: \delta z_s(x) = \sum_b w_b(x)\,\big[\mathcal{F}^{-1} M_b
+              \mathcal{F} m\big](x), \qquad \sum_b w_b(x) = 1.
+
+    Geometry is clustered into ``n_bins`` groups of similar :math:`(H, u_x, u_y)`
+    (deterministically, see :func:`_kmeans_geometry`), each contributing one
+    multiplier, and the hard bin indicators are Gaussian-smoothed over
+    ``blend_px`` and renormalized so the weights are an exact partition of unity.
+    With a spatially constant geometry every cell lands in one bin, so the result
+    is **bit-identical** to :class:`StubblefieldForward`.
+
+    Cost is one forward FFT plus ``n_bins`` inverse FFTs per call -- cheaper than
+    a correctly haloed tiling, and independent of how finely the geometry varies.
+
+    Parameters
+    ----------
+    ny, nx, dx, dy :
+        Grid shape and posting (m).
+    H_field, ux_field, uy_field : (ny, nx) arrays
+        Local thickness (m) and velocity (m/yr). Non-finite cells (off-shelf) do
+        not vote on the clustering and take the nearest valid weights.
+    n_bins :
+        Number of distinct multipliers. Cost is linear in it.
+    blend_px :
+        Gaussian sigma (pixels) used to soften the bin indicators.
+    """
+
+    def __init__(
+        self,
+        ny: int,
+        nx: int,
+        dx: float,
+        dy: float,
+        H_field: np.ndarray,
+        ux_field: np.ndarray,
+        uy_field: np.ndarray,
+        *,
+        n_bins: int = 6,
+        blend_px: float = 8.0,
+        **mult_kwargs,
+    ):
+        super().__init__()
+        self.ny, self.nx = int(ny), int(nx)
+
+        H_field = np.asarray(H_field, dtype=float)
+        ux_field = np.asarray(ux_field, dtype=float)
+        uy_field = np.asarray(uy_field, dtype=float)
+        valid = (np.isfinite(H_field) & np.isfinite(ux_field)
+                 & np.isfinite(uy_field) & (H_field > 0))
+        if not valid.any():
+            raise ValueError("no finite (H, ux, uy) cells for the blended operator")
+
+        feats = np.stack([H_field[valid], ux_field[valid], uy_field[valid]], axis=1)
+        n_bins = max(1, min(int(n_bins), len(np.unique(feats, axis=0))))
+        if n_bins == 1:
+            lab_v = np.zeros(len(feats), dtype=int)
+            cent = feats.mean(0, keepdims=True)
+        else:
+            lab_v, cent = _kmeans_geometry(feats, n_bins)
+        self.n_bins = n_bins
+        self.bin_geometry = [tuple(float(c) for c in row) for row in cent]
+
+        mults = [stubblefield_forward_multiplier(
+                     2 * self.ny, 2 * self.nx, dx, dy, H_b, ux_b, uy_b,
+                     **mult_kwargs)
+                 for H_b, ux_b, uy_b in self.bin_geometry]
+        self.register_buffer(
+            "M", torch.from_numpy(np.ascontiguousarray(np.stack(mults))))
+
+        # Soft weights: smooth each hard indicator, then renormalize. Off-shelf
+        # cells carry no indicator of their own, so smoothing lets the nearest
+        # on-shelf bins fill them in and the partition of unity still holds.
+        w = np.zeros((n_bins, self.ny, self.nx))
+        for b in range(n_bins):
+            ind = np.zeros((self.ny, self.nx))
+            ind[valid] = (lab_v == b)
+            w[b] = gaussian_filter(ind, blend_px, mode="nearest")
+        tot = w.sum(0)
+        flat = tot < 1e-8            # unreachable by smoothing: fall back to bin 0
+        w[0][flat] = 1.0
+        tot = np.maximum(w.sum(0), 1e-30)
+        self.register_buffer("w", torch.from_numpy(w / tot))
+
+    def forward(self, m: torch.Tensor) -> torch.Tensor:
+        F = torch.fft.fft2(_pad2x(m).to(torch.complex128))
+        resp = torch.fft.ifft2(self.M * F).real[:, :self.ny, :self.nx]
+        return (self.w * resp).sum(0)
+
+
 class GridMelt(torch.nn.Module):
     """Dense per-pixel melt field (the direct representation)."""
 
@@ -214,9 +405,16 @@ class SirenMelt(torch.nn.Module):
 class MeltInverseResult:
     """Output of :func:`variational_melt_inverse`."""
 
-    melt: np.ndarray          # (ny, nx) recovered basal melt, m/yr
-    loss_history: list        # data-misfit term per recorded iteration
+    melt: np.ndarray                    # (ny, nx) recovered basal melt, m/yr
+    loss_history: list                  # data-misfit term per recorded iteration
     n_iter: int
+    dzs_fit: np.ndarray | None = None   # (ny, nx) modeled surface anomaly, m
+    # fitted background surface (m) when bg_degree is set: the reference state
+    # projected out of the data residual, so full model = dzs_fit + bg_field
+    bg_field: np.ndarray | None = None
+    # geometry bins actually used (the request is clamped to the number of
+    # distinct geometries present); 1 means the monolithic operator
+    n_bins_used: int = 1
 
 
 def variational_melt_inverse(
@@ -239,11 +437,23 @@ def variational_melt_inverse(
     g: float = G_GRAVITY,
     siren_kwargs: dict | None = None,
     log_every: int = 0,
+    H_field: np.ndarray | None = None,
+    ux_field: np.ndarray | None = None,
+    uy_field: np.ndarray | None = None,
+    n_bins: int | None = None,
+    blend_px: float = 8.0,
+    m_prior: np.ndarray | None = None,
+    bg_degree: int | None = None,
+    bg_extra: np.ndarray | None = None,
 ) -> MeltInverseResult:
-    r"""Fit basal melt to an observed surface anomaly through the forward operator.
+    r"""Fit basal melt to an observed surface (anomaly) through the forward operator.
 
-    Minimizes ``||Forward(m) - dzs_obs||^2_mask + lam*||m||^2`` by Adam, with
-    the Stubblefield transfer as a fixed differentiable forward layer.
+    Minimizes ``||(I - P_B)(Forward(m) - dzs_obs)||^2_mask + lam*||m - m_prior||^2``
+    by Adam, with the Stubblefield transfer as a fixed differentiable forward
+    layer. ``P_B`` projects out an optional low-order background basis (see
+    ``bg_degree``), and ``m_prior`` optionally anchors the null-space to a budget
+    field. With both defaulted this reduces to
+    ``||Forward(m) - dzs_obs||^2 + lam*||m||^2``.
 
     Parameters
     ----------
@@ -263,6 +473,32 @@ def variational_melt_inverse(
     log_every :
         If > 0, print the data/reg terms every ``log_every`` iterations (heavy
         fits run under ``nohup``; the log is the only visibility).
+    H_field, ux_field, uy_field, n_bins, blend_px :
+        Set ``n_bins`` to use the spatially varying
+        :class:`BlendedStubblefieldForward` instead of the single-``(H, u)``
+        operator: the geometry fields are clustered into ``n_bins`` multipliers,
+        each applied globally and blended over ``blend_px``. Required on real
+        shelves, where one mean velocity is wrong nearly everywhere. Fields
+        default to constants from the scalars (which reduces to the monolithic
+        operator exactly).
+    m_prior : (ny, nx) array, optional
+        Budget-anchored null-space: the Tikhonov term becomes
+        ``lam*||m - m_prior||^2``, pulling melt toward this field (a budget/level
+        melt in Stubblefield sign, m>0 = melt) instead of zero. The DC-blind
+        operator cannot constrain the mean or the global ramp, so those modes
+        relax to ``m_prior`` while the data only moves melt off it where the
+        operator has gain (the channel band). ``None`` = the toward-zero pin.
+    bg_degree : int, optional
+        Degree of a polynomial background basis (0=DC, 1=plane, 2=quadratic)
+        fitted *in the model* and projected out of the data residual each step
+        (variable projection). Replaces the input high-pass: it removes the
+        reference state the linearization expands about without cutting a
+        wavelength band from the melt signal, so the raw (un-high-passed) surface
+        is then the correct input. ``None`` = no background term (the input must
+        already be an anomaly).
+    bg_extra : (ny, nx) or (ny, nx, k) array, optional
+        Extra background regressors appended to the polynomial basis (e.g. the
+        hydrostatic surface of the thickness field). Non-finite cells are zeroed.
 
     Returns
     -------
@@ -275,24 +511,85 @@ def variational_melt_inverse(
     if rep not in ("grid", "siren"):
         raise ValueError(f"rep must be 'grid' or 'siren', got {rep!r}")
 
-    M_h = stubblefield_forward_multiplier(
-        2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr,
-        eta_bar=eta_bar, alpha_scale=alpha_scale,
-        rho_i=rho_i, rho_w=rho_w, g=g)
-    fwd = StubblefieldForward(M_h, ny, nx)
+    mult_kw = dict(eta_bar=eta_bar, alpha_scale=alpha_scale,
+                   rho_i=rho_i, rho_w=rho_w, g=g)
+    if n_bins is None:
+        M_h = stubblefield_forward_multiplier(
+            2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr, **mult_kw)
+        fwd = StubblefieldForward(M_h, ny, nx)
+    else:
+        def _fld(a, v):
+            return np.full((ny, nx), float(v)) if a is None else np.asarray(a)
+        fwd = BlendedStubblefieldForward(
+            ny, nx, dx, dy, _fld(H_field, H), _fld(ux_field, ux_myr),
+            _fld(uy_field, uy_myr), n_bins=int(n_bins), blend_px=blend_px,
+            **mult_kw)
+        if log_every:
+            gh = np.array([g[0] for g in fwd.bin_geometry])
+            gu = np.hypot([g[1] for g in fwd.bin_geometry],
+                          [g[2] for g in fwd.bin_geometry])
+            print(f"    blended operator: {fwd.n_bins} geometry bins  "
+                  f"H {gh.min():.0f}-{gh.max():.0f} m  "
+                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr", flush=True)
     rep_net = (GridMelt(ny, nx) if rep == "grid"
                else SirenMelt(ny, nx, **(siren_kwargs or {})))
 
     dzs_t = torch.from_numpy(np.ascontiguousarray(dzs_obs, dtype=np.float64))
     mask_t = torch.from_numpy(np.ascontiguousarray(mask, dtype=bool))
+
+    # Budget-anchored null-space: pull melt toward m_prior (the budget/level
+    # field) instead of zero, so the modes the DC-blind operator cannot see
+    # relax to the budget rather than vanishing. None reproduces the toward-zero
+    # pin exactly.
+    anchor = m_prior is not None
+    m_prior_t = (torch.zeros(ny, nx, dtype=torch.float64) if not anchor
+                 else torch.from_numpy(np.ascontiguousarray(
+                     np.where(np.isfinite(m_prior), m_prior, 0.0),
+                     dtype=np.float64)))
+
+    # Background-in-the-model: a low-order basis for the reference state the
+    # linearization expands about (the shape a Gaussian high-pass used to strip
+    # from the input). We instead project it out of the data residual each step
+    # (variable projection), so the raw surface goes in unfiltered and no
+    # melt-bearing band is discarded. Qb spans the basis on the masked cells.
+    Qb = Rinv = B_full_t = None
+    if bg_degree is not None:
+        B_full_t = torch.from_numpy(np.ascontiguousarray(
+            _poly_basis(ny, nx, int(bg_degree), extra=bg_extra)))
+        B_m = B_full_t[torch.from_numpy(np.ascontiguousarray(mask, bool).ravel())]
+        if B_m.shape[0] <= B_m.shape[1]:
+            raise ValueError(
+                f"background basis ({B_m.shape[1]} cols) >= masked cells "
+                f"({B_m.shape[0]}); lower bg_degree")
+        Qb, Rb = torch.linalg.qr(B_m)
+        Rinv = torch.linalg.inv(Rb)
+        if log_every:
+            print(f"    background projection: degree {bg_degree}, "
+                  f"{B_m.shape[1]} basis columns removed from the residual",
+                  flush=True)
+
+    # Reparametrize as m = m_prior + dm: the network fits the deviation dm (init
+    # 0) and reg pulls dm toward 0, so where the DC-blind operator sees nothing
+    # the melt equals the prior. A plain ||m - m_prior||^2 penalty has the same
+    # minimum but converges far too slowly in the flat null-space direction.
+    # The mask-mean of dm is the exact null direction (the operator zeros a
+    # constant): Adam's per-pixel normalization drifts it even though the data
+    # gradient is mean-zero, so we pin it -- the melt's unobservable level then
+    # comes from the prior, not the optimizer. m_prior=None => dm=m (legacy).
     opt = torch.optim.Adam(rep_net.parameters(), lr=lr)
     history: list = []
     for it in range(iters):
         opt.zero_grad()
-        m = rep_net()
+        dm = rep_net()
+        if anchor:
+            dm = dm - dm[mask_t].mean()
+        m = dm + m_prior_t
         pred = fwd(m)
-        data = ((pred - dzs_t)[mask_t] ** 2).mean()
-        reg = (m ** 2).mean()
+        r = (pred - dzs_t)[mask_t]
+        if Qb is not None:                       # remove the fitted background
+            r = r - Qb @ (Qb.t() @ r)
+        data = (r ** 2).mean()
+        reg = (dm ** 2).mean()
         loss = data + lam * reg
         loss.backward()
         opt.step()
@@ -301,5 +598,254 @@ def variational_melt_inverse(
             print(f"    it {it:5d}  data {data.item():.3e}  reg {reg.item():.3e}",
                   flush=True)
 
-    melt = rep_net().detach().cpu().numpy()
-    return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters)
+    with torch.no_grad():
+        m_hat = rep_net()
+        if anchor:
+            m_hat = m_hat - m_hat[mask_t].mean()
+        m_final = m_hat + m_prior_t
+        melt = m_final.cpu().numpy()
+        dzs_fit = fwd(m_final).cpu().numpy()
+        bg_field = None
+        if Qb is not None:
+            r_fin = (torch.from_numpy(np.ascontiguousarray(dzs_fit)) - dzs_t)[mask_t]
+            theta = -(Rinv @ (Qb.t() @ r_fin))    # coeffs in the raw basis
+            bg_field = (B_full_t @ theta).reshape(ny, nx).cpu().numpy()
+    return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters,
+                             dzs_fit=dzs_fit, bg_field=bg_field,
+                             n_bins_used=getattr(fwd, "n_bins", 1))
+
+
+def variational_melt_rate(
+    h_stack: xr.DataArray,
+    vx: xr.DataArray,
+    vy: xr.DataArray,
+    floating_mask: xr.DataArray | None = None,
+    d: xr.DataArray | float = 0.0,
+    *,
+    rep: str = "grid",
+    eta_bar: float = 1e14,
+    alpha_scale: float = 0.34,
+    lam: float = 1e-4,
+    iters: int = 4000,
+    lr: float = 3e-3,
+    sigma_hp_H: float = 5.0,
+    rho_w: float = rhow,
+    rho_i: float = rhoi,
+    g: float = G_GRAVITY,
+    siren_kwargs: dict | None = None,
+    log_every: int = 0,
+    n_bins: int | None = None,
+    blend_km: float = 4.0,
+    m_prior: xr.DataArray | None = None,
+    bg_degree: int | None = None,
+    bg_extra: xr.DataArray | None = None,
+) -> xr.Dataset:
+    r"""Basal melt rate from the surface (anomaly) by variational forward-fit.
+
+    Driver-facing xarray wrapper around :func:`variational_melt_inverse`:
+    strip-robust time-**median** surface -> remove the reference state (legacy
+    high-pass of the input, or -- with ``bg_degree`` -- an in-model background
+    fitted and projected out of the residual) -> fit melt through the
+    Stubblefield forward operator on the floating bbox, optionally anchored to a
+    budget field via ``m_prior`` -> Shean sign (negative = melt).
+
+    Unlike
+    :func:`~stereo_melt.dynamics.stubblefield_inverse.stubblefield_inverse_melt_rate`
+    (a direct Fourier division that over-lifts across-flow ridges), this puts the
+    bridging transfer in the *forward* model and fits, so along-flow, oblique, and
+    across-flow melt come through one operator with no angular weight.
+
+    Set ``n_bins`` to run the spatially varying
+    :class:`BlendedStubblefieldForward`, which clusters the shelf into that many
+    thickness/velocity geometries and blends their globally applied responses.
+    Without it the operator collapses the shelf to one ``H_ref`` and one mean
+    ``(u0x, u0y)``, which is a synthetic-twin assumption -- on a real shelf
+    spanning a large velocity range it is wrong nearly everywhere, so ``n_bins``
+    is the appropriate setting for production. Either way the operator is
+    DC-blind (it zeros ``k=0``): the recovered field is a channel-scale pattern
+    correction, **not** a mass-budget melt, and is not interchangeable with the
+    Eulerian/Lagrangian solvers.
+
+    Parameters
+    ----------
+    h_stack : xarray.DataArray ``(time, y, x)``
+        Geoid-referenced, corrected surface-elevation stack, meters.
+    vx, vy : xarray.DataArray
+        Column-averaged velocity (m/yr); the time/shelf mean sets the advection.
+    floating_mask : xarray.DataArray, optional
+        Floating-ice mask; the inversion is reported only there.
+    d : firn air content (m), for the reference thickness.
+    rep, eta_bar, alpha_scale, lam, iters, lr :
+        Passed through to :func:`variational_melt_inverse` (see there and the
+        module docstring; ``eta_bar``/``alpha_scale`` are per-geometry study
+        parameters, not constants).
+    m_prior : xarray.DataArray, optional
+        Budget/level melt field (Shean sign, negative = melt) on the stack grid.
+        Anchors the fit's null-space (mean + global ramp, which the DC-blind
+        operator cannot see) to the budget, so the fused melt carries an absolute
+        level and flux/gain become meaningful. Negated internally to the
+        operator's sign. ``None`` = the DC-blind toward-zero pin.
+    bg_degree : int, optional
+        Fit a polynomial background of this degree (1=plane, 2=quadratic) in the
+        model and feed the RAW median surface, instead of the legacy Gaussian
+        high-pass (``sigma_hp_H``, used only when ``bg_degree is None``). Removes
+        the reference state without cutting a melt-bearing wavelength band.
+    bg_extra : xarray.DataArray, optional
+        Extra background regressor on the stack grid (e.g. the hydrostatic
+        surface of the thickness field), appended to the polynomial basis.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``melt_rate`` (m ice/yr, Shean sign), the observed high-passed surface
+        anomaly ``dzs_obs`` and the operator's fit to it ``dzs_fit``, plus
+        ``H_ref_m``, ``t_r_yr``, ``u0x_myr``/``u0y_myr``, ``eta_bar``,
+        ``alpha_scale``, ``lam``, ``iters``, ``rep`` and the fit-quality attrs
+        ``fit_rms_resid_m`` / ``fit_rms_obs_m`` / ``fit_var_explained``. On a real
+        shelf there is no truth, so how much of ``dzs_obs`` the operator can
+        reproduce is the only available self-diagnostic: a low
+        ``fit_var_explained`` means the surface structure is not something this
+        (single-``H``, single-mean-``u``, steady) operator can make from *any*
+        melt field, and the recovered melt should be read with that caveat.
+    """
+    # strip-robust surface (median over time, not mean)
+    h_med = h_stack.median("time", skipna=True)
+    if floating_mask is not None:
+        h_med = h_med.where(floating_mask)
+    res = float(abs(h_stack["x"].values[1] - h_stack["x"].values[0]))
+
+    fl = np.isfinite(h_med.values)
+    if floating_mask is not None:
+        fl &= floating_mask.values.astype(bool)
+    if not fl.any():
+        raise ValueError("no finite floating-shelf surface for the variational inverse")
+
+    H_ref = float(freeboard_to_thickness(float(np.nanmean(h_med.values[fl])), d=0.0,
+                                         rho_w=rho_w, rho_i=rho_i))
+    if isinstance(d, xr.DataArray):
+        H_ref = float(np.nanmean(
+            freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values[fl]))
+    if not np.isfinite(H_ref) or H_ref <= 0:
+        raise ValueError(f"derived H_ref={H_ref} is not positive finite")
+    t_r_yr = (2.0 * eta_bar / (rho_i * g * H_ref)) / SECONDS_PER_YEAR
+
+    # advection from the mean flow
+    vxm = vx.mean("time") if "time" in vx.dims else vx
+    vym = vy.mean("time") if "time" in vy.dims else vy
+    flda = xr.DataArray(fl, dims=h_med.dims, coords=h_med.coords)
+    u0x = float(vxm.where(flda).mean(skipna=True))
+    u0y = float(vym.where(flda).mean(skipna=True))
+    u0x = 0.0 if not np.isfinite(u0x) else u0x
+    u0y = 0.0 if not np.isfinite(u0y) else u0y
+
+    # crop to the floating bbox
+    ys, xs = np.where(fl)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    hm = h_med.values[y0:y1, x0:x1]
+    fl_crop = fl[y0:y1, x0:x1]
+    # Remove the reference state the operator expands about, two ways:
+    #   bg_degree is None -> legacy Gaussian high-pass of the INPUT (a band cut)
+    #   bg_degree set      -> feed the raw surface; the background is fitted in
+    #                         the model and projected out of the residual.
+    if bg_degree is None:
+        dzs = hm - _nan_gauss(hm, sigma_hp_H * H_ref / res)
+    else:
+        dzs = hm.copy()
+    fit_mask = np.isfinite(dzs) & fl_crop
+    dzs = np.where(np.isfinite(dzs), dzs, 0.0)
+
+    # Budget-anchored null-space prior (Shean sign -> Stubblefield sign) and any
+    # extra background regressor, cropped to the fit bbox.
+    m_prior_crop = None
+    if m_prior is not None:
+        mp = m_prior.mean("time") if "time" in m_prior.dims else m_prior
+        m_prior_crop = -np.asarray(mp.values)[y0:y1, x0:x1]
+    bg_extra_crop = (None if bg_extra is None
+                     else np.asarray(bg_extra.values)[y0:y1, x0:x1])
+
+    # Local geometry for the blended operator: thickness and velocity on the same
+    # crop, masked off the shelf so the geometry clustering is not pulled by open
+    # ocean or grounded ice.
+    H_crop = ux_crop = uy_crop = None
+    if n_bins is not None:
+        H_full = freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values
+        H_crop = np.where(fl_crop, H_full[y0:y1, x0:x1], np.nan)
+        ux_crop = np.where(fl_crop, vxm.values[y0:y1, x0:x1], np.nan)
+        uy_crop = np.where(fl_crop, vym.values[y0:y1, x0:x1], np.nan)
+
+    result = variational_melt_inverse(
+        dzs, fit_mask, res, res, H_ref, u0x, u0y,
+        rep=rep, eta_bar=eta_bar, alpha_scale=alpha_scale, lam=lam,
+        iters=iters, lr=lr, rho_i=rho_i, rho_w=rho_w, g=g,
+        siren_kwargs=siren_kwargs, log_every=log_every,
+        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop, n_bins=n_bins,
+        blend_px=blend_km * 1000.0 / res,
+        m_prior=m_prior_crop, bg_degree=bg_degree, bg_extra=bg_extra_crop)
+
+    def _embed(crop: np.ndarray, name: str) -> xr.DataArray:
+        """Place a bbox-cropped field back on the full grid, masked to the fit."""
+        full = np.full(h_med.shape, np.nan, dtype=np.float64)
+        full[y0:y1, x0:x1] = np.where(fit_mask, crop, np.nan)
+        full[~fl] = np.nan
+        return xr.DataArray(full, dims=h_med.dims, coords=h_med.coords, name=name)
+
+    # Stubblefield m>0 = melt -> Shean negate; report only where fit
+    melt = _embed(-result.melt, "melt_rate")
+
+    # Fit quality: the share of the observed surface anomaly the operator
+    # reproduces (the only no-truth self-diagnostic). With an in-model background
+    # the anomaly is hm - bg_field and the model is dzs_fit + bg_field; with the
+    # legacy high-pass the anomaly is the high-passed dzs and the model dzs_fit.
+    if result.bg_field is not None:
+        dzs_anom = dzs - result.bg_field
+        resid = (result.dzs_fit + result.bg_field - dzs)[fit_mask]
+    else:
+        dzs_anom = dzs
+        resid = (result.dzs_fit - dzs)[fit_mask]
+    obs = dzs_anom[fit_mask]
+    rms_resid = float(np.sqrt(np.mean(resid ** 2)))
+    rms_obs = float(np.sqrt(np.mean(obs ** 2)))
+    var_expl = float(1.0 - np.var(resid) / np.var(obs)) if np.var(obs) > 0 else np.nan
+
+    data_vars = {
+        "melt_rate": melt,
+        "dzs_obs": _embed(dzs_anom, "dzs_obs"),
+        "dzs_fit": _embed(result.dzs_fit, "dzs_fit"),
+    }
+    if result.bg_field is not None:
+        data_vars["dzs_bg"] = _embed(result.bg_field, "dzs_bg")
+
+    return xr.Dataset(
+        data_vars,
+        attrs={
+            "fit_rms_resid_m": rms_resid,
+            "fit_rms_obs_m": rms_obs,
+            "fit_var_explained": var_expl,
+            "fit_n_cells": int(fit_mask.sum()),
+            "equation": ("Stubblefield 2023 forward-fit: "
+                         "min ||(I-P_B)(Forward(m)-h)||^2 + lam||m-m_prior||^2"),
+            "units": "m ice yr^-1; Shean convention: negative melt_rate = melt, positive = accretion",
+            "method": (
+                f"variational forward-operator inverse ({rep})"
+                + ("; budget-anchored null-space + in-model background"
+                   if (m_prior is not None or bg_degree is not None)
+                   else "; DC-blind channel correction")),
+            "rho_w": rho_w, "rho_i": rho_i, "eta_bar": eta_bar,
+            "H_ref_m": H_ref, "t_r_yr": t_r_yr,
+            "u0x_myr": u0x, "u0y_myr": u0y,
+            "alpha_scale": alpha_scale, "lam": lam, "iters": iters, "rep": rep,
+            "sigma_hp_H": (-1.0 if bg_degree is not None else sigma_hp_H),
+            "bg_degree": (-1 if bg_degree is None else int(bg_degree)),
+            "budget_anchored": int(m_prior is not None),
+            "n_bins": -1 if n_bins is None else int(result.n_bins_used),
+            "blend_km": -1.0 if n_bins is None else float(blend_km),
+            # aliases so this Dataset slots into run_melt's linv plot/save plumbing
+            "gamma_dimless": 0.0, "tr_yr": t_r_yr,
+            "note": (
+                (f"blended operator ({result.n_bins_used} geometry bins, "
+                 "globally applied)"
+                 if n_bins else "first-order (single H, single mean u)")
+                + ("; budget-anchored, carries level" if m_prior is not None
+                   else "; pattern diagnostic, not mass-budget melt")),
+        },
+    )

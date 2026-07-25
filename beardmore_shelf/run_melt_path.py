@@ -46,6 +46,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.melt import lagrangian_melt_rate
@@ -98,6 +99,27 @@ def load_grounded_mask(stack: xr.DataArray) -> xr.DataArray:
     return grounded
 
 
+def _render_path_figure(mr, count, floating, tag, out_png) -> None:
+    """Path melt map (LADDIE symmetric-log, negative = melt) + deposit
+    count. ``mr``/``count``/``floating`` are plain arrays; shared by the
+    solve path and ``--replot``."""
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), constrained_layout=True)
+    im = axes[0].imshow(mr, cmap=melt_cmap(), norm=melt_norm(vmax=10.0),
+                        interpolation="nearest")
+    axes[0].set_title(f"Beardmore_Shelf path melt {tag} (m ice/yr)", fontsize=10)
+    add_melt_colorbar(fig, im, ax=axes[0], shrink=0.8)
+    im2 = axes[1].imshow(np.where(floating, count, np.nan),
+                         cmap="viridis", interpolation="nearest")
+    axes[1].set_title("path deposit count", fontsize=10)
+    fig.colorbar(im2, ax=axes[1], shrink=0.8)
+    for ax in axes:
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.savefig(out_png, dpi=110)
+    plt.close(fig)
+    print(f"  wrote {out_png}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--res", type=int, default=config.RES,
@@ -105,9 +127,28 @@ def main() -> None:
     p.add_argument("--tag", type=str, default=None,
                    help="variant tag matching a `--tag` build/tilt run "
                         "(e.g. is2ctempo); carried into output names")
+    p.add_argument("--replot", action="store_true",
+                   help="skip the solve; rebuild melt_path_<tag>.png from the "
+                        "saved product with the current colormap")
     args = p.parse_args()
     tag = f"{args.res}m" + (f"_{args.tag}" if args.tag else "")
     t0 = time.time()
+
+    if args.replot:
+        out_nc = (
+            config.PROCESSED_DIR
+            / f"beardmore_shelf_melt_path_{tag}_{config.START_TIME}_{config.END_TIME}.nc"
+        )
+        if not out_nc.exists():
+            raise SystemExit(f"--replot: missing product {out_nc}")
+        print(f"Replot from: {out_nc.name}")
+        ds = xr.open_dataset(out_nc)
+        out_png = config.FIGURES_DIR / f"melt_path_{tag}.png"
+        _render_path_figure(
+            ds["melt_rate_lagrangian"].values, ds["lagrangian_count"].values,
+            np.asarray(ds["floating_mask"].values, bool), tag, out_png,
+        )
+        return
 
     print(f"Loading curated {tag} stack...")
     stack = load_stack_res(args.res, tag=args.tag)
@@ -172,21 +213,9 @@ def main() -> None:
     out.to_netcdf(out_nc, encoding=comp)
     print(f"Saved -> {out_nc}")
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), constrained_layout=True)
-    im = axes[0].imshow(mr.values, cmap="RdBu_r", vmin=-10, vmax=10,
-                        interpolation="nearest")
-    axes[0].set_title(f"Beardmore_Shelf path melt {tag} (m ice/yr)", fontsize=10)
-    fig.colorbar(im, ax=axes[0], shrink=0.8)
-    im2 = axes[1].imshow(np.where(floating.values, lagr["count"].values, np.nan),
-                         cmap="viridis", interpolation="nearest")
-    axes[1].set_title("path deposit count", fontsize=10)
-    fig.colorbar(im2, ax=axes[1], shrink=0.8)
-    for ax in axes:
-        ax.set_xticks([]); ax.set_yticks([])
     out_png = config.FIGURES_DIR / f"melt_path_{tag}.png"
-    fig.savefig(out_png, dpi=110)
-    plt.close(fig)
-    print(f"  wrote {out_png}")
+    _render_path_figure(mr.values, lagr["count"].values, floating.values,
+                        tag, out_png)
     print(f"DONE in {(time.time() - t0) / 60:.1f} min")
 
 
