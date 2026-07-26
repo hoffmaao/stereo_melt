@@ -319,6 +319,10 @@ class BlendedStubblefieldForward(torch.nn.Module):
     H_field, ux_field, uy_field : (ny, nx) arrays
         Local thickness (m) and velocity (m/yr). Non-finite cells (off-shelf) do
         not vote on the clustering and take the nearest valid weights.
+    eta_field : (ny, nx) array, optional
+        Spatially varying effective viscosity (Pa s). When given it joins the
+        clustering features and each bin's multiplier is built with its own
+        ``eta_bar`` (overriding the scalar in ``mult_kwargs``).
     n_bins :
         Number of distinct multipliers. Cost is linear in it.
     blend_px :
@@ -335,6 +339,7 @@ class BlendedStubblefieldForward(torch.nn.Module):
         ux_field: np.ndarray,
         uy_field: np.ndarray,
         *,
+        eta_field: np.ndarray | None = None,
         n_bins: int = 6,
         blend_px: float = 8.0,
         **mult_kwargs,
@@ -347,10 +352,21 @@ class BlendedStubblefieldForward(torch.nn.Module):
         uy_field = np.asarray(uy_field, dtype=float)
         valid = (np.isfinite(H_field) & np.isfinite(ux_field)
                  & np.isfinite(uy_field) & (H_field > 0))
+        cols = [H_field, ux_field, uy_field]
+        if eta_field is not None:
+            # Spatially varying effective viscosity (e.g. inferred from a
+            # momentum-balance inversion): eta joins the geometry clustering and
+            # each bin's multiplier is built with its own eta_bar, overriding
+            # the scalar from mult_kwargs. Soft shear margins and stiff trunk
+            # ice then get different bridging responses.
+            eta_field = np.asarray(eta_field, dtype=float)
+            valid &= np.isfinite(eta_field) & (eta_field > 0)
+            cols.append(eta_field)
         if not valid.any():
-            raise ValueError("no finite (H, ux, uy) cells for the blended operator")
+            raise ValueError("no finite (H, ux, uy[, eta]) cells for the "
+                             "blended operator")
 
-        feats = np.stack([H_field[valid], ux_field[valid], uy_field[valid]], axis=1)
+        feats = np.stack([c[valid] for c in cols], axis=1)
         n_bins = max(1, min(int(n_bins), len(np.unique(feats, axis=0))))
         if n_bins == 1:
             lab_v = np.zeros(len(feats), dtype=int)
@@ -360,10 +376,15 @@ class BlendedStubblefieldForward(torch.nn.Module):
         self.n_bins = n_bins
         self.bin_geometry = [tuple(float(c) for c in row) for row in cent]
 
+        def _bin_kwargs(row):
+            if eta_field is None:
+                return mult_kwargs
+            return {**mult_kwargs, "eta_bar": row[3]}
+
         mults = [stubblefield_forward_multiplier(
-                     2 * self.ny, 2 * self.nx, dx, dy, H_b, ux_b, uy_b,
-                     **mult_kwargs)
-                 for H_b, ux_b, uy_b in self.bin_geometry]
+                     2 * self.ny, 2 * self.nx, dx, dy, row[0], row[1], row[2],
+                     **_bin_kwargs(row))
+                 for row in self.bin_geometry]
         self.register_buffer(
             "M", torch.from_numpy(np.ascontiguousarray(np.stack(mults))))
 
@@ -469,6 +490,7 @@ def variational_melt_inverse(
     H_field: np.ndarray | None = None,
     ux_field: np.ndarray | None = None,
     uy_field: np.ndarray | None = None,
+    eta_field: np.ndarray | None = None,
     n_bins: int | None = None,
     blend_px: float = 8.0,
     m_prior: np.ndarray | None = None,
@@ -504,6 +526,12 @@ def variational_melt_inverse(
     log_every :
         If > 0, print the data/reg terms every ``log_every`` iterations (heavy
         fits run under ``nohup``; the log is the only visibility).
+    eta_field : (ny, nx) array, optional
+        Spatially varying effective (Newtonian-equivalent) viscosity, Pa s —
+        e.g. a momentum-balance inversion linearized about the observed strain
+        rate. Joins the geometry clustering, and each bin's multiplier is built
+        with its own ``eta_bar`` (the scalar ``eta_bar`` is then only a
+        fallback for cells outside the field). Requires ``n_bins``.
     H_field, ux_field, uy_field, n_bins, blend_px :
         Set ``n_bins`` to use the spatially varying
         :class:`BlendedStubblefieldForward` instead of the single-``(H, u)``
@@ -574,6 +602,8 @@ def variational_melt_inverse(
     mult_kw = dict(eta_bar=eta_bar, alpha_scale=alpha_scale,
                    rho_i=rho_i, rho_w=rho_w, g=g)
     if n_bins is None:
+        if eta_field is not None:
+            raise ValueError("eta_field requires n_bins (the blended operator)")
         M_h = stubblefield_forward_multiplier(
             2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr, **mult_kw)
         fwd = StubblefieldForward(M_h, ny, nx)
@@ -582,15 +612,19 @@ def variational_melt_inverse(
             return np.full((ny, nx), float(v)) if a is None else np.asarray(a)
         fwd = BlendedStubblefieldForward(
             ny, nx, dx, dy, _fld(H_field, H), _fld(ux_field, ux_myr),
-            _fld(uy_field, uy_myr), n_bins=int(n_bins), blend_px=blend_px,
-            **mult_kw)
+            _fld(uy_field, uy_myr), eta_field=eta_field,
+            n_bins=int(n_bins), blend_px=blend_px, **mult_kw)
         if log_every:
             gh = np.array([g[0] for g in fwd.bin_geometry])
             gu = np.hypot([g[1] for g in fwd.bin_geometry],
                           [g[2] for g in fwd.bin_geometry])
+            eta_note = ""
+            if len(fwd.bin_geometry[0]) > 3:
+                ge = np.array([g[3] for g in fwd.bin_geometry])
+                eta_note = f"  eta {ge.min():.2e}-{ge.max():.2e} Pa s"
             print(f"    blended operator: {fwd.n_bins} geometry bins  "
                   f"H {gh.min():.0f}-{gh.max():.0f} m  "
-                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr", flush=True)
+                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr{eta_note}", flush=True)
     rep_net = (GridMelt(ny, nx) if rep == "grid"
                else SirenMelt(ny, nx, **(siren_kwargs or {})))
 
@@ -758,6 +792,7 @@ def variational_melt_rate(
     log_every: int = 0,
     n_bins: int | None = None,
     blend_km: float = 4.0,
+    eta_field: xr.DataArray | None = None,
     m_prior: xr.DataArray | None = None,
     anchor_lp_sigma_H: float | None = None,
     anchor_short_lambda_H: float | None = 2.5,
@@ -803,6 +838,15 @@ def variational_melt_rate(
         Passed through to :func:`variational_melt_inverse` (see there and the
         module docstring; ``eta_bar``/``alpha_scale`` are per-geometry study
         parameters, not constants).
+    eta_field : xarray.DataArray, optional
+        Spatially varying effective (Newtonian-equivalent) viscosity on the
+        stack grid, Pa s — e.g. an icepack/momentum-balance inversion
+        linearized about the observed strain rate,
+        :math:`\bar\eta = \tfrac12 A^{-1/n}\,\dot\varepsilon_e^{(1-n)/n}`.
+        Joins the geometry clustering of the blended operator so soft shear
+        margins and stiff trunk ice get different bridging responses; the
+        scalar ``eta_bar`` remains the study-parameter fallback. Requires
+        ``n_bins``.
     m_prior : xarray.DataArray, optional
         Budget/level melt field (Shean sign, negative = melt) on the stack grid.
         Anchors the fit's null-space (mean + global ramp, which the DC-blind
@@ -914,19 +958,23 @@ def variational_melt_rate(
     # Local geometry for the blended operator: thickness and velocity on the same
     # crop, masked off the shelf so the geometry clustering is not pulled by open
     # ocean or grounded ice.
-    H_crop = ux_crop = uy_crop = None
+    H_crop = ux_crop = uy_crop = eta_crop = None
     if n_bins is not None:
         H_full = freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values
         H_crop = np.where(fl_crop, H_full[y0:y1, x0:x1], np.nan)
         ux_crop = np.where(fl_crop, vxm.values[y0:y1, x0:x1], np.nan)
         uy_crop = np.where(fl_crop, vym.values[y0:y1, x0:x1], np.nan)
+        if eta_field is not None:
+            eta_crop = np.where(
+                fl_crop, np.asarray(eta_field.values)[y0:y1, x0:x1], np.nan)
 
     result = variational_melt_inverse(
         dzs, fit_mask, res, res, H_ref, u0x, u0y,
         rep=rep, eta_bar=eta_bar, alpha_scale=alpha_scale, lam=lam,
         iters=iters, lr=lr, rho_i=rho_i, rho_w=rho_w, g=g,
         siren_kwargs=siren_kwargs, log_every=log_every,
-        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop, n_bins=n_bins,
+        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop,
+        eta_field=eta_crop, n_bins=n_bins,
         blend_px=blend_km * 1000.0 / res,
         m_prior=m_prior_crop,
         anchor_lp_sigma_px=(None if anchor_lp_sigma_H is None
@@ -1013,6 +1061,7 @@ def variational_melt_rate(
                 else float(anchor_short_lambda_H)),
             "n_bins": -1 if n_bins is None else int(result.n_bins_used),
             "blend_km": -1.0 if n_bins is None else float(blend_km),
+            "eta_field": int(eta_field is not None),
             # aliases so this Dataset slots into run_melt's linv plot/save plumbing
             "gamma_dimless": 0.0, "tr_yr": t_r_yr,
             "note": (
