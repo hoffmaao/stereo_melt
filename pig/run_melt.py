@@ -839,6 +839,20 @@ def main(
         from stereo_melt.dynamics.stubblefield_forward import variational_melt_rate
 
         print("Running variational forward-fit inverse (4th solver; narrates)...")
+        # PIG_VAR_BG_DEGREE selects HOW the reference state is removed, which is
+        # a choice about the INPUT, independent of the forward fit itself:
+        #   unset (default) -> legacy Gaussian high-pass of the input at
+        #                      sigma_hp_H (a band CUT: melt beyond ~13 km at
+        #                      PIG's H is deleted from the target and cannot be
+        #                      recovered).
+        #   0/1/2           -> feed the RAW surface and fit a polynomial
+        #                      background inside the model, projected out of the
+        #                      residual each step. No wavelength band is
+        #                      discarded; sigma_hp_H is then ignored.
+        # The operator stays DC-blind either way (that is a property of T(k),
+        # not of the filter), but with bg_degree the unconstrained long
+        # wavelengths are left to the background/prior instead of deleted.
+        _bg = os.environ.get("PIG_VAR_BG_DEGREE", "").strip()
         varfit = variational_melt_rate(
             stack, vx, vy, floating_mask=floating, d=firn,
             rep=os.environ.get("PIG_VAR_REP", "grid"),
@@ -848,6 +862,7 @@ def main(
             iters=int(os.environ.get("PIG_VAR_ITERS", "4000")),
             lr=float(os.environ.get("PIG_VAR_LR", "3e-3")),
             sigma_hp_H=float(os.environ.get("PIG_VAR_SIGMA_HP_H", "5.0")),
+            bg_degree=int(_bg) if _bg else None,
             log_every=int(os.environ.get("PIG_VAR_LOG_EVERY", "250")),
             # PIG spans ~300-4000 m/yr, so a single mean u is wrong nearly
             # everywhere; cluster the shelf into geometry bins instead. Tiling
