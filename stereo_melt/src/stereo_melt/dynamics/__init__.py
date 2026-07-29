@@ -6,6 +6,10 @@ from .bridging_restoration import (
     bridging_restoration,
     bridging_restoration_filter,
 )
+from .budget_bridging import (
+    budget_bridging_melt_rate,
+    normalized_bridging_multiplier,
+)
 from .budget_linear_inverse import (
     linear_inverse_budget_melt_rate,
     linear_inverse_eulerian_budget_melt_rate,
@@ -48,6 +52,8 @@ __all__ = [
     "bridging_inverse_filter",
     "bridging_restoration",
     "bridging_restoration_filter",
+    "budget_bridging_melt_rate",
+    "normalized_bridging_multiplier",
     "PerturbationForwardOp",
     "PerturbationForwardOpDCT",
     "cg_invert",
