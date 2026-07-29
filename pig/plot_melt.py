@@ -21,6 +21,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
+
 RESULTS = Path("/wd2/projects/stereo_melt/pig/results")
 FIG = Path("/wd2/projects/stereo_melt/pig/figures")
 EUL, LAG = "melt_rate_eulerian", "melt_rate_lagrangian"
@@ -72,9 +74,9 @@ def plot_single(tag, res, start, end, clim):
     fig, ax = plt.subplots(1, 3, figsize=(19, 6), constrained_layout=True)
 
     for a, var, name in [(ax[0], EUL, "Eulerian"), (ax[1], LAG, "Lagrangian")]:
-        im = _imshow(a, ds[var], cmap="RdBu_r", vmin=-clim, vmax=clim)
+        im = _imshow(a, ds[var], cmap=melt_cmap(), norm=melt_norm(vmax=clim))
         a.set_title(_lbl(name, ds[var]))
-        fig.colorbar(im, ax=a, fraction=0.046, label="melt (m ice/yr, neg=melt)")
+        add_melt_colorbar(fig, im, ax=a, fraction=0.046)
         a.set_xlabel("x (m)")
     ax[0].set_ylabel("y (m)")
     _crop(ax[:2], ds[EUL])
@@ -101,9 +103,10 @@ def plot_ab(base, new, res, start, end, clim, dclim):
 
     for r, (var, name) in enumerate([(EUL, "Eulerian"), (LAG, "Lagrangian")]):
         for c, (ds, tag) in enumerate([(dsA, base), (dsB, new)]):
-            im = _imshow(ax[r, c], ds[var], cmap="RdBu_r", vmin=-clim, vmax=clim)
+            im = _imshow(ax[r, c], ds[var], cmap=melt_cmap(),
+                         norm=melt_norm(vmax=clim))
             ax[r, c].set_title(_lbl(f"{name} — {tag}", ds[var]))
-            fig.colorbar(im, ax=ax[r, c], fraction=0.046)
+            add_melt_colorbar(fig, im, ax=ax[r, c], fraction=0.046)
         diff = dsB[var] - dsA[var]
         im = _imshow(ax[r, 2], diff, cmap="PuOr", vmin=-dclim, vmax=dclim)
         ax[r, 2].set_title(f"{name}  Δ ({new} − {base})")

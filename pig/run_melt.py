@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.smb import smb_over_window
@@ -362,7 +363,10 @@ def load_smb_on_grid(stack: xr.DataArray) -> xr.DataArray:
 # ----------------------------------------------------------------------
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     im = ax.imshow(
         da.values,
         extent=[
@@ -373,9 +377,8 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
         aspect="equal",
+        **kw,
     )
     return im
 
@@ -424,18 +427,26 @@ def plot_melt_comparison(
     """QC: side-by-side Eulerian vs Lagrangian vs linear-inverse melt."""
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
 
-    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
-    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
-    fig.colorbar(im0, ax=axes[0, 0], fraction=0.045)
+    # Melt panels share the LADDIE symmetric-log scale (black at zero, log
+    # decades outward): a linear +/-60 stretch buries everything below ~5 m/yr
+    # in the white middle, which on PIG is most of the shelf. Difference and
+    # flux-divergence panels below stay linear -- they are not melt rates and
+    # the negative=melt palette would misread on them.
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
 
-    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap=mcmap, norm=mnorm)
+    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
+    add_melt_colorbar(fig, im0, ax=axes[0, 0], fraction=0.045)
+
+    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=mcmap, norm=mnorm)
     axes[0, 1].set_title("Lagrangian melt_rate (m ice/yr)")
-    fig.colorbar(im1, ax=axes[0, 1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
     if linv is not None:
-        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap=mcmap, norm=mnorm)
         axes[0, 2].set_title("Stubblefield non-hydrostatic inverse")
-        fig.colorbar(im2, ax=axes[0, 2], fraction=0.045)
+        add_melt_colorbar(fig, im2, ax=axes[0, 2], fraction=0.045)
     else:
         axes[0, 2].set_visible(False)
 
@@ -995,12 +1006,13 @@ def main(
         parcel_png = config.FIGURES_DIR / f"melt_parcel_lsq{out_suffix}{win_tag}.png"
         pfloat = parcel.melt_rate.where(floating)
         fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
-        im = _imshow_xr(axes[0, 0], pfloat, cmap="RdBu_r", vmin=-60, vmax=60)
+        pcmap, pnorm = melt_cmap(), melt_norm(vmax=60.0)
+        im = _imshow_xr(axes[0, 0], pfloat, cmap=pcmap, norm=pnorm)
         axes[0, 0].set_title("parcel-LSQ melt_rate (m ice/yr)")
-        fig.colorbar(im, ax=axes[0, 0], fraction=0.045)
-        im = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=-60, vmax=60)
+        add_melt_colorbar(fig, im, ax=axes[0, 0], fraction=0.045)
+        im = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=pcmap, norm=pnorm)
         axes[0, 1].set_title("endpoint-pair Lagrangian (reference)")
-        fig.colorbar(im, ax=axes[0, 1], fraction=0.045)
+        add_melt_colorbar(fig, im, ax=axes[0, 1], fraction=0.045)
         im = _imshow_xr(axes[0, 2], pfloat - lagr.melt_rate, cmap="PuOr", vmin=-10, vmax=10)
         axes[0, 2].set_title("parcel − pair (m ice/yr)")
         fig.colorbar(im, ax=axes[0, 2], fraction=0.045)

@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.backend import backend as _BACKEND
 from stereo_melt.dynamics import lagrangian_frame_stack
 from stereo_melt.dynamics.pseudospectral_lagrangian_stationary import (
@@ -245,14 +246,15 @@ def main(res_override: float | None = None) -> None:
 
     fig, axes = plt.subplots(1, len(panels), figsize=(len(panels) * 4.4, 6.5), constrained_layout=True)
     for col, (title, da, clim) in enumerate(panels):
-        im = _imshow_xr(axes[col], da, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im = _imshow_xr(axes[col], da, cmap=melt_cmap(),
+                        norm=melt_norm(vmax=max(abs(clim[0]), abs(clim[1]))))
         axes[col].set_title(
             f"{title}\nmedian={float(da.median()):+.2f}  "
             f"IQR=[{float(da.quantile(0.25)):+.2f}, {float(da.quantile(0.75)):+.2f}]  "
             f"abs_max={float(np.abs(da).max()):.0f}",
             fontsize=10,
         )
-        fig.colorbar(im, ax=axes[col], fraction=0.045)
+        add_melt_colorbar(fig, im, ax=axes[col], fraction=0.045)
         axes[col].set_xlabel("x (m)")
     axes[0].set_ylabel("y (m)")
     fig.suptitle(

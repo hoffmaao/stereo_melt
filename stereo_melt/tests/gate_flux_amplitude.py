@@ -55,6 +55,7 @@ from gate_match_lagrangian import (  # noqa: E402
     budget_exact_stack, build_epochs, nan_gauss, scorr,
 )
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.constants import rhoi, rhow  # noqa: E402
 from stereo_melt.dynamics import linear_inverse_budget_melt_rate  # noqa: E402
 from stereo_melt.melt import eulerian_melt_rate, lagrangian_melt_rate  # noqa: E402
@@ -270,10 +271,11 @@ def main():
 
     fig, axes = plt.subplots(1, 4, figsize=(19, 4.2), constrained_layout=True)
     for ax, (name, v) in zip(axes, keep_maps.items()):
-        im = ax.imshow(v, cmap="RdBu_r", vmin=-50, vmax=50, interpolation="nearest")
+        im = ax.imshow(v, cmap=melt_cmap(), norm=melt_norm(vmax=50.0),
+                       interpolation="nearest")
         ax.set_title(f"{name} (G4: +3 blunder strips)", fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
-        fig.colorbar(im, ax=ax, shrink=0.75)
+        add_melt_colorbar(fig, im, ax=ax, shrink=0.75)
     out = OUT_DIR / "gate_flux_amplitude_G4.png"
     fig.savefig(out, dpi=110)
     print(f"\nwrote {out}")
