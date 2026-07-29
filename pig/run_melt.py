@@ -272,6 +272,52 @@ def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArr
     return vx, vy, source
 
 
+def apply_min_extent(
+    floating: xr.DataArray,
+    mask_suffix: str = "_250m_is2ctempo",
+    file_start: str | None = None,
+    file_end: str | None = None,
+) -> xr.DataArray:
+    """Intersect a static floating mask with the window-minimum shelf extent.
+
+    Window-minimum shelf extent (calving-aware): built by
+    pig.build_min_extent_mask from Greene 2022 observed coastlines + the
+    stack's per-epoch ocean test. Pixels the shelf lost mid-window must not
+    enter the solvers as ice-to-ocean dh/dt cliffs. ``PIG_MIN_EXTENT=0`` opts
+    out. The cached file covers the FULL stack window, so a --start/--end
+    sub-window run gets the (conservative) full-window minimum.
+
+    Shared by run_melt's main() and the standalone solver rigs
+    (pig/scripts/fused_melt_map.py) so every product sees the same geometry --
+    a rig that skips it re-admits the calved sector, whose ice-to-ocean cliff
+    is ~28 Gt/yr of spurious melt in the budget legs and a large-scale
+    dh/dt mode the DC-blind legs cannot represent.
+    """
+    if os.environ.get("PIG_MIN_EXTENT", "1") == "0":
+        return floating
+    file_start = file_start or config.START_TIME
+    file_end = file_end or config.END_TIME
+    min_ext_nc = (
+        config.PROCESSED_DIR
+        / f"pig_min_extent{mask_suffix}_{file_start}_{file_end}.nc"
+    )
+    if not min_ext_nc.exists():
+        print(
+            f"  min-extent mask not found ({min_ext_nc.name}); "
+            "static floating mask only"
+        )
+        return floating
+    with xr.open_dataset(min_ext_nc) as _mds:
+        min_ext = _mds["min_extent_mask"].astype(bool).load()
+    _n_static = int(floating.sum())
+    floating = floating & min_ext
+    print(
+        f"  min-extent mask {min_ext_nc.name}: removed "
+        f"{_n_static - int(floating.sum())} of {_n_static} floating px"
+    )
+    return floating
+
+
 def load_floating_mask(stack: xr.DataArray) -> xr.DataArray:
     """Return a boolean floating-ice mask on the stack grid.
 
@@ -525,6 +571,9 @@ def main(
     if tag:
         stack_prefix += f"_{tag}"
         out_suffix += f"_{tag}"
+    # The min-extent mask file is named by res/tag only (no MELT_OUT_SUFFIX):
+    # every output variant of the same stack shares one geometry.
+    mask_suffix = out_suffix
     # MELT_OUT_SUFFIX appends to the OUTPUT name only (not the stack loaded), so a
     # variant run (e.g. fused velocity on the same is2ctempo stack) writes beside
     # the baseline instead of overwriting it -- enables a clean A/B.
@@ -594,6 +643,8 @@ def main(
     floating = load_floating_mask(stack)
     frac_floating = float(floating.mean())
     print(f"  floating-ice fraction of AOI: {frac_floating:.3f}")
+
+    floating = apply_min_extent(floating, mask_suffix, file_start, file_end)
     stack = stack.where(floating)
 
     print("Loading velocity...")
