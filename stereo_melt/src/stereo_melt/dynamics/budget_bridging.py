@@ -113,11 +113,14 @@ def normalized_bridging_multiplier(
     r"""Return :math:`D(k) = M_h(k)/|M_h|_{\max}` with ``D[0, 0] = 1``.
 
     ``M_h`` is the Stubblefield steady multiplier. Dividing by its long-
-    wavelength plateau (which the modulus attains, the multiplier being
-    monotone toward small :math:`k`) strips the hydrostatic conversion and any
-    relaxation-time scale, leaving a dimensionless *relative* damping that tends
-    to unity where the shelf floats hydrostatically. The complex phase is kept:
-    it is the advective downstream lag of the surface expression.
+    wavelength plateau strips the hydrostatic conversion and any relaxation-time
+    scale, leaving a dimensionless *relative* damping that tends to unity where
+    the shelf floats hydrostatically. The complex phase is kept: it is the
+    advective downstream lag of the surface expression.
+
+    The plateau is the **signed complex** value of ``M_h`` at its modulus
+    maximum, not the modulus itself — see the inline note; using ``max|M_h|``
+    inverted the sign of every non-zero wavenumber.
 
     The ``k = 0`` bin is set to **1**, overriding the hand-zeroing in
     :mod:`.linear_perturbation` — appropriate for an anomaly operator, wrong for
@@ -129,8 +132,19 @@ def normalized_bridging_multiplier(
     M = stubblefield_forward_multiplier(
         ny, nx, dx, dy, H=H, ux_myr=ux_myr, uy_myr=uy_myr,
         eta_bar=eta_bar, alpha_scale=alpha_scale, rho_i=rho_i, rho_w=rho_w)
-    plateau = float(np.nanmax(np.abs(M)))
-    if not np.isfinite(plateau) or plateau <= 0:
+    # Normalise by the SIGNED COMPLEX plateau, not its modulus. M_h maps melt
+    # to surface elevation in the Stubblefield convention (m > 0 = melt), so
+    # its long-wavelength limit is NEGATIVE REAL (-3.66 on E2a geometry):
+    # melting thins the shelf. Dividing by max|M| discarded that minus sign
+    # and produced D = -1 at every k != 0 while D[0, 0] was hand-set to +1 --
+    # the domain mean and the rest of the spectrum in opposite signs. Taking
+    # the plateau bin's complex value instead leaves |D| untouched and sends
+    # D -> +1 in the hydrostatic limit, which is what D[0, 0] = 1 asserts.
+    flat = np.abs(M).ravel()
+    if not np.isfinite(flat).any():
+        raise ValueError("bridging multiplier is entirely non-finite")
+    plateau = M.ravel()[int(np.nanargmax(flat))]
+    if not np.isfinite(plateau) or abs(plateau) <= 0:
         raise ValueError(f"degenerate bridging multiplier (plateau={plateau})")
     D = M / plateau
     D[0, 0] = 1.0 + 0.0j
