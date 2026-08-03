@@ -30,6 +30,17 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
 
 ## Experiments (status 2026-07-13)
 
+**2026-08-03 directive: Elmer 3D is the sole truth generator going forward.**
+The Stubblefield-derived FEniCSx flowline tier (E1/E1b, `flowline/`, the
+`fenicsx` env above) is **FROZEN** — redundant with Elmer 3D for any new
+question; its results below (incl. the Glen H1 quartet) stand as the
+historical record, but author no new flowline experiments. This retires the
+flowline *simulator only*: the Stubblefield linear transfer function inside
+the inverse solvers is the operator under test, not a truth generator, and is
+unaffected. Corollary: the shipped `alpha_scale` 0.34 was measured on
+Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
+(`fit_alpha_factor.py`), not on new flowline runs.
+
 - **E1** — vendored Stubblefield FEniCSx nonlinear flowline (closed box, paper
   config λ=20H, m0=5 m/yr): `scripts/e1_run_nonlinear.py` →
   `results/e1_nonlinear_result.npz`; scored by `scripts/e1_score_vs_linear.py`
