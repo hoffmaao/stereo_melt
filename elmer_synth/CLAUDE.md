@@ -95,7 +95,11 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
   vendored (u·n) form adds ~13% fake backpressure on the front); surface
   kinematics are numpy per-column **upwind** (centered slope = FTCS =
   unconditionally unstable; front CFL needs dt=0.05 yr); Newton warm-start
-  needs `atol=1.0` (rtol alone stalls at the LU roundoff floor).
+  needs `atol=1.0` (rtol alone stalls at the LU roundoff floor). For n>1
+  (Glen), warm-started full Newton falls into a period-2 residual limit
+  cycle after the first mesh move — `stokes_solve` defaults to relaxation
+  0.5 for `rm2 != 0` (~30 iters/step; env `E1B_NEWTON_RELAX`), full Newton
+  stays the n=1 default (linear ⇒ exact in one iteration).
 - First-order upwind ⇒ numerical diffusion κ≈u·dx/2 (Pe≈55 at the anomaly):
   quasi-steady profiles shift ~2%, transients smear — fine for M6/M8, revisit
   for M1 short-λ work.
