@@ -60,8 +60,30 @@ NPZ = f"{REPO}/pig/processed/pig_eta_inv_inputs.npz"
 MSH = f"{REPO}/pig/processed/pig_shelf_dual.msh"
 OUT = f"{REPO}/pig/processed/pig_eta_field_250m_dual.npz"
 FIG = f"{REPO}/pig/figures/pig_eta_inversion_dual_qc.png"
-T0_K = 258.0
+T0_JSON = f"{REPO}/pig/processed/pig_eta_prior_T0.json"
+T0_FALLBACK = 258.0       # the pre-2026-07-30 hardcoded value, no provenance
 M_E_MIN = 1.0e-3          # MPa; membrane-stress floor for the eta map
+
+
+def prior_temperature(override=None):
+    """Constant prior temperature T0 for A0 = rate_factor(T0).
+
+    The prior is deliberately CONSTANT (2026-07-30 directive): PIG's interior
+    carries no observational constraint that would justify a spatially varying
+    thermal prior, so every spatial structure in the recovered fluidity is
+    paid for by the velocity data rather than inherited from a model. Its
+    value is the window- and area-mean ERA5 2 m temperature over the inverted
+    domain, written by ``pig/scripts/era5_t2m_prior.py``.
+    """
+    if override is not None:
+        return float(override), "--T0 override"
+    if os.path.exists(T0_JSON):
+        with open(T0_JSON) as f:
+            rec = json.load(f)
+        return float(rec["T0_K"]), (
+            f"{rec['source']} over {rec['t0']}..{rec['t1']} "
+            f"({rec['n_months']} months, spread {rec['spatial_spread_K']:.2f} K)")
+    return T0_FALLBACK, "FALLBACK (run era5_t2m_prior.py for provenance)"
 
 
 def build_mesh(polys, vclasses, lc, msh_path):
@@ -133,6 +155,10 @@ def main() -> int:
                     help="|theta| box bound for L-BFGS-B; <=0 = unbounded "
                          "(default — the Whittle-Matern prior is the "
                          "regularizer, 2026-07-27 directive)")
+    ap.add_argument("--T0", type=float, default=None,
+                    help="constant prior temperature K for A0 = "
+                         "rate_factor(T0); default = the ERA5 window/area "
+                         "mean in pig_eta_prior_T0.json")
     ap.add_argument("--theta0-npz", default=None,
                     help="warm-start theta from a previous output npz "
                          "(theta on the input grid)")
@@ -175,8 +201,11 @@ def main() -> int:
           f"{h.dat.data_ro.max():.0f}] m  area {area / 1e6:.0f} km^2",
           flush=True)
 
+    T0_K, T0_src = prior_temperature(args.T0)
     A0 = float(icepack.rate_factor(Constant(T0_K)))
-    print(f"[prior] A0 = rate_factor({T0_K:.0f} K) = {A0:.4e} MPa^-3 yr^-1",
+    print(f"[prior] T0 = {T0_K:.2f} K ({T0_K - 273.15:+.2f} C) <- {T0_src}",
+          flush=True)
+    print(f"[prior] A0 = rate_factor(T0) = {A0:.4e} MPa^-3 yr^-1 (constant)",
           flush=True)
 
     # PIG-density shelf balance (icepack2's uses module constants 917/1024)
@@ -369,6 +398,7 @@ def main() -> int:
     # summary.json — the L-curve reader's input (one per sweep point)
     summary = {
         "gamma": float(args.gamma), "sigma_u": float(args.sigma_u),
+        "T0_K": float(T0_K), "T0_src": T0_src, "A0": float(A0),
         "L_reg": float(L_REG), "bound": float(args.bound),
         "J_total": float(best["J"]), "J_misfit": J_misfit, "J_reg": J_reg,
         "seminorm": seminorm,
