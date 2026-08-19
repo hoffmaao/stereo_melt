@@ -41,6 +41,7 @@ literature/
 # ---------------------------------------------------------------------------
 figures/
 */figures/
+*/figures.zip             # bundled figure exports; regenerable, and 100 MB+
 scripts/deletable_strips.txt
 scripts.tar.gz
 
