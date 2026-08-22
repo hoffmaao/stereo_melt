@@ -7,6 +7,7 @@ from .bridging_restoration import (
     bridging_restoration_filter,
 )
 from .budget_bridging import (
+    bridging_transfer_multiplier,
     budget_bridging_melt_rate,
     normalized_bridging_multiplier,
 )
@@ -52,6 +53,7 @@ __all__ = [
     "bridging_inverse_filter",
     "bridging_restoration",
     "bridging_restoration_filter",
+    "bridging_transfer_multiplier",
     "budget_bridging_melt_rate",
     "normalized_bridging_multiplier",
     "PerturbationForwardOp",

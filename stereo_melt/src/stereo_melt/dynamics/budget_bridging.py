@@ -12,32 +12,60 @@ viscous stresses bridge across it — but it was only ever applied to a
 high-passed *anomaly*, which made it DC-blind and forced a fusion step to glue
 the two answers back together in wavenumber bands.
 
-They are not rivals. Measured on the PIG production geometry, the Stubblefield
-multiplier ``|M_h(k)|`` is **flat** for every wavelength above ~10 km (0.2947 at
-20 km, 0.2966 at 40 km, 0.2972 at 170 km) and rolls off only at short scales
-(0.104 at 3H = 1.4 km). That plateau *is* the hydrostatic response, and the only
-degenerate mode is the exact ``k = 0`` bin, which
-:mod:`~stereo_melt.dynamics.linear_perturbation` zeroes by hand so that
-perturbations carry no DC offset. So the transfer factorises as
+They are not rivals, and the seam between them is the **observation operator**,
+not a dynamical one.
 
-.. math:: T(k) = (\text{hydrostatic}) \times D(k), \qquad D(k\to 0) = 1
+What the DEM stack actually measures
+------------------------------------
+A DEM gives surface elevation :math:`z_s`; every hydrostatic inverse turns that
+into thickness by dividing by the freeboard factor
+:math:`f_b = 1 - \rho_i/\rho_w`. Full-Stokes ice does not float pointwise, so
+the thickness we *infer* is not the thickness the shelf *has*:
 
-and :math:`D` — the *normalised* multiplier — is a pure correction to
-hydrostatics. That is the seam this module exploits.
+.. math::
+    \hat H_f(\mathbf k) \;=\; \frac{\hat z_s}{f_b}
+      \;=\; T(\mathbf k)\,\hat H_{\rm true}(\mathbf k),
+    \qquad
+    T \;=\; \frac{G_h}{f_b\,(G_h - G_s)}
+      \;=\; \frac{(1+\delta)B}{\delta B + R + q},
+
+with :math:`G_h, G_s` the steady Stubblefield surface/basal Green's functions.
+:math:`T` is the **flotation departure**: the surface response divided by the
+hydrostatic response to the same thickness change. It is 1 wherever the shelf
+floats freely and falls below 1 where bridging stresses hold the surface up over
+a thin spot — 0.375 / 0.703 / 0.863 at :math:`\lambda = 2H / 3H / 4H`
+(:math:`\alpha = 0`, the Stubblefield headline: 62% / 30% damping). With
+:math:`\alpha = 0` it depends on **nothing but** :math:`\lambda/H` and the
+density ratio: no viscosity, no velocity, no calibration. That closed form is
+gated in ``tests/gate_budget_bridging_identity.py`` (rung G4).
 
 The forward model
 -----------------
-Thickness responds to the mass budget,
+True thickness obeys the mass budget exactly (Shean sign: negative
+:math:`\dot m` = melt),
 
-.. math:: S = \dot m + \dot a - \nabla\!\cdot(H_f u)
+.. math:: \partial H_{\rm true}/\partial t = \dot m + \dot a
+          - \nabla\!\cdot(H_{\rm true} u),
 
-(Shean sign: negative :math:`\dot m` = melt), and the thickness we *observe* —
-by hydrostatic inversion of the DEM stack — is the bridged version of it:
+and :math:`T` is a fixed spatial multiplier, so applying it to the whole
+equation and using :math:`T\{\nabla\!\cdot(H_{\rm true} u)\}
+= \nabla\!\cdot(T\{H_{\rm true}\}\,u) = \nabla\!\cdot(H_f u)` — exact for uniform
+:math:`u`, because :math:`\nabla\!\cdot(\cdot\,u)` is itself the Fourier
+multiplier :math:`i\mathbf k\!\cdot\!u` and multipliers commute — gives
 
-.. math:: \left(\partial H_f/\partial t\right)_{\rm obs} = D\{S\}.
+.. math::
+    \left(\partial H_f/\partial t\right)_{\rm obs}
+        = T\{\dot m + \dot a\} - \nabla\!\cdot(H_f u).
 
-Everything is in **thickness space**, so no hydrostatic factor appears; it has
-already been divided out of :math:`D`.
+**The flux divergence sits outside the operator**, and it is built from the
+*observed* mean thickness, which is already the bridged field. Putting it inside
+(as this module did before 2026-08-20) filters it a second time and double-counts
+the advection — the failure mode :mod:`.stubblefield_forward` warns about for the
+post-hoc deconvolution route. In the steady limit it is worse than a bias: with
+the flux inside, the fit reduces to :math:`D\{\dot m + \dot a - \nabla\!\cdot
+(H_f u)\} = 0`, which for any invertible :math:`D` is the *hydrostatic* answer,
+so the bridging correction silently vanishes exactly where the shelf is best
+observed.
 
 Why the 513-epoch timeseries costs nothing
 ------------------------------------------
@@ -61,7 +89,7 @@ The objective is therefore
 
 .. math::
     L(\dot m) = \sum_x S_{tt}(x)\,
-        \bigl( D\{\dot m + \dot a - \nabla\!\cdot(H_f u)\}(x)
+        \bigl( T\{\dot m + \dot a\}(x) - \nabla\!\cdot(H_f u)(x)
                - \widehat{\partial_t H_f}(x) \bigr)^2
         + \lambda \lVert \nabla \dot m \rVert^2 .
 
@@ -69,18 +97,26 @@ Consequences worth stating
 --------------------------
 * **No high-pass, no anomaly, no prior, no fusion.** The reference state never
   enters: a free per-pixel intercept was profiled out analytically.
-* **The mean is identified.** :math:`D(0)` is set to **1** here (not 0 as in the
-  anomaly operator) because at :math:`k\to0` there is no damping; the melt's
-  spatial mean is then fixed by the budget exactly as in the Eulerian solver.
+* **The mean is identified.** :math:`T(0) = 1` *analytically* (the :math:`k\to0`
+  limits :math:`G_h \to -2`, :math:`G_s \to 2/\delta` give
+  :math:`\delta/(f_b(\delta+1)) = 1`), so the melt's spatial mean is fixed by
+  the budget exactly as in the Eulerian solver — no plateau hunt, no hand-pinned
+  DC bin.
 * **``bridging=False`` reproduces the Eulerian solver exactly.** With
-  :math:`D = I` the minimiser is pixelwise
+  :math:`T = I` the minimiser is pixelwise
   :math:`\dot m = \widehat{\partial_t H_f} + \nabla\!\cdot(H_f u) - \dot a`,
   which is Shean Eq. 10 — for any positive weights. Gate:
   ``tests/gate_budget_bridging_identity.py``.
-* **The ill-conditioning is at SHORT wavelengths**, where :math:`|D|` falls to
-  ~1.4% by :math:`\lambda = 600` m, so :math:`D^{-1}` amplifies ~70x. That is
-  what ``lam`` regularises, and it is the honest location of the difficulty —
+* **The ill-conditioning is at SHORT wavelengths**, where :math:`|T|` falls to
+  3% by :math:`\lambda = H`, so :math:`T^{-1}` amplifies ~30x. That is what
+  ``lam``/``ridge`` regularise, and it is the honest location of the difficulty —
   the long-wavelength band the legacy high-pass removed was never the problem.
+* **What this operator does NOT model.** :math:`T` is a filter of *thickness*.
+  The E2a Elmer twin also carries a flotation departure proportional to the melt
+  *rate* itself (roughly 0.5 m per m/yr, wavelength-independent), which no
+  thickness filter can represent; in a budget inverse it appears as a
+  :math:`u\!\cdot\!\nabla\dot m` dipole and is the known across-flow-channel
+  failure. See ``elmer_synth/scripts/score_bridging_operator.py``.
 """
 from __future__ import annotations
 
@@ -93,7 +129,61 @@ from ..kinematics import dh_dt, flux_divergence
 
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
-__all__ = ["budget_bridging_melt_rate", "normalized_bridging_multiplier"]
+__all__ = ["budget_bridging_melt_rate", "bridging_transfer_multiplier",
+           "normalized_bridging_multiplier"]
+
+
+def bridging_transfer_multiplier(
+    ny: int,
+    nx: int,
+    dx: float,
+    dy: float,
+    H: float,
+    ux_myr: float,
+    uy_myr: float,
+    *,
+    eta_bar: float = 1e14,
+    alpha_scale: float = 0.34,
+    rho_i: float = rhoi,
+    rho_w: float = rhow,
+    gamma: float = 0.0,
+    theta: float = 1e-14,
+) -> np.ndarray:
+    r"""Return the flotation departure :math:`T(k) = G_h/(f_b (G_h - G_s))`.
+
+    The map from **true** thickness to the thickness a hydrostatic inversion of
+    the DEM infers, on the ``(ny, nx)`` FFT wavenumber grid (pass the *padded*
+    shape when the field is mirror-doubled before transforming). Identical
+    object to :func:`~stereo_melt.dynamics.bridging_restoration._bridging_transfer`
+    — one transfer, shared by the spectral post-filter, the Wiener inverse and
+    this monolithic fit, so they cannot drift apart.
+
+    ``T[0, 0]`` is set to **1**, which is the analytic limit rather than a
+    convention: :math:`G_h \to -2` and :math:`G_s \to 2/\delta` as
+    :math:`k \to 0`, so :math:`T \to \delta/(f_b(\delta+1)) = 1` exactly. The
+    :math:`k=0` bin only needs setting because
+    :meth:`~stereo_melt.dynamics.linear_perturbation.LinearPerturbation.steady_state_kernel`
+    hard-zeros DC to keep perturbation operators mean-free.
+
+    With ``alpha_scale=0`` the result is real, isotropic and depends on nothing
+    but :math:`\lambda/H` and :math:`\rho_i/\rho_w` — no viscosity, no velocity.
+    ``alpha_scale != 0`` adds the advective term :math:`q = i\mathbf k\!\cdot\!u
+    \,t_r`, which damps and phase-shifts along-flow wavenumbers; on the E2a
+    geometry that is a <= 3% amplitude effect over the resolvable band, so the
+    choice is not load-bearing here (it is on fast, thick ice).
+    """
+    from .bridging_restoration import _bridging_transfer
+    from .linear_perturbation import G_GRAVITY
+    from ..backend import to_numpy
+
+    T, _kx, _ky, _fb, _u = _bridging_transfer(
+        ny, nx, dx, dy, H, ux_myr, uy_myr, eta_bar, alpha_scale,
+        rho_i, rho_w, G_GRAVITY, gamma, theta)
+    T = np.ascontiguousarray(to_numpy(T)).astype(np.complex128)
+    if not np.isfinite(T[1:, 1:]).any():
+        raise ValueError("bridging transfer is entirely non-finite")
+    T[0, 0] = 1.0 + 0.0j
+    return T
 
 
 def normalized_bridging_multiplier(
@@ -181,6 +271,8 @@ def budget_bridging_melt_rate(
     d: xr.DataArray | float = 0.0,
     floating_mask: xr.DataArray | None = None,
     bridging: bool = True,
+    transfer: str = "flotation",
+    flux_in_operator: bool = False,
     eta_bar: float = 1e14,
     alpha_scale: float = 0.34,
     eta_field: xr.DataArray | None = None,
@@ -209,9 +301,23 @@ def budget_bridging_melt_rate(
     floating_mask
         Cells to fit. Non-floating cells get zero weight and NaN melt.
     bridging
-        ``False`` sets :math:`D = I`, which reproduces the Eulerian solver
-        exactly and is the correctness gate. ``True`` applies the normalised
-        Stubblefield damping.
+        ``False`` sets the operator to the identity, which reproduces the
+        Eulerian solver exactly and is the correctness gate. ``True`` applies
+        the bridging transfer selected by ``transfer``.
+    transfer
+        ``"flotation"`` (default, correct) — :math:`T = G_h/(f_b(G_h - G_s))`,
+        the flotation departure, the map from true to hydrostatically-inferred
+        thickness. ``"normalized"`` — the pre-2026-08-20
+        :math:`D = M_h(k)/M_h(\\text{plateau})`, kept **only** so the operator
+        audit can score the shipped answer against the corrected one; it drops
+        :math:`G_s` and retains the advective factor that cancels in the true
+        ratio, so it over-lifts along-flow wavenumbers by up to 15x on E2a
+        geometry. Do not use it for science.
+    flux_in_operator
+        ``False`` (default, correct) puts :math:`\\nabla\\!\\cdot(H_f u)` on the
+        observation side, unfiltered, as the commutation identity requires.
+        ``True`` reproduces the pre-2026-08-20 double count, again for the A/B
+        only.
     eta_bar, alpha_scale, eta_field
         Viscosity for the bridging operator; ``eta_field`` (a map, e.g. from the
         momentum-balance inversion) overrides the scalar via its masked median.
@@ -281,17 +387,31 @@ def budget_bridging_melt_rate(
     dx = float(abs(H_f_mean.x.values[1] - H_f_mean.x.values[0]))
     dy = float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0]))
 
-    known = np.where(fit, np.nan_to_num(a_field.values) - np.nan_to_num(fd.values), 0.0)
+    a_np = np.nan_to_num(a_field.values)
+    fd_np = np.nan_to_num(fd.values)
+    # The flux divergence is built from the OBSERVED (already bridged) mean
+    # thickness, so it must not pass through the operator a second time; it goes
+    # on the observation side. `flux_in_operator=True` restores the pre-fix
+    # double count for the audit A/B only.
+    if flux_in_operator:
+        known_in = np.where(fit, a_np - fd_np, 0.0)
+        known_out = np.zeros_like(known_in)
+    else:
+        known_in = np.where(fit, a_np, 0.0)
+        known_out = np.where(fit, -fd_np, 0.0)
     obs = np.where(fit, np.nan_to_num(dHdt_obs.values), 0.0)
     wv = np.where(fit, w.values, 0.0)
     wv = wv / max(float(wv.max()), 1e-30)
 
     # ---- the operator
+    if transfer not in ("flotation", "normalized"):
+        raise ValueError(
+            f"transfer must be 'flotation' or 'normalized', got {transfer!r}")
+    H_ref = float(np.nanmedian(H_f_mean.values[fit]))
+    eb = eta_bar
     if bridging:
-        H_ref = float(np.nanmedian(H_f_mean.values[fit]))
         u0x = float(np.nanmedian(vxm.values[fit]))
         u0y = float(np.nanmedian(vym.values[fit]))
-        eb = eta_bar
         if eta_field is not None:
             ef = np.asarray(eta_field.broadcast_like(H_f_mean).values, float)
             fin = np.isfinite(ef) & fit
@@ -299,20 +419,34 @@ def budget_bridging_melt_rate(
                 eb = float(np.nanmedian(ef[fin]))
         # padded grid: the operator's downstream footprint is long, so the
         # field is mirror-doubled before transforming (as StubblefieldForward).
-        D = normalized_bridging_multiplier(
-            2 * ny, 2 * nx, dx, dy, H=H_ref, ux_myr=u0x, uy_myr=u0y,
-            eta_bar=eb, alpha_scale=alpha_scale, rho_i=rho_i, rho_w=rho_w)
+        build = (bridging_transfer_multiplier if transfer == "flotation"
+                 else normalized_bridging_multiplier)
+        D = build(2 * ny, 2 * nx, dx, dy, H=H_ref, ux_myr=u0x, uy_myr=u0y,
+                  eta_bar=eb, alpha_scale=alpha_scale, rho_i=rho_i,
+                  rho_w=rho_w)
         if log_every:
-            print(f"    bridging operator: H_ref={H_ref:.0f} m  "
-                  f"u0=({u0x:.0f}, {u0y:.0f}) m/yr  eta_bar={eb:.2e} Pa s",
+            print(f"    bridging operator [{transfer}]: H_ref={H_ref:.0f} m  "
+                  f"u0=({u0x:.0f}, {u0y:.0f}) m/yr  eta_bar={eb:.2e} Pa s  "
+                  f"alpha_scale={alpha_scale:g}  "
+                  f"flux_{'inside' if flux_in_operator else 'outside'}",
                   flush=True)
     else:
         D = None
-        H_ref = float(np.nanmedian(H_f_mean.values[fit]))
         u0x = u0y = 0.0
-        eb = eta_bar
 
-    t_known = torch.from_numpy(np.ascontiguousarray(known, dtype=np.float64))
+    # NB: there is deliberately no melt-RATE term here -- no `-tau*div(m u)`,
+    # no advective shift of the recovered melt. The E2a departure from flotation
+    # that motivated one (`eps = -f_b*tau*mdot`, tau ~ 4.9 a, 2026-08-20) is not
+    # shelf physics: it is the Elmer twin's explicit Stokes<->free-surface
+    # splitting, `eps = 0.996*M*dt`, first order in the TIMESTEP and necessary
+    # and sufficient for the whole across-flow-channel dipole (2026-08-21,
+    # `elmer_synth/scripts/diagnose_dt_splitting.py`). A real shelf has no dt.
+    # The only physical displacement of the surface expression is the advective
+    # phase already inside T(k) via `alpha`, which is sub-metre over the
+    # resolvable band. Do not re-add a fitted lag.
+
+    t_known = torch.from_numpy(np.ascontiguousarray(known_in, dtype=np.float64))
+    t_kout = torch.from_numpy(np.ascontiguousarray(known_out, dtype=np.float64))
     t_obs = torch.from_numpy(np.ascontiguousarray(obs, dtype=np.float64))
     t_w = torch.from_numpy(np.ascontiguousarray(wv, dtype=np.float64))
     t_fit = torch.from_numpy(np.ascontiguousarray(fit))
@@ -333,12 +467,12 @@ def budget_bridging_melt_rate(
     # search from nothing: this starts the optimiser inside the right basin,
     # and it makes the `bridging=False` case exact at iteration 0 (the residual
     # is identically zero there) instead of merely converging toward it.
-    m0 = np.where(fit, obs - known, 0.0)
+    m0 = np.where(fit, obs + fd_np - a_np, 0.0)
     wsum = float(t_w.sum())
 
     # --- The objective is QUADRATIC in m, so solve it as one.
     #
-    # L(m) = sum_x w (D{m+c} - obs)^2 / sum(w)  +  lam*||grad m||^2
+    # L(m) = sum_x w (T{m+a} - div(H_f u) - obs)^2 / sum(w) + lam*||grad m||^2
     #                                           +  ridge*||m||^2
     #
     # Adam was the wrong tool here: on a quadratic whose condition number is set
@@ -355,7 +489,8 @@ def budget_bridging_melt_rate(
     def _grad(vec: torch.Tensor) -> torch.Tensor:
         mv = vec.detach().clone().requires_grad_(True)
         S = torch.where(t_fit, mv + t_known, torch.zeros_like(mv))
-        resid = torch.where(t_fit, bridge(S) - t_obs, torch.zeros_like(mv))
+        resid = torch.where(t_fit, bridge(S) + t_kout - t_obs,
+                            torch.zeros_like(mv))
         loss = (t_w * resid ** 2).sum() / wsum
         if lam:
             gx = mv[:, 1:] - mv[:, :-1]
@@ -404,7 +539,7 @@ def budget_bridging_melt_rate(
 
     with torch.no_grad():
         S = torch.where(t_fit, m + t_known, torch.zeros_like(m))
-        fit_rate = bridge(S).numpy()
+        fit_rate = (bridge(S) + t_kout).numpy()
         m_out = m.numpy()
 
     melt = np.where(fit, m_out, np.nan)
@@ -428,6 +563,8 @@ def budget_bridging_melt_rate(
         attrs={
             "method": "budget+bridging monolithic fit",
             "bridging": int(bool(bridging)),
+            "transfer": transfer if bridging else "identity",
+            "flux_in_operator": int(bool(flux_in_operator)),
             "H_ref_m": H_ref,
             "u0x_myr": u0x,
             "u0y_myr": u0y,
