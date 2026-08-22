@@ -64,14 +64,51 @@ Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
   survey-realistic DEM-stack tier (`scripts/make_dem_stack.py` →
   `score_dem_stack_tilt.py` → `run_dem_stack_melt.py`, with `--sweep`
   time-series and `--solvers full` bridging modes). Findings consolidated in
-  `../literature/bridging_approximation_assessment.md`. Beware the dt
-  time-splitting artifact (surface amp ≈ 0.97·dt for along-flow-oscillating
-  forcing): requalify any short-λ axis-x surface metric with a dt pair.
-  **Why 3D:** the bridging kernel is isotropic in |k| (`linear_perturbation.py`
+  `../literature/bridging_approximation_assessment.md`.
+  **⚠ THE FLOTATION ARTIFACT (attributed 2026-08-21 — read before using any
+  E2a surface).** Every E2a run's surface carries
+  `ε = z_s − f_b H = S·M·Δt` — one timestep's worth of melt thickness, a rigid
+  upward offset over any melt anomaly, at *every* wavelength and *both*
+  orientations. It is `ElmerIceUSF::SeaSpring` (`Buoyancy.F90`:546,
+  `C = ρ_w g Δt N_s`): the spring anticipates the base moving by `u_n Δt`
+  within the step, which is exact only where `u_n = 0`, and a melting steady
+  state has `u_n N_s = −ṁ`. So it is **not** "a short-λ axis-x dt artifact" as
+  this file said before — it is everywhere, and it is inert along-flow only
+  because `u·∇ε = 0` there. A free 2-parameter fit measures it at
+  `c = 1.00 ± 0.05` and leaves `r_bridge = 1.00` at r² ≥ 0.999.
+  Consequences: **E2a measures no viscous bridging at all**, the "strongly
+  anisotropic transfer" finding is retracted, and the across-flow melt-inverse
+  error extrapolates to **zero** in both dt and the spring coefficient.
+  Diagnose/remove with `scripts/diagnose_dt_splitting.py --part {law,attrib,
+  spring,bridge}`; the spring is load-bearing for stability, so it cannot
+  simply be weakened (×0.2 and ×0 both diverge — see the run table there).
+  **✅ FIXED 2026-08-22 — `run_e2a.py --basal-melt-buoyancy` is now the
+  standing configuration for every new E2a run.** It sets Elmer's own
+  `Buoyancy Use Basal Melt` / `Bottom Surface Name`, switching `SeaPressure`
+  to `pw = −ρ_w g (Z_sl − S − a_perp·Δt·N_s)` (`Buoyancy.F90`:355). That term
+  anticipates the base moving by `a_perp Δt`, the spring anticipates `u_n Δt`,
+  and a melting steady state has `u_n N_s = −ṁ = −a_perp`, so they cancel
+  exactly — keeping the spring at ×1 (and its conditioning) while removing the
+  bias. Measured on `runs/trans_gauss_bmb`, a single-knob A/B of
+  `trans_gauss_a5`: `ε/(MΔt)` **0.996 → −0.007**, peak |ε| **2.4805 → 0.0854 m**,
+  free-fit `c_artifact` **+0.995 → −0.022**, and the across-flow melt inverse
+  **nrmse 2.155 → 0.039 at corr 0.9991 with zero shift** (monolithic 0.035;
+  perfect-H ceiling 0.022) — better than post-hoc subtraction (0.069), at
+  2.75 min/step, i.e. no cost. `trans_gauss_a5`'s "2.15 physics floor" was
+  entirely the artifact. See [[project-e2a-bmb-artifact-fix-2026-08-22]].
+  ~~**Why 3D:** the bridging kernel is isotropic in |k| (`linear_perturbation.py`
   :215) and hardcodes `alpha=0` (`budget_linear_inverse.py:588`), so it *must*
   correct across-flow and along-flow channels of equal width identically —
   3D Stokes with through-flow will not, and a 2D flowline cannot pose the
-  question. Forcing is a **zero-mean cosine at a single |k|**, not a Gaussian:
+  question.~~ *(The motivation is still sound; the 07-19 campaign did not
+  deliver it. **The isotropy test is OPEN but now answerable**: the axis-y arm
+  measured the artifact, and the axis-x arm had no signal — advection erases
+  the thickness anomaly at the forcing k to 0.17–0.23 m while the artifact was
+  2.5 m, S/N ≈ 0.09. With `--basal-melt-buoyancy` the artifact is ~0.085 m, so
+  **S/N ≈ 2.7** and both arms become measurable. The redo is the quartet
+  `cos{x,y}_L{3,4}H_bmb`, each a 20 yr restart of its 07-19 predecessor with
+  the flag on, scored by `--part bridge`.)* Forcing is a **zero-mean cosine at
+  a single |k|**, not a Gaussian:
   E1b's lambda~20H Gaussian sat on the kernel's flat k->0 floor (+3.85%), which
   `_pooled_kernel_correction` median-subtracts (`:598`) — which is why the 07-16
   score saw a ~1% correction. Probe **lambda/H ~ 3-5** (knee is lambda~2*pi*H,
