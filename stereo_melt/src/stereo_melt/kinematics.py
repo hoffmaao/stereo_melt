@@ -46,6 +46,7 @@ __all__ = [
     "clean_temporal_outliers",
     "DivergenceEstimator",
     "FiniteDifferenceDivergence",
+    "HelmholtzDivergence",
     "SECONDS_PER_YEAR",
     "backward_advect_pixels",
     "build_streamline_dataset",
@@ -266,6 +267,133 @@ class FiniteDifferenceDivergence:
         qx = H * vx
         qy = H * vy
         return qx.differentiate("x") + qy.differentiate("y")
+
+
+class HelmholtzDivergence:
+    r"""Mass-consistent flux divergence from a Helmholtz-decomposed flux fit.
+
+    The flux :math:`q = H u` is represented, on the mirror-doubled spectral
+    grid (the same construction as the bridging operator), as
+
+    .. math::
+        q = J\nabla\psi + \nabla\phi,\qquad
+        J\nabla\psi = (-\partial_y\psi,\ \partial_x\psi),
+
+    a solenoidal (divergence-free) part carrying the bulk transport and a
+    potential part carrying all of the convergence. Per wavenumber the
+    decomposition is the orthogonal projection of :math:`\hat q` onto
+    :math:`\hat k` and :math:`\hat k^\perp`, and the divergence is
+
+    .. math::
+        \nabla\!\cdot q = \nabla^2\phi \;\;\Longleftrightarrow\;\;
+        \widehat{\nabla\!\cdot q}(k) = i\,k\cdot\hat q(k)\,F_\ell(k),
+
+    i.e. the *exact* divergence of a continuous field (Gauss's theorem holds
+    on the fitted flux to round-off; the solenoidal part cannot leak into
+    melt), with the potential smoothed by a Tikhonov penalty on
+    :math:`\nabla^2\phi`, :math:`F_\ell = 1/(1 + (|k|\ell)^4)`. This is
+    the FluxNet construction (Bente et al. 2026: :math:`q = J\nabla\psi +
+    \nabla\phi` from a coordinate network, divergence by autodiff) with a
+    linear spectral representation in place of the network, so the
+    smoothness is an explicit length :math:`\ell` instead of an implicit
+    bandwidth — and :math:`\ell` is selected by closed-form GCV on the
+    longitudinal flux component :math:`\hat k\cdot\hat q`, the only part the
+    divergence sees (``ell="gcv"``, the default).
+
+    Why it helps: on a DEM stack the observation-side noise of the budget is
+    dominated by :math:`\nabla\!\cdot(\bar H u)` of the white noise in the
+    mean thickness — :math:`u\,\delta H/\Delta x \sim 800\times1/200 = 4`
+    m/yr per pixel — which finite differences pass straight through.
+
+    Parameters
+    ----------
+    ell : float or "gcv"
+        Smoothing length (m) of the potential; ``"gcv"`` picks it from
+        ``ell_grid_px`` (in pixels) by GCV. ``0`` reproduces the spectral
+        divergence of the unsmoothed flux.
+    ell_grid_px : sequence of float
+        Candidate lengths for GCV, in pixels (default 0.5 … 16, log-spaced).
+    fill_sigma_px : float
+        NaN-aware Gaussian fill scale for gaps before the transform; masked
+        cells return NaN.
+    """
+
+    def __init__(self, ell="gcv", ell_grid_px=None, fill_sigma_px: float = 2.0):
+        self.ell = ell
+        self.ell_grid_px = (np.logspace(np.log10(0.5), np.log10(16.0), 16)
+                            if ell_grid_px is None else np.asarray(ell_grid_px, float))
+        self.fill_sigma_px = float(fill_sigma_px)
+        self.last = {}   # diagnostics of the last call
+
+    @staticmethod
+    def _fill(a: np.ndarray, sigma: float) -> np.ndarray:
+        from scipy.ndimage import gaussian_filter
+        m = np.isfinite(a)
+        if m.all():
+            return a
+        a0 = np.where(m, a, 0.0)
+        num = gaussian_filter(a0, sigma)
+        den = gaussian_filter(m.astype(float), sigma)
+        filled = np.where(den > 1e-3, num / np.maximum(den, 1e-12), 0.0)
+        # far from any data: iterate a wider fill so there is no hard edge
+        far = den <= 1e-3
+        if far.any():
+            num2 = gaussian_filter(a0, 4 * sigma)
+            den2 = gaussian_filter(m.astype(float), 4 * sigma)
+            filled = np.where(far, num2 / np.maximum(den2, 1e-12), filled)
+        return np.where(m, a, filled)
+
+    def __call__(self, H: xr.DataArray, vx: xr.DataArray, vy: xr.DataArray) -> xr.DataArray:
+        qx = to_numpy((H * vx).values).astype(float)
+        qy = to_numpy((H * vy).values).astype(float)
+        valid = np.isfinite(qx) & np.isfinite(qy)
+        ny, nx = qx.shape
+        x = np.asarray(H.x.values, float)
+        y = np.asarray(H.y.values, float)
+        dx = float(abs(x[1] - x[0]))
+        dy = float(abs(y[1] - y[0]))
+        sx = np.sign(x[1] - x[0])
+        sy = np.sign(y[1] - y[0])
+        fx = self._fill(qx, self.fill_sigma_px)
+        fy = self._fill(qy, self.fill_sigma_px)
+        # mirror-double so the periodic transform sees an even, seamless field
+        px = np.concatenate([fx, fx[::-1]], 0)
+        px = np.concatenate([px, px[:, ::-1]], 1)
+        py = np.concatenate([fy, fy[::-1]], 0)
+        py = np.concatenate([py, py[:, ::-1]], 1)
+        kx = 2.0 * np.pi * np.fft.fftfreq(2 * nx, d=dx) * sx   # d/dx in COORDINATE direction
+        ky = 2.0 * np.pi * np.fft.fftfreq(2 * ny, d=dy) * sy
+        KX, KY = np.meshgrid(kx, ky)
+        K2 = KX ** 2 + KY ** 2
+        Qx, Qy = np.fft.fft2(px), np.fft.fft2(py)
+        div_hat = 1j * (KX * Qx + KY * Qy)            # exact spectral divergence
+        Kmag = np.sqrt(K2)
+        # longitudinal (potential) flux component: the scalar the divergence sees
+        with np.errstate(invalid="ignore", divide="ignore"):
+            p_hat = np.where(K2 > 0, (KX * Qx + KY * Qy) / np.where(K2 > 0, Kmag, 1.0), 0.0)
+        if self.ell == "gcv":
+            N = p_hat.size
+            best, ell_m = None, 0.0
+            gcv_curve = []
+            for ell_px in self.ell_grid_px:
+                ell = ell_px * 0.5 * (dx + dy)
+                F = 1.0 / (1.0 + (Kmag * ell) ** 4)
+                resid = float(np.sum(np.abs((1.0 - F) * p_hat) ** 2))
+                dof = float(np.sum(F)) / N
+                g = resid / max(1.0 - dof, 1e-9) ** 2
+                gcv_curve.append((ell, g))
+                if best is None or g < best:
+                    best, ell_m = g, ell
+            self.last["gcv"] = gcv_curve
+        else:
+            ell_m = float(self.ell)
+        F = 1.0 / (1.0 + (Kmag * ell_m) ** 4) if ell_m > 0 else np.ones_like(K2)
+        div = np.real(np.fft.ifft2(div_hat * F))[:ny, :nx]
+        self.last.update(ell_m=ell_m, ell_px=ell_m / (0.5 * (dx + dy)))
+        out = np.where(valid, div, np.nan)
+        return xr.DataArray(asarray(out), dims=H.dims, coords=H.coords,
+                            name="flux_divergence",
+                            attrs={"estimator": "helmholtz", "ell_m": ell_m})
 
 
 def flux_divergence(

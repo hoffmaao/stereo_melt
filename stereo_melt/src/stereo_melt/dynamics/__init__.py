@@ -5,11 +5,13 @@ from .bridging_restoration import (
     bridging_inverse_filter,
     bridging_restoration,
     bridging_restoration_filter,
+    restored_budget_melt_rate,
 )
 from .budget_bridging import (
     bridging_transfer_multiplier,
     budget_bridging_melt_rate,
     normalized_bridging_multiplier,
+    strip_mode_design,
 )
 from .budget_linear_inverse import (
     linear_inverse_budget_melt_rate,
@@ -72,8 +74,10 @@ __all__ = [
     "linear_inverse_eulerian_budget_melt_rate",
     "linear_inverse_lagrangian_melt_rate",
     "pseudospectral_eulerian_inverse",
+    "restored_budget_melt_rate",
     "pseudospectral_lagrangian_inverse",
     "stationary_pseudospectral_lagrangian_inverse",
     "steady_state",
+    "strip_mode_design",
     "variable_H_pseudospectral_lagrangian_inverse",
 ]

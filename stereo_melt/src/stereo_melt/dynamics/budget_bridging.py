@@ -130,7 +130,7 @@ from ..kinematics import dh_dt, flux_divergence
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
 __all__ = ["budget_bridging_melt_rate", "bridging_transfer_multiplier",
-           "normalized_bridging_multiplier"]
+           "normalized_bridging_multiplier", "strip_mode_design"]
 
 
 def bridging_transfer_multiplier(
@@ -241,6 +241,84 @@ def normalized_bridging_multiplier(
     return D
 
 
+def strip_mode_design(
+    stack: xr.DataArray,
+    vx: xr.DataArray,
+    vy: xr.DataArray,
+    *,
+    modes: tuple = ("offset", "tilt"),
+    min_count: int = 3,
+    rho_i: float = rhoi,
+    rho_w: float = rhow,
+    estimator=None,
+):
+    r"""Rate-space design fields of the per-strip survey errors — the
+    **coloured noise model** of the budget inverse.
+
+    Every DEM strip :math:`k` leaves a residual offset :math:`c_k` and plane
+    :math:`a_k (x - x_k) + b_k (y - y_k)` over its footprint after the tilt
+    fit. Through the per-pixel OLS slope weights
+    :math:`\omega_{ik} = (t_k - \bar t_i)/S_{tt,i}` they enter the observed
+    thickness rate, and through the mean-thickness weights :math:`1/n_i` (then
+    the flux divergence) they enter :math:`\nabla\cdot(H_f u)` — a coherent,
+    strip-shaped error with spikes at footprint edges that no white-noise
+    model describes. Per strip and component :math:`j` the field
+
+    .. math::
+        G_{kj}(x) = \frac{1}{f_b}\Bigl[\omega_k(x)\,\phi_{kj}(x)
+                    + \nabla\cdot\bigl(\tfrac{\phi_{kj}(x)}{n(x)}\,u\bigr)\Bigr]
+
+    maps a unit error of that component (freeboard units: m for the offset,
+    m m⁻¹ for the tilts) onto the observation side ``dHdt_obs + div(H_f u)``
+    (thickness rate). With these as nuisance columns the data model becomes
+    :math:`d = A m + G\theta + \varepsilon`; estimating :math:`\theta`
+    jointly with the melt under a prior :math:`\theta\sim N(0, \Sigma)` is
+    exactly the coloured covariance :math:`\sigma^2 W^{-1} + G\Sigma G^T`,
+    and conditioned on :math:`\theta` the residual is white again.
+
+    Returns ``(G, strip_index, component)``: ``G`` of shape ``(n_modes, ny,
+    nx)``, and per-mode labels (strip index into ``stack.time``, component
+    name in ``offset, tilt_x, tilt_y``). The offset modes are degenerate with
+    a uniform thickness trend through offsets linear in strip time — the
+    prior on :math:`\theta` is what anchors them (as control anchors the tilt
+    fit); ``modes=("tilt",)`` drops them.
+    """
+    fb = 1.0 - rho_i / rho_w
+    v = np.isfinite(stack.values)
+    t = ((stack.time.values - stack.time.values[0]) / np.timedelta64(1, "D")
+         / 365.25).astype(float)
+    n = v.sum(0)
+    ok = n >= min_count
+    tbar = np.where(ok, (v * t[:, None, None]).sum(0) / np.maximum(n, 1), 0.0)
+    stt = (v * (t[:, None, None] - tbar[None]) ** 2).sum(0)
+    inv_stt = np.where(ok & (stt > 0), 1.0 / np.maximum(stt, 1e-30), 0.0)
+    inv_n = np.where(ok, 1.0 / np.maximum(n, 1), 0.0)
+    x2d, y2d = np.meshgrid(stack.x.values.astype(float), stack.y.values.astype(float))
+    comps = []
+    if "offset" in modes:
+        comps.append("offset")
+    if "tilt" in modes:
+        comps += ["tilt_x", "tilt_y"]
+    G, sidx, cname = [], [], []
+    for k in range(stack.sizes["time"]):
+        F = v[k] & ok
+        if not F.any():
+            continue
+        xc, yc = float(x2d[F].mean()), float(y2d[F].mean())
+        omega = np.where(F, (t[k] - tbar) * inv_stt, 0.0)
+        for c in comps:
+            phi = (F.astype(float) if c == "offset" else
+                   F * (x2d - xc) if c == "tilt_x" else F * (y2d - yc))
+            obs_part = omega * phi
+            Herr = xr.DataArray(phi * inv_n, dims=("y", "x"),
+                                coords={"y": stack.y.values, "x": stack.x.values})
+            div_part = np.nan_to_num(flux_divergence(Herr, vx, vy, estimator=estimator).values)
+            G.append((obs_part + div_part) / fb)
+            sidx.append(k)
+            cname.append(c)
+    return np.stack(G), np.array(sidx), np.array(cname)
+
+
 def _temporal_leverage(stack: xr.DataArray) -> xr.DataArray:
     r"""Per-pixel :math:`S_{tt} = \sum_i (t_i - \bar t)^2` over finite samples.
 
@@ -276,10 +354,16 @@ def budget_bridging_melt_rate(
     eta_bar: float = 1e14,
     alpha_scale: float = 0.34,
     eta_field: xr.DataArray | None = None,
+    n_bins: int = 1,
+    blend_px: float = 8.0,
+    flux_restored: bool = False,
+    restore_kwargs: dict | None = None,
+    strip_modes: np.ndarray | None = None,
+    strip_prior: np.ndarray | float | None = None,
+    sigma2: float | str = "auto",
     lam: float = 1e-3,
     ridge: float = 0.0,
     iters: int = 300,
-    lr: float = 0.0,
     weight: str = "leverage",
     converge_tol: float = 1e-16,
     min_count: int = 3,
@@ -318,6 +402,47 @@ def budget_bridging_melt_rate(
         observation side, unfiltered, as the commutation identity requires.
         ``True`` reproduces the pre-2026-08-20 double count, again for the A/B
         only.
+    flux_restored, restore_kwargs
+        **The corrected forward model (2026-08-24, "monolithic v2").** The
+        historical model puts the flux divergence of the OBSERVED (bridged)
+        mean thickness outside the operator; but the exact relation is
+        ``dH_f/dt = T{m + a - div(H u)}`` with ``H = T^{-1}{H_f}`` INSIDE the
+        flux term — its unregularised solution is precisely the
+        restore-then-budget solver, and the historical placement is what
+        over-reads along-flow channels (lifting the velocity-carried term and
+        the transfer gradient). ``flux_restored=True`` computes the flux
+        divergence from the RESTORATION-FILTERED mean thickness (the bounded,
+        flow-projected 1/T of :func:`.bridging_restoration.bridging_restoration_filter`,
+        options via ``restore_kwargs``: ``lift_cap``, ``band_lam_min``,
+        ``lift_umax_myr`` handled by bin) and places it inside ``T`` — so the
+        fit shares restore-then-budget's physics while lam regularises the
+        short-wavelength deconvolution properly instead of a hard band limit.
+    n_bins, blend_px
+        **Local operator.** With ``n_bins > 1`` the fit cells are clustered by
+        ``(H, u_x, u_y[, eta])`` (:func:`~.stubblefield_forward._kmeans_geometry`,
+        deterministic), one transfer is built per bin from the bin centroid —
+        its own thickness, advection and (with ``eta_field``) its own secant
+        viscosity — each is applied to the WHOLE padded domain (the operator is
+        not spatially compact: long-wavelength modes advect far before they
+        damp), and the responses are recombined with Gaussian-smoothed
+        (``blend_px``) partition-of-unity weights, exactly as
+        :class:`~.stubblefield_forward.BlendedStubblefieldForward`. ``n_bins=1``
+        (default) is the single global multiplier at the median geometry.
+        This is the answer to "T depends on the local H" (λ = 2H is 5
+        elements per wavelength at H = 333 m but 3 at 460 m) and to a
+        shelf-wide η spanning a decade.
+    strip_modes, strip_prior, sigma2
+        **Coloured noise model.** ``strip_modes`` is the ``(n_modes, ny, nx)``
+        design from :func:`strip_mode_design`; the per-strip error amplitudes
+        ``theta`` are estimated JOINTLY with the melt under the prior
+        ``theta_j ~ N(0, strip_prior_j)`` (variances in freeboard units —
+        m² for offsets, (m/m)² for tilts; a scalar applies to every mode),
+        with the white-noise variance ``sigma2`` (thickness-rate², at a
+        unit-weight pixel) setting the prior's weight against the data term:
+        ``"auto"`` estimates it from the per-pixel regression residuals and
+        their flux divergence (it still contains the strip errors, so it is an
+        upper bound). Returns ``theta`` and the fitted coherent-error field
+        ``strip_error_rate`` = G theta on the observation side.
     eta_bar, alpha_scale, eta_field
         Viscosity for the bridging operator; ``eta_field`` (a map, e.g. from the
         momentum-balance inversion) overrides the scalar via its masked median.
@@ -332,8 +457,6 @@ def budget_bridging_melt_rate(
     iters
         Maximum conjugate-gradient iterations (each costs one forward+backward,
         i.e. two FFT pairs). CG on this quadratic typically converges in tens.
-    lr
-        Unused; retained so existing call sites do not break.
     weight
         ``"leverage"`` (default, :math:`S_{tt}`), ``"count"``, or ``"none"``.
     converge_tol
@@ -388,12 +511,48 @@ def budget_bridging_melt_rate(
     dy = float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0]))
 
     a_np = np.nan_to_num(a_field.values)
+    if flux_restored and bridging:
+        # flux divergence of the RESTORED (un-bridged) mean thickness
+        from .bridging_restoration import bridging_restoration_filter
+        rk = dict(restore_kwargs or {})
+        umax = rk.pop("lift_umax_myr", None)
+        Hb0 = float(np.nanmedian(H_f_mean.values[fit]))
+        ub0x = float(np.nanmedian(vxm.values[fit]))
+        ub0y = float(np.nanmedian(vym.values[fit]))
+        if umax is not None and float(np.hypot(ub0x, ub0y)) > umax:
+            H_rest = H_f_mean
+        else:
+            Frest, _ = bridging_restoration_filter(
+                2 * H_f_mean.sizes["y"], 2 * H_f_mean.sizes["x"],
+                float(abs(H_f_mean.x.values[1] - H_f_mean.x.values[0])),
+                float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0])),
+                Hb0, ub0x, ub0y, eta_bar=eta_bar, alpha_scale=alpha_scale,
+                rho_i=rho_i, rho_w=rho_w, **rk)
+            hv = H_f_mean.values.astype(float)
+            finh = np.isfinite(hv)
+            pad = np.pad(np.where(finh, hv, float(hv[finh].mean())),
+                         ((0, H_f_mean.sizes["y"]), (0, H_f_mean.sizes["x"])),
+                         mode="symmetric")
+            hr = np.real(np.fft.ifft2(np.asarray(Frest) * np.fft.fft2(pad)))[
+                :H_f_mean.sizes["y"], :H_f_mean.sizes["x"]]
+            H_rest = xr.DataArray(np.where(finh, hr, np.nan), dims=("y", "x"),
+                                  coords={"y": H_f_mean.y.values,
+                                          "x": H_f_mean.x.values})
+        fd = flux_divergence(H_rest, vxm, vym, estimator=estimator)
+        # dHdt_obs is also the bridged rate: restore it the same way so the
+        # whole observation side is the un-bridged budget, then the model
+        # T{m} = ... no: with the flux inside T the residual is
+        # T{m + a - fd_rest} - dHdt_obs, i.e. dHdt stays observed (bridged).
     fd_np = np.nan_to_num(fd.values)
     # The flux divergence is built from the OBSERVED (already bridged) mean
     # thickness, so it must not pass through the operator a second time; it goes
     # on the observation side. `flux_in_operator=True` restores the pre-fix
     # double count for the audit A/B only.
-    if flux_in_operator:
+    if flux_restored and bridging:
+        # corrected model: residual = T{m + a - div(H_rest u)} - dHdt_obs
+        known_in = np.where(fit, a_np - fd_np, 0.0)
+        known_out = np.zeros_like(known_in)
+    elif flux_in_operator:
         known_in = np.where(fit, a_np - fd_np, 0.0)
         known_out = np.zeros_like(known_in)
     else:
@@ -403,15 +562,46 @@ def budget_bridging_melt_rate(
     wv = np.where(fit, w.values, 0.0)
     wv = wv / max(float(wv.max()), 1e-30)
 
+    # ---- coloured noise model: per-strip mode columns + their prior
+    n_modes = 0 if strip_modes is None else int(strip_modes.shape[0])
+    sigma2_val = float("nan")
+    if n_modes:
+        if strip_prior is None:
+            raise ValueError("strip_modes needs strip_prior (variances per mode)")
+        tau2 = np.broadcast_to(np.asarray(strip_prior, float), (n_modes,)).copy()
+        if sigma2 == "auto":
+            # white variance at a unit-weight pixel: sigma^2 = w_i * var_i with
+            # var_i = rmse_i^2/S_tt,i (slope) + u_i^2 rmse_i^2/(2 n_i dx^2)
+            # (divergence of the mean-thickness noise), averaged over fit cells
+            rm = np.nan_to_num(reg["rmse"].values)
+            cnt = np.nan_to_num(reg["count"].values).astype(float)
+            stt = np.nan_to_num(_temporal_leverage(H_f_stack).values)
+            u2 = np.nan_to_num(vxm.values ** 2 + vym.values ** 2)
+            var_i = np.where(stt > 0, rm ** 2 / np.maximum(stt, 1e-30), 0.0) \
+                + u2 * rm ** 2 / (2.0 * np.maximum(cnt, 1) * dx ** 2)
+            sigma2_val = float(np.mean((wv * var_i)[fit]))
+        else:
+            sigma2_val = float(sigma2)
+        # standardise the amplitudes (theta' = theta / tau, G' = G tau): the
+        # tilt modes carry (x - x_c) ~ 1e4 m against theta ~ 1e-4 m/m, and
+        # without this the theta block of the Hessian is ~1e8 worse
+        # conditioned than the melt's and CG never converges it
+        tau = np.sqrt(tau2)
+        G_np = np.where(fit[None], np.nan_to_num(strip_modes, nan=0.0), 0.0) \
+            * tau[:, None, None]
+
     # ---- the operator
     if transfer not in ("flotation", "normalized"):
         raise ValueError(
             f"transfer must be 'flotation' or 'normalized', got {transfer!r}")
     H_ref = float(np.nanmedian(H_f_mean.values[fit]))
     eb = eta_bar
+    bins_w = None          # (n_bins, ny, nx) partition-of-unity weights
+    bin_geom = []          # per-bin (H, ux, uy[, eta]) centroids
     if bridging:
         u0x = float(np.nanmedian(vxm.values[fit]))
         u0y = float(np.nanmedian(vym.values[fit]))
+        ef = None
         if eta_field is not None:
             ef = np.asarray(eta_field.broadcast_like(H_f_mean).values, float)
             fin = np.isfinite(ef) & fit
@@ -421,15 +611,59 @@ def budget_bridging_melt_rate(
         # field is mirror-doubled before transforming (as StubblefieldForward).
         build = (bridging_transfer_multiplier if transfer == "flotation"
                  else normalized_bridging_multiplier)
-        D = build(2 * ny, 2 * nx, dx, dy, H=H_ref, ux_myr=u0x, uy_myr=u0y,
-                  eta_bar=eb, alpha_scale=alpha_scale, rho_i=rho_i,
-                  rho_w=rho_w)
+
+        def _mult(Hb, uxb, uyb, etab):
+            return build(2 * ny, 2 * nx, dx, dy, H=Hb, ux_myr=uxb, uy_myr=uyb,
+                         eta_bar=etab, alpha_scale=alpha_scale, rho_i=rho_i,
+                         rho_w=rho_w)
+
+        if int(n_bins) <= 1:
+            D = _mult(H_ref, u0x, u0y, eb)
+            bin_geom = [(H_ref, u0x, u0y, eb)]
+        else:
+            from scipy.ndimage import gaussian_filter
+            from .stubblefield_forward import _kmeans_geometry
+            cols = [H_f_mean.values, vxm.values, vym.values]
+            valid = fit & np.isfinite(cols[0]) & np.isfinite(cols[1]) \
+                & np.isfinite(cols[2]) & (cols[0] > 0)
+            if ef is not None:
+                cols.append(ef)
+                valid &= np.isfinite(ef) & (ef > 0)
+            feats = np.stack([np.asarray(c, float)[valid] for c in cols], axis=1)
+            # uniform geometry (to 1e-6 relative) must collapse to ONE bin so
+            # the global multiplier is reproduced exactly, not to round-off
+            scale = np.maximum(np.abs(feats).max(0), 1e-30)
+            n_uniq = len(np.unique(np.round(feats / scale, 6), axis=0))
+            nb = max(1, min(int(n_bins), n_uniq))
+            if nb == 1:
+                lab_v = np.zeros(len(feats), int)
+                cent = feats.mean(0, keepdims=True)
+            else:
+                lab_v, cent = _kmeans_geometry(feats, nb)
+            mults, w = [], np.zeros((nb, ny, nx))
+            for b in range(nb):
+                row = [float(c) for c in cent[b]]
+                etab = row[3] if ef is not None else eb
+                bin_geom.append((row[0], row[1], row[2], etab))
+                mults.append(_mult(row[0], row[1], row[2], etab))
+                ind = np.zeros((ny, nx))
+                ind[valid] = (lab_v == b)
+                w[b] = gaussian_filter(ind, blend_px, mode="nearest")
+            tot = w.sum(0)
+            w[0][tot < 1e-8] = 1.0
+            bins_w = w / np.maximum(w.sum(0), 1e-30)
+            D = np.stack(mults)
         if log_every:
             print(f"    bridging operator [{transfer}]: H_ref={H_ref:.0f} m  "
                   f"u0=({u0x:.0f}, {u0y:.0f}) m/yr  eta_bar={eb:.2e} Pa s  "
                   f"alpha_scale={alpha_scale:g}  "
-                  f"flux_{'inside' if flux_in_operator else 'outside'}",
-                  flush=True)
+                  f"flux_{'inside' if flux_in_operator else 'outside'}  "
+                  f"bins={len(bin_geom)}", flush=True)
+            if len(bin_geom) > 1:
+                for b, (Hb, uxb, uyb, etab) in enumerate(bin_geom):
+                    print(f"      bin {b}: H={Hb:.0f} m  u=({uxb:.0f}, {uyb:.0f}) "
+                          f"m/yr  eta={etab:.2e}  area {bins_w[b].mean():.2f}",
+                          flush=True)
     else:
         D = None
         u0x = u0y = 0.0
@@ -451,6 +685,10 @@ def budget_bridging_melt_rate(
     t_w = torch.from_numpy(np.ascontiguousarray(wv, dtype=np.float64))
     t_fit = torch.from_numpy(np.ascontiguousarray(fit))
     t_D = None if D is None else torch.from_numpy(np.ascontiguousarray(D))
+    t_G = (None if not n_modes else
+           torch.from_numpy(np.ascontiguousarray(G_np.reshape(n_modes, -1), dtype=np.float64)))
+    t_bw = (None if bins_w is None
+            else torch.from_numpy(np.ascontiguousarray(bins_w, dtype=np.float64)))
 
     def _pad2x(a):
         a = torch.cat([a, torch.flip(a, dims=[0])], dim=0)
@@ -460,7 +698,11 @@ def budget_bridging_melt_rate(
         if t_D is None:
             return field
         F = torch.fft.fft2(_pad2x(field).to(torch.complex128))
-        return torch.fft.ifft2(t_D * F).real[:ny, :nx]
+        if t_bw is None:
+            return torch.fft.ifft2(t_D * F).real[:ny, :nx]
+        # local operator: every bin's multiplier on the whole domain, blended
+        resp = torch.fft.ifft2(t_D * F[None]).real[:, :ny, :nx]
+        return (t_bw * resp).sum(0)
 
     # Warm start at the HYDROSTATIC inverse (m = dHdt_obs + div - a, i.e. the
     # Eulerian answer). The bridging fit is a correction to hydrostatics, not a
@@ -486,11 +728,22 @@ def budget_bridging_melt_rate(
     # The gradient of a quadratic is affine, so the Hessian-vector product is
     # H v = g(v) - g(0) exactly -- no hand-derived adjoint of the mirror-padded
     # spectral operator (the easy thing to get wrong) is needed.
+    # The unknown vector is [m (ny*nx) | theta (n_modes)]: the strip-error
+    # amplitudes ride along in the same CG, so the coloured covariance is
+    # handled exactly (marginalising theta) at the cost of n_modes extra dofs.
+    n_m = ny * nx
+
+    def _split(vec):
+        return vec[:n_m].reshape(ny, nx), (vec[n_m:] if n_modes else None)
+
     def _grad(vec: torch.Tensor) -> torch.Tensor:
-        mv = vec.detach().clone().requires_grad_(True)
+        vv = vec.detach().clone().requires_grad_(True)
+        mv, th = _split(vv)
         S = torch.where(t_fit, mv + t_known, torch.zeros_like(mv))
-        resid = torch.where(t_fit, bridge(S) + t_kout - t_obs,
-                            torch.zeros_like(mv))
+        resid = bridge(S) + t_kout - t_obs
+        if n_modes:
+            resid = resid + (th[:, None] * t_G).sum(0).reshape(ny, nx)
+        resid = torch.where(t_fit, resid, torch.zeros_like(mv))
         loss = (t_w * resid ** 2).sum() / wsum
         if lam:
             gx = mv[:, 1:] - mv[:, :-1]
@@ -498,17 +751,20 @@ def budget_bridging_melt_rate(
             loss = loss + lam * ((gx ** 2).mean() + (gy ** 2).mean())
         if ridge:
             loss = loss + ridge * (mv ** 2).mean()
-        (g,) = torch.autograd.grad(loss, mv)
+        if n_modes:
+            loss = loss + (sigma2_val / wsum) * (th ** 2).sum()   # unit-variance prior
+        (g,) = torch.autograd.grad(loss, vv)
         return g
 
-    zero = torch.zeros((ny, nx), dtype=torch.float64)
+    zero = torch.zeros(n_m + n_modes, dtype=torch.float64)
     g0 = _grad(zero)                 # g(0) = -rhs
     rhs = -g0
 
     def _hess(v: torch.Tensor) -> torch.Tensor:
         return _grad(v) - g0
 
-    m = torch.from_numpy(np.ascontiguousarray(m0, dtype=np.float64))
+    m = torch.cat([torch.from_numpy(np.ascontiguousarray(m0, dtype=np.float64)).reshape(-1),
+                   torch.zeros(n_modes, dtype=torch.float64)])
     r = rhs - _hess(m)
     p = r.clone()
     rs = float((r * r).sum())
@@ -538,9 +794,15 @@ def budget_bridging_melt_rate(
               flush=True)
 
     with torch.no_grad():
-        S = torch.where(t_fit, m + t_known, torch.zeros_like(m))
-        fit_rate = (bridge(S) + t_kout).numpy()
-        m_out = m.numpy()
+        mv, th = _split(m)
+        S = torch.where(t_fit, mv + t_known, torch.zeros_like(mv))
+        strip_rate = (np.zeros((ny, nx)) if not n_modes else
+                      (th[:, None] * t_G).sum(0).reshape(ny, nx).numpy())
+        # the fitted rate INCLUDING the estimated strip error, so the residual
+        # reported below is the whitened one
+        fit_rate = (bridge(S) + t_kout).numpy() + strip_rate
+        m_out = mv.numpy()
+        theta = None if not n_modes else th.numpy() * tau   # back to freeboard units
 
     melt = np.where(fit, m_out, np.nan)
     fit_rate = np.where(fit, fit_rate, np.nan)
@@ -557,6 +819,8 @@ def budget_bridging_melt_rate(
             "dHdt_fit": xr.DataArray(fit_rate, dims=("y", "x"), coords=coords),
             "H_f_mean": H_f_mean,
             "flux_div": fd,
+            "strip_error_rate": xr.DataArray(np.where(fit, strip_rate, np.nan),
+                                             dims=("y", "x"), coords=coords),
             "weight": xr.DataArray(np.where(fit, wv, np.nan), dims=("y", "x"),
                                    coords=coords),
         },
@@ -565,11 +829,17 @@ def budget_bridging_melt_rate(
             "bridging": int(bool(bridging)),
             "transfer": transfer if bridging else "identity",
             "flux_in_operator": int(bool(flux_in_operator)),
+            "flux_restored": int(bool(flux_restored)),
             "H_ref_m": H_ref,
             "u0x_myr": u0x,
             "u0y_myr": u0y,
             "eta_bar": eb,
             "alpha_scale": alpha_scale,
+            "n_bins": len(bin_geom),
+            "n_strip_modes": n_modes,
+            "sigma2_white": sigma2_val,
+            "bin_geometry": ";".join(f"{Hb:.1f},{uxb:.1f},{uyb:.1f},{etab:.3e}"
+                                     for Hb, uxb, uyb, etab in bin_geom),
             "lam": lam,
             "ridge": ridge,
             "cg_iters": n_cg,
@@ -583,4 +853,7 @@ def budget_bridging_melt_rate(
             "units": "m ice yr^-1; Shean convention: negative melt_rate = melt",
         },
     )
+    if n_modes:
+        ds["theta"] = xr.DataArray(theta, dims=("mode",))
+        ds["theta_prior_var"] = xr.DataArray(tau2, dims=("mode",))
     return ds

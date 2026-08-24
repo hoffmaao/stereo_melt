@@ -154,6 +154,24 @@ class LinearPerturbation:
         Long-wavelength regularization for the transfer functions
         (Stubblefield Appendix A). The solution is insensitive over
         the range :math:`10^{-16}-10^{-10}` for typical parameters.
+    n : float
+        Glen stress exponent of the **perturbation rheology**. ``1``
+        (default) is Stubblefield's Newtonian layer. For ``n > 1`` the
+        relaxation/buoyancy functions are those of the linearised
+        power-law layer (:mod:`.powerlaw_layer`): the tangent viscosity
+        about the background strain rate is anisotropic — :math:`\eta^0/n`
+        for normal perturbations along a uniaxial extension axis, the full
+        :math:`\eta^0` for shear — so ``R, B`` depend on the angle of
+        :math:`\mathbf k` to the principal strain axes. ``eta_bar`` is then
+        the **secant** viscosity at the background effective strain rate
+        (:func:`.powerlaw_layer.glen_secant_viscosity`).
+    Exx, Eyy : float
+        Background principal strain rates (only their ratio and signs
+        enter the anisotropy; ``Exx`` along :math:`x`). Default uniaxial
+        extension along :math:`x`, the flow-aligned-frame convention.
+    Ephi : float
+        Rotation (rad, counter-clockwise from :math:`+x`) of the ``Exx``
+        principal axis, for tiles that are not in the flow-aligned frame.
 
     Attributes
     ----------
@@ -175,6 +193,10 @@ class LinearPerturbation:
         alpha_y: float = 0.0,
         gamma: float = 0.0,
         theta: float = 1e-14,
+        n: float = 1.0,
+        Exx: float = 1.0,
+        Eyy: float = 0.0,
+        Ephi: float = 0.0,
     ):
         self.H = float(H)
         self.eta_bar = float(eta_bar)
@@ -191,6 +213,49 @@ class LinearPerturbation:
         self.theta = float(theta)
         self.tr = 2.0 * self.eta_bar / (self.rho_i * self.g * self.H)
         self.delta = self.rho_w / self.rho_i - 1.0
+        self.n = float(n)
+        self.Exx = float(Exx)
+        self.Eyy = float(Eyy)
+        self.Ephi = float(Ephi)  # rotation (rad) of the Exx principal axis from x
+        self._rb_table = None
+
+    def _powerlaw_RB(self, kmag, kx, ky):
+        r"""``R, B`` of the linearised power-law layer on the wavenumber
+        grid, by bilinear interpolation (log :math:`kH` × angle) of a table
+        computed once per instance. Angle is taken modulo :math:`\pi`
+        (the layer response is even in :math:`\mathbf k`)."""
+        from .powerlaw_layer import layer_response_table, newtonian_RB
+        if self._rb_table is None:
+            # normalise the strain-rate pair so the cache hits on the ratio
+            scale = max(abs(self.Exx), abs(self.Eyy), 1e-300)
+            self._rb_table = layer_response_table(
+                round(self.n, 6), round(self.Exx / scale, 6),
+                round(self.Eyy / scale, 6), delta=round(self.delta, 9))
+        kH_t, th_t, R_t, B_t = self._rb_table
+        kmag_np = to_numpy(kmag)
+        kx_np, ky_np = to_numpy(kx), to_numpy(ky)
+        th = np.mod(np.arctan2(ky_np, kx_np) - self.Ephi, np.pi)
+        lk = np.log(np.clip(kmag_np, kH_t[0], kH_t[-1]))
+        lk_t = np.log(kH_t)
+        ik = np.clip(np.searchsorted(lk_t, lk) - 1, 0, lk_t.size - 2)
+        it = np.clip(np.searchsorted(th_t, th) - 1, 0, th_t.size - 2)
+        wk = (lk - lk_t[ik]) / (lk_t[ik + 1] - lk_t[ik])
+        wt = (th - th_t[it]) / (th_t[it + 1] - th_t[it])
+
+        def interp(T):
+            return ((1 - wk) * (1 - wt) * T[ik, it] + wk * (1 - wt) * T[ik + 1, it]
+                    + (1 - wk) * wt * T[ik, it + 1] + wk * wt * T[ik + 1, it + 1])
+        R = interp(R_t)
+        B = interp(B_t)
+        # beyond the table the Newtonian tail is fine: R scales by its
+        # half-space ratio, B is exponentially negligible
+        hi = kmag_np > kH_t[-1]
+        if hi.any():
+            R1, B1 = newtonian_RB(kmag_np[hi])
+            R1e, _ = newtonian_RB(np.full(hi.sum(), kH_t[-1]))
+            R[hi] = R1 * interp(R_t)[hi] / R1e
+            B[hi] = 0.0
+        return asarray(R), asarray(B)
 
     def transfer_functions(self, kx, ky):
         r"""Return :math:`(R, B, \lambda_+, \lambda_-, \mu)` at wavenumber ``(kx, ky)``.
@@ -232,6 +297,8 @@ class LinearPerturbation:
 
         B_num = 2.0 * ((kmag_safe + 1.0) * emk + (kmag_safe - 1.0) * em3k)
         B = B_num / denom
+        if self.n != 1.0:
+            R, B = self._powerlaw_RB(kmag_safe, kx, ky)
 
         # Long-wavelength regularization (Appendix A)
         R_reg = 1.0 / (self.theta + 1.0 / R)

@@ -107,7 +107,7 @@ def main() -> int:
     stack, vx, vy = synth_stack(melt_true)
     eul = eulerian_melt_rate(stack, vx, vy, **RHO).melt_rate
     ident = budget_bridging_melt_rate(
-        stack, vx, vy, bridging=False, lam=0.0, iters=1500, lr=0.05, **RHO)
+        stack, vx, vy, bridging=False, lam=0.0, iters=1500, **RHO)
     fin = np.isfinite(eul.values) & np.isfinite(ident.melt_rate.values)
     mx, rms = _stats(ident.melt_rate.values, eul.values, fin)
     ok = mx < 5e-3
@@ -123,7 +123,7 @@ def main() -> int:
     eul_r = eulerian_melt_rate(stack_r, vx, vy, **RHO).melt_rate
     ident_r = budget_bridging_melt_rate(
         stack_r, vx, vy, bridging=False, floating_mask=mask, lam=0.0,
-        iters=1500, lr=0.05, **RHO)
+        iters=1500, **RHO)
     fin = (np.isfinite(eul_r.values) & np.isfinite(ident_r.melt_rate.values)
            & mask.values)
     mx1, rms1 = _stats(ident_r.melt_rate.values, eul_r.values, fin)
