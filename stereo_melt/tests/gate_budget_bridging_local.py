@@ -16,6 +16,15 @@ L3  LOCAL RECOVERY. A stack generated through the two-bin forward is
     plumbing and the adjoint-through-autograd, not the physics).
 L4  ETA PER BIN. With an ``eta_field`` that is 3e13 on one half and 3e14 on
     the other, the bin geometry carries the two viscosities (not the median).
+L5  FLUX_RESTORED PER BIN. With ``flux_restored=True`` (monolithic v2) the
+    restored thickness feeding ``div(H_rest u)`` is built per bin with the
+    same partition-of-unity weights, and ``lift_umax_myr`` guards bins by
+    their own centroid speed: on a two-speed shelf the guard count sweeps
+    2/1/0, an all-guarded run reproduces the observed-thickness flux to
+    round-off, and guarding one bin changes ``flux_div`` only under that
+    bin's weight (the returned ``flux_div`` is exact; the lam=1e-5 CG
+    amplifies 1e-13 differences on the RHS to ~1e-2 m/yr in the melt, so
+    the melt is only checked loosely).
 
 Run::
 
@@ -73,9 +82,10 @@ def main() -> int:
     Hf0 = 500.0 + 100.0 * np.tanh((xx - 0.5 * NX * RES) / 2000.0)
     left = xx < 0.5 * NX * RES
 
-    def forward_stack(melt, Hf0, T_of_x, n_t=25, span=6.0):
+    def forward_stack(melt, Hf0, T_of_x, n_t=25, span=6.0, vx_=None):
         fdiv = flux_divergence(xr.DataArray(Hf0, dims=("y", "x"),
-                                            coords={"y": y, "x": x}), vx, vy).values
+                                            coords={"y": y, "x": x}),
+                               vx if vx_ is None else vx_, vy).values
         rate = T_of_x(melt) - np.nan_to_num(fdiv)
         t = np.linspace(-0.5 * span, 0.5 * span, n_t)
         times = (pd.to_datetime("2015-01-01")
@@ -134,6 +144,49 @@ def main() -> int:
     etas = sorted(float(row.split(",")[3]) for row in inv_e.attrs["bin_geometry"].split(";"))
     check("bins carry 3e13 and 3e14", len(etas) == 2 and abs(etas[0] / 3e13 - 1) < 0.05
           and abs(etas[1] / 3e14 - 1) < 0.05, f"{etas}")
+
+    print("L5  flux_restored: per-bin restoration, per-bin trunk guard")
+    u_slow, u_fast = 600.0, 2400.0
+    vx5 = xr.DataArray(np.where(left, u_slow, u_fast), dims=("y", "x"),
+                       coords={"y": y, "x": x})
+    T_Ls = bridging_transfer_multiplier(2 * NY, 2 * NX, RES, RES, H=400.0,
+                                        ux_myr=u_slow, uy_myr=0.0, eta_bar=1e14)
+    T_Rf = bridging_transfer_multiplier(2 * NY, 2 * NX, RES, RES, H=600.0,
+                                        ux_myr=u_fast, uy_myr=0.0, eta_bar=1e14)
+
+    def T_local5(f):
+        return wL * pad_apply(T_Ls, f) + (1 - wL) * pad_apply(T_Rf, f)
+
+    st_5 = forward_stack(melt, Hf0, T_local5, vx_=vx5)
+
+    def run5(**extra):
+        return budget_bridging_melt_rate(st_5, vx5, vy, bridging=True, n_bins=2,
+                                         blend_px=1.0, **kw, **extra)
+
+    def _rms(a, m):
+        return float(np.sqrt(np.nanmean(a[m] ** 2)))
+
+    all_g = run5(flux_restored=True, restore_kwargs=dict(lift_umax_myr=1.0))
+    one_g = run5(flux_restored=True, restore_kwargs=dict(lift_umax_myr=1500.0))
+    no_g = run5(flux_restored=True, restore_kwargs=dict(lift_umax_myr=None))
+    fio = run5(flux_in_operator=True)
+    guarded = tuple(r.attrs["flux_restored_guarded_bins"] for r in (all_g, one_g, no_g))
+    check("guard sweeps the bin speeds: 2 / 1 / 0 bins guarded", guarded == (2, 1, 0),
+          f"{guarded}  bins {one_g.attrs['bin_geometry']}")
+    d_fd = float(np.nanmax(np.abs(all_g.flux_div.values - fio.flux_div.values)))
+    d_m = _rms(all_g.melt_rate.values - fio.melt_rate.values, sc)
+    check("all bins guarded == flux of the observed thickness", d_fd < 1e-9 and d_m < 0.05,
+          f"max|d flux_div| {d_fd:.1e}  melt rms diff {d_m:.1e} m/yr")
+    slow, fast = sc & left, sc & ~left
+    fd_one, fd_all, fd_no = (r.flux_div.values for r in (one_g, all_g, no_g))
+    check("one bin guarded: flux_div unchanged under the other bin's weight",
+          _rms(fd_one - fd_all, fast) < 1e-9 and _rms(fd_one - fd_no, slow) < 1e-9,
+          f"fast |fd_one-fd_all| {_rms(fd_one - fd_all, fast):.1e}  "
+          f"slow |fd_one-fd_no| {_rms(fd_one - fd_no, slow):.1e} m/yr")
+    check("the un-guarded bin is lifted, the guarded one is not",
+          _rms(fd_one - fd_all, slow) > 1e-4 and _rms(fd_no - fd_one, fast) > 1e-3,
+          f"slow lift {_rms(fd_one - fd_all, slow):.2e}  "
+          f"fast lift (no guard) {_rms(fd_no - fd_one, fast):.2e} m/yr")
 
     print()
     if FAILS:

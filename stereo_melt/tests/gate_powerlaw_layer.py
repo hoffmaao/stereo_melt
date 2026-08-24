@@ -59,8 +59,15 @@ def cheb(N):
     return (1 - x) / 2, -2 * D
 
 
-def psi_solver(kH, nu, N=48, delta=1020 / 917 - 1):
-    """Plane-strain stream-function BVP (independent of the 6x6 solver)."""
+def psi_solver(kH, nu, N=24, delta=1020 / 917 - 1):
+    """Plane-strain stream-function BVP (independent of the 6x6 solver).
+
+    ``N`` is deliberately modest: the fourth-order Chebyshev matrix D @ D @ D @ D
+    conditions like N**8, and at N = 48 the kH = 0.5 solve (R ~ 284) is
+    round-off dominated -- its answer moved between 4e-4 and 3e-3 relative
+    with the BLAS thread count, straddling the 1e-3 tolerance of G4. N = 20-28
+    resolves every kH <= 8 to < 5e-5 at any thread count.
+    """
     z, D = cheb(N)
     D2, D3, D4 = D @ D, D @ D @ D, D @ D @ D @ D
     Id = np.eye(N)
