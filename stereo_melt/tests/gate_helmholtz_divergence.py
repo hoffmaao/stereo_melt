@@ -29,7 +29,7 @@ import sys
 import numpy as np
 import xarray as xr
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/stereo_melt/src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from stereo_melt.kinematics import (  # noqa: E402
     FiniteDifferenceDivergence, HelmholtzDivergence, flux_divergence,
 )
@@ -90,8 +90,6 @@ def main() -> int:
     # filtered flux: q - (1-F) * potential part
     Qx_f = Qx - (1 - F) * KX * pot
     Qy_f = Qy - (1 - F) * KY * pot
-    qxf = np.real(np.fft.ifft2(Qx_f))[:ny, :nx]
-    qyf = np.real(np.fft.ifft2(Qy_f))[:ny, :nx]
     # rectangle i0:i1 (rows, y descending), j0:j1 (cols): flux out = sum over edges
     i0, i1, j0, j1 = 16, 48, 32, 96
     area_int = float(div_est[i0:i1, j0:j1].sum() * res * res)

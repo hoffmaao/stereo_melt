@@ -31,7 +31,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/stereo_melt/src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from stereo_melt.dynamics.linear_perturbation import LinearPerturbation  # noqa: E402
 from stereo_melt.dynamics.powerlaw_layer import (  # noqa: E402
     layer_response, newtonian_RB, normal_viscosity_ratio,

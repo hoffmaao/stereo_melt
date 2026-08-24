@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/stereo_melt/src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from stereo_melt.constants import rhoi, rhow  # noqa: E402
 from stereo_melt.dynamics.bridging_restoration import restored_budget_melt_rate  # noqa: E402
 from stereo_melt.dynamics.budget_bridging import bridging_transfer_multiplier  # noqa: E402
