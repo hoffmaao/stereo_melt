@@ -55,7 +55,7 @@ from gate_match_lagrangian import (  # noqa: E402
     budget_exact_stack, build_epochs, nan_gauss, scorr,
 )
 
-from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm  # noqa: E402
 from stereo_melt.constants import rhoi, rhow  # noqa: E402
 from stereo_melt.dynamics import linear_inverse_budget_melt_rate  # noqa: E402
 from stereo_melt.melt import eulerian_melt_rate, lagrangian_melt_rate  # noqa: E402

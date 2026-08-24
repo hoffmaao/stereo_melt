@@ -1,6 +1,6 @@
 """Build the window-minimum floating-shelf extent mask for Pine Island.
 
-Stage 4b (after ``pig.tilt_fit``, before/independent of ``pig.run_melt``).
+Stage 6b (after ``pig.tilt_fit``, before/independent of ``pig.run_melt``).
 Intersects three constraints on the stack grid via
 :func:`stereo_melt.shelf_extent.min_shelf_extent`:
 
@@ -31,18 +31,18 @@ _env_proj = os.path.join(sys.prefix, "share", "proj")
 if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
-import xarray as xr
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import xarray as xr  # noqa: E402
 
-from stereo_melt.io.greene import greene_min_extent_on_grid
-from stereo_melt.shelf_extent import min_shelf_extent
+from stereo_melt.io.greene import greene_min_extent_on_grid  # noqa: E402
+from stereo_melt.shelf_extent import min_shelf_extent  # noqa: E402
 
-from pig import config
-from pig.run_melt import load_floating_mask, load_stack
+from pig import config  # noqa: E402
+from pig.run_melt import load_floating_mask, load_stack  # noqa: E402
 
 
 def main(res_override: float | None = None, tag: str | None = None) -> None:

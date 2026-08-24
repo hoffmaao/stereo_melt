@@ -22,11 +22,11 @@ _env_proj = os.path.join(sys.prefix, "share", "proj")
 if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 
-import matplotlib
+import matplotlib  # noqa: E402
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import numpy as np
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
 BLUE, ORANGE = "#2a78d6", "#eb6834"          # validated categorical slots
 INK, INK2 = "#0b0b0b", "#52514e"
