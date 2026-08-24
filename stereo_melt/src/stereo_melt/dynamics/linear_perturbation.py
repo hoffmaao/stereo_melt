@@ -234,7 +234,10 @@ class LinearPerturbation:
         kH_t, th_t, R_t, B_t = self._rb_table
         kmag_np = to_numpy(kmag)
         kx_np, ky_np = to_numpy(kx), to_numpy(ky)
-        th = np.mod(np.arctan2(ky_np, kx_np) - self.Ephi, np.pi)
+        # arctan2 in the array frame (plain-fftfreq ky, y descending) gives
+        # -phi_map; the response is even in theta, so the map-frame axis
+        # rotation Ephi (CCW from +x) enters the table angle with a + sign
+        th = np.mod(np.arctan2(ky_np, kx_np) + self.Ephi, np.pi)
         lk = np.log(np.clip(kmag_np, kH_t[0], kH_t[-1]))
         lk_t = np.log(kH_t)
         ik = np.clip(np.searchsorted(lk_t, lk) - 1, 0, lk_t.size - 2)

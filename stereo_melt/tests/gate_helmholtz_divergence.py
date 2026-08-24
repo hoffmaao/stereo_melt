@@ -73,10 +73,13 @@ def main() -> int:
           f"ell {estg.last['ell_px']:.2f} px, rel rms {relg:.2e}")
 
     print("H2  Gauss on the fitted field")
-    # reconstruct the fitted flux: unfiltered solenoidal + filtered potential
+    # reconstruct the fitted flux: unfiltered solenoidal + filtered potential;
+    # H2 uses a y-curved vy (unlike the vy=0 of H1/H3/H4, whose div_true
+    # assumes it) so the y-face half of the identity is actually exercised
+    vy2 = 20.0 + 40.0 * np.sin(2 * np.pi * Y / (ny * res))
     est = HelmholtzDivergence(ell=3 * res)
-    div_est = est(da(H), da(vx), da(vy)).values
-    qx, qy = H * vx, H * vy
+    div_est = est(da(H), da(vx), da(vy2)).values
+    qx, qy = H * vx, H * vy2
     px = np.concatenate([qx, qx[::-1]], 0); px = np.concatenate([px, px[:, ::-1]], 1)  # noqa: E702
     py = np.concatenate([qy, qy[::-1]], 0); py = np.concatenate([py, py[:, ::-1]], 1)  # noqa: E702
     kx = 2 * np.pi * np.fft.fftfreq(2 * nx, d=res)
@@ -98,19 +101,25 @@ def main() -> int:
     # flux on the box faces with the same spectral field (interior consistency)
     # -> compare with the divergence theorem evaluated spectrally: the mean of
     # div over the box equals the net boundary flux of the SAME smooth field.
-    # Evaluate the net flux through the faces from the fitted components at
-    # half-pixel accuracy using the spectral interpolation (shift by half px).
+    # Evaluate the net flux through the faces from the fitted components by
+    # spectral interpolation to the half-pixel face, times the midpoint factor
+    # (kd/2)/sin(kd/2) in the face-normal wavenumber: the pixel-center sum of
+    # the spectral derivative telescopes EXACTLY to face differences of that
+    # corrected field (band-limited midpoint quadrature), so the identity
+    # holds to round-off instead of O((kd)^2/24) per mode.
     def shift_half(Q, axis):
-        k = KX if axis == 1 else KY
-        return np.real(np.fft.ifft2(Q * np.exp(1j * k * res / 2)))[:ny, :nx]
+        k = (KX if axis == 1 else KY) * res
+        fac = np.where(k != 0, (k / 2) / np.where(k != 0, np.sin(k / 2), 1.0), 1.0)
+        return np.real(np.fft.ifft2(Q * fac * np.exp(1j * k / 2)))[:ny, :nx]
     qx_e = shift_half(Qx_f, 1)   # qx at x + dx/2 (east faces)
-    qy_e = shift_half(Qy_f, 0)   # qy at y - dy/2 in index space -> toward +y index
+    qy_e = shift_half(Qy_f, 0)   # ky carries -1, so this shifts by -res/2 in index
     east = qx_e[i0:i1, j1 - 1].sum() * res
     west = qx_e[i0:i1, j0 - 1].sum() * res
-    # y index increases southward (y descends): qy_e at index i is the flux
-    # across the face between row i and i+1 in the +y (northward) direction
-    north = qy_e[i0 - 1, j0:j1].sum() * res
-    south = qy_e[i1 - 1, j0:j1].sum() * res
+    # y index increases southward (y descends): qy_e at index i is the +y
+    # (northward) flux across the face between rows i-1 and i, so the box
+    # rows i0:i1 have their north face at qy_e[i0] and south face at qy_e[i1]
+    north = qy_e[i0, j0:j1].sum() * res
+    south = qy_e[i1, j0:j1].sum() * res
     net = (east - west) + (north - south)
     rel_g = abs(area_int - net) / max(abs(area_int), 1e-30)
     check("box divergence integral == net boundary flux of the fitted field", rel_g < 1e-6,

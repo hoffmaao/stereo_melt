@@ -25,6 +25,7 @@ import sys
 
 import numpy as np
 
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 # Library (pulls pandas) BEFORE torch: torch-first pins the stale system
 # libstdc++ and breaks pandas' extension load in this env.
 from stereo_melt.dynamics.stubblefield_forward import (  # noqa: E402

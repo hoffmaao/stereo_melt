@@ -100,7 +100,7 @@ def render_map(fields, xk, yk, out_fig, subtitle):
     padx = 0.02 * (xk.max() - xk.min())
     pady = 0.02 * (yk.max() - yk.min())
     xlim = (xk[ii.min()] - padx, xk[ii.max()] + padx)
-    ylim = (yk[jj.min()] - pady, yk[jj.max()] + pady)
+    ylim = (yk[jj.min()] + pady, yk[jj.max()] - pady)
 
     fig, axs = plt.subplots(2, 2, figsize=(13.5, 11), sharex=True, sharey=True)
     for ax, n in zip(axs.ravel(), PANELS):

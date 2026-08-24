@@ -128,12 +128,14 @@ def main() -> int:
         if extra in t2m.dims:
             t2m = t2m.mean(extra)
     tv = t2m["time"].values.astype("datetime64[ns]")
-    in_window = (tv >= np.datetime64(t0)) & (tv < np.datetime64(t1))
+    # floor to month starts: months_between is month-granular (partial first
+    # month in, partial last month out), so the stamp filter must be too
+    in_window = (tv >= np.datetime64(t0[:7])) & (tv < np.datetime64(t1[:7]))
     t2m = t2m.isel(time=np.flatnonzero(in_window))
     if t2m.sizes["time"] != len(ym):
         raise SystemExit(
             f"{path}: {t2m.sizes['time']} monthly means fall inside "
-            f"[{t0}, {t1}) but the window spans {len(ym)} months")
+            f"[{t0[:7]}, {t1[:7]}) but the window spans {len(ym)} months")
     t2m_mean = t2m.mean("time")            # window-mean field (K)
 
     la = np.asarray(t2m_mean["latitude"].values, float)
