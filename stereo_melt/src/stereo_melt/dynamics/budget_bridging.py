@@ -199,6 +199,7 @@ def normalized_bridging_multiplier(
     alpha_scale: float = 0.34,
     rho_i: float = rhoi,
     rho_w: float = rhow,
+    plateau_rtol: float = 0.05,
 ) -> np.ndarray:
     r"""Return :math:`D(k) = M_h(k)/|M_h|_{\max}` with ``D[0, 0] = 1``.
 
@@ -216,6 +217,15 @@ def normalized_bridging_multiplier(
     :mod:`.linear_perturbation` — appropriate for an anomaly operator, wrong for
     a relative damping, and the difference is exactly what makes the melt mean
     identifiable here.
+
+    That pin is only self-consistent if :math:`|M_h|` actually plateaus at
+    the longest resolved wavelengths. Whether it does depends on ``eta_bar``
+    as much as on geometry (flat at :math:`10^{13}` Pa s, **not** at the
+    :math:`10^{14}` default on PIG or E2a geometry, where :math:`|D|` at
+    :math:`\lambda = 40` km is already 0.77–0.85): if the lowest non-zero
+    wavenumber bins fall more than ``plateau_rtol`` below the modulus maximum,
+    a ``ValueError`` is raised rather than a step at :math:`k = 0` silently
+    biasing the melt mean.
     """
     from .stubblefield_forward import stubblefield_forward_multiplier
 
@@ -236,6 +246,16 @@ def normalized_bridging_multiplier(
     plateau = M.ravel()[int(np.nanargmax(flat))]
     if not np.isfinite(plateau) or abs(plateau) <= 0:
         raise ValueError(f"degenerate bridging multiplier (plateau={plateau})")
+    low_k = ([M[0, 1], M[0, -1]] if nx > 1 else []) \
+        + ([M[1, 0], M[-1, 0]] if ny > 1 else [])
+    low_ratio = float(np.nanmin(np.abs(low_k))) / abs(plateau)
+    if not low_ratio >= 1.0 - plateau_rtol:
+        raise ValueError(
+            "bridging multiplier has no long-wavelength plateau: |M_h| at the "
+            f"lowest resolved wavenumbers is {low_ratio:.3f} of its maximum "
+            f"(tolerance {plateau_rtol:g}), so D[0, 0] = 1 would bias the melt "
+            f"mean; lower eta_bar (={eta_bar:.2e} Pa s) or use "
+            "transfer='flotation'")
     D = M / plateau
     D[0, 0] = 1.0 + 0.0j
     return D
@@ -289,8 +309,10 @@ def strip_mode_design(
          / 365.25).astype(float)
     n = v.sum(0)
     ok = n >= min_count
-    tbar = np.where(ok, (v * t[:, None, None]).sum(0) / np.maximum(n, 1), 0.0)
-    stt = (v * (t[:, None, None] - tbar[None]) ** 2).sum(0)
+    s1, s2 = np.tensordot(np.stack([t, t * t]), v.reshape(len(t), -1),
+                          axes=1).reshape(2, *n.shape)
+    tbar = np.where(ok, s1 / np.maximum(n, 1), 0.0)
+    stt = np.maximum(s2 - 2.0 * tbar * s1 + n * tbar ** 2, 0.0)
     inv_stt = np.where(ok & (stt > 0), 1.0 / np.maximum(stt, 1e-30), 0.0)
     inv_n = np.where(ok, 1.0 / np.maximum(n, 1), 0.0)
     x2d, y2d = np.meshgrid(stack.x.values.astype(float), stack.y.values.astype(float))
@@ -331,10 +353,13 @@ def _temporal_leverage(stack: xr.DataArray) -> xr.DataArray:
     t = (t - t[0]) / (1e9 * SECONDS_PER_YEAR)          # years since first epoch
     ok = np.isfinite(stack.values)                      # (time, y, x)
     n = ok.sum(0).astype(float)
-    tt = np.where(ok, t[:, None, None], 0.0)
-    sum_t = tt.sum(0)
-    mean_t = np.divide(sum_t, n, out=np.zeros_like(sum_t), where=n > 0)
-    stt = (np.where(ok, (t[:, None, None] - mean_t[None]) ** 2, 0.0)).sum(0)
+    # S_tt = sum t^2 ok - 2 mean_t sum t ok + mean_t^2 n: one (2, time) x
+    # (time, pixels) product over the boolean mask, no (time, y, x) float
+    # temporaries (the 513-epoch stack would need several GB of them)
+    s1, s2 = np.tensordot(np.stack([t, t * t]), ok.reshape(len(t), -1),
+                          axes=1).reshape(2, *n.shape)
+    mean_t = np.divide(s1, n, out=np.zeros_like(s1), where=n > 0)
+    stt = np.maximum(s2 - 2.0 * mean_t * s1 + n * mean_t ** 2, 0.0)
     stt = np.where(n >= 2, stt, 0.0)
     return xr.DataArray(stt, dims=("y", "x"),
                         coords={"y": stack.y.values, "x": stack.x.values})
@@ -414,9 +439,18 @@ def budget_bridging_melt_rate(
         divergence from the RESTORATION-FILTERED mean thickness (the bounded,
         flow-projected 1/T of :func:`.bridging_restoration.bridging_restoration_filter`,
         options via ``restore_kwargs``: ``lift_cap``, ``band_lam_min``,
-        ``lift_umax_myr`` handled by bin) and places it inside ``T`` — so the
-        fit shares restore-then-budget's physics while lam regularises the
+        ``lift_umax_myr``) and places it inside ``T`` — so the fit shares
+        restore-then-budget's physics while lam regularises the
         short-wavelength deconvolution properly instead of a hard band limit.
+        The restoration is PER BIN, exactly as
+        :func:`~.bridging_restoration.restored_budget_melt_rate`: one filter
+        per operator bin from that bin's ``(H, u_x, u_y, eta)`` centroid
+        (so it is the bounded inverse of the very transfer the operator
+        applies there), blended with the same partition-of-unity weights,
+        and the ``lift_umax_myr`` trunk guard gives bins whose centroid speed
+        exceeds it the identity filter (no lift over the fast crevassed
+        trunk). Attrs record ``flux_restored_bins`` and
+        ``flux_restored_guarded_bins``.
     n_bins, blend_px
         **Local operator.** With ``n_bins > 1`` the fit cells are clustered by
         ``(H, u_x, u_y[, eta])`` (:func:`~.stubblefield_forward._kmeans_geometry`,
@@ -511,53 +545,6 @@ def budget_bridging_melt_rate(
     dy = float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0]))
 
     a_np = np.nan_to_num(a_field.values)
-    if flux_restored and bridging:
-        # flux divergence of the RESTORED (un-bridged) mean thickness
-        from .bridging_restoration import bridging_restoration_filter
-        rk = dict(restore_kwargs or {})
-        umax = rk.pop("lift_umax_myr", None)
-        Hb0 = float(np.nanmedian(H_f_mean.values[fit]))
-        ub0x = float(np.nanmedian(vxm.values[fit]))
-        ub0y = float(np.nanmedian(vym.values[fit]))
-        if umax is not None and float(np.hypot(ub0x, ub0y)) > umax:
-            H_rest = H_f_mean
-        else:
-            Frest, _ = bridging_restoration_filter(
-                2 * H_f_mean.sizes["y"], 2 * H_f_mean.sizes["x"],
-                float(abs(H_f_mean.x.values[1] - H_f_mean.x.values[0])),
-                float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0])),
-                Hb0, ub0x, ub0y, eta_bar=eta_bar, alpha_scale=alpha_scale,
-                rho_i=rho_i, rho_w=rho_w, **rk)
-            hv = H_f_mean.values.astype(float)
-            finh = np.isfinite(hv)
-            pad = np.pad(np.where(finh, hv, float(hv[finh].mean())),
-                         ((0, H_f_mean.sizes["y"]), (0, H_f_mean.sizes["x"])),
-                         mode="symmetric")
-            hr = np.real(np.fft.ifft2(np.asarray(Frest) * np.fft.fft2(pad)))[
-                :H_f_mean.sizes["y"], :H_f_mean.sizes["x"]]
-            H_rest = xr.DataArray(np.where(finh, hr, np.nan), dims=("y", "x"),
-                                  coords={"y": H_f_mean.y.values,
-                                          "x": H_f_mean.x.values})
-        fd = flux_divergence(H_rest, vxm, vym, estimator=estimator)
-        # dHdt_obs is also the bridged rate: restore it the same way so the
-        # whole observation side is the un-bridged budget, then the model
-        # T{m} = ... no: with the flux inside T the residual is
-        # T{m + a - fd_rest} - dHdt_obs, i.e. dHdt stays observed (bridged).
-    fd_np = np.nan_to_num(fd.values)
-    # The flux divergence is built from the OBSERVED (already bridged) mean
-    # thickness, so it must not pass through the operator a second time; it goes
-    # on the observation side. `flux_in_operator=True` restores the pre-fix
-    # double count for the audit A/B only.
-    if flux_restored and bridging:
-        # corrected model: residual = T{m + a - div(H_rest u)} - dHdt_obs
-        known_in = np.where(fit, a_np - fd_np, 0.0)
-        known_out = np.zeros_like(known_in)
-    elif flux_in_operator:
-        known_in = np.where(fit, a_np - fd_np, 0.0)
-        known_out = np.zeros_like(known_in)
-    else:
-        known_in = np.where(fit, a_np, 0.0)
-        known_out = np.where(fit, -fd_np, 0.0)
     obs = np.where(fit, np.nan_to_num(dHdt_obs.values), 0.0)
     wv = np.where(fit, w.values, 0.0)
     wv = wv / max(float(wv.max()), 1e-30)
@@ -575,7 +562,8 @@ def budget_bridging_melt_rate(
             # (divergence of the mean-thickness noise), averaged over fit cells
             rm = np.nan_to_num(reg["rmse"].values)
             cnt = np.nan_to_num(reg["count"].values).astype(float)
-            stt = np.nan_to_num(_temporal_leverage(H_f_stack).values)
+            stt = np.nan_to_num((w if weight == "leverage"
+                                 else _temporal_leverage(H_f_stack)).values)
             u2 = np.nan_to_num(vxm.values ** 2 + vym.values ** 2)
             var_i = np.where(stt > 0, rm ** 2 / np.maximum(stt, 1e-30), 0.0) \
                 + u2 * rm ** 2 / (2.0 * np.maximum(cnt, 1) * dx ** 2)
@@ -657,7 +645,7 @@ def budget_bridging_melt_rate(
             print(f"    bridging operator [{transfer}]: H_ref={H_ref:.0f} m  "
                   f"u0=({u0x:.0f}, {u0y:.0f}) m/yr  eta_bar={eb:.2e} Pa s  "
                   f"alpha_scale={alpha_scale:g}  "
-                  f"flux_{'inside' if flux_in_operator else 'outside'}  "
+                  f"flux_{'restored' if flux_restored else 'inside' if flux_in_operator else 'outside'}  "
                   f"bins={len(bin_geom)}", flush=True)
             if len(bin_geom) > 1:
                 for b, (Hb, uxb, uyb, etab) in enumerate(bin_geom):
@@ -667,6 +655,58 @@ def budget_bridging_melt_rate(
     else:
         D = None
         u0x = u0y = 0.0
+
+    # ---- the flux divergence: of the observed mean thickness on the
+    # observation side (default), or, with `flux_restored`, of the PER-BIN
+    # restored thickness inside the operator
+    umax = None
+    n_restore_guarded = 0
+    if flux_restored and bridging:
+        from ..backend import to_numpy
+        from .bridging_restoration import bridging_restoration_filter
+        rk = dict(restore_kwargs or {})
+        umax = rk.pop("lift_umax_myr", None)
+        hv = H_f_mean.values.astype(float)
+        finh = np.isfinite(hv)
+        pad = np.pad(np.where(finh, hv, float(hv[finh].mean())),
+                     ((0, ny), (0, nx)), mode="symmetric")
+        spec = np.fft.fft2(pad)
+        hr = np.zeros((ny, nx))
+        for b, (Hb, uxb, uyb, etab) in enumerate(bin_geom):
+            if umax is not None and float(np.hypot(uxb, uyb)) > umax:
+                n_restore_guarded += 1
+                resp = pad[:ny, :nx]
+            else:
+                Fb, _ = bridging_restoration_filter(
+                    2 * ny, 2 * nx, dx, dy, Hb, uxb, uyb, eta_bar=etab,
+                    alpha_scale=alpha_scale, rho_i=rho_i, rho_w=rho_w, **rk)
+                resp = np.real(np.fft.ifft2(to_numpy(Fb) * spec))[:ny, :nx]
+            hr += resp if bins_w is None else bins_w[b] * resp
+        H_rest = xr.DataArray(np.where(finh, hr, np.nan), dims=("y", "x"),
+                              coords={"y": H_f_mean.y.values,
+                                      "x": H_f_mean.x.values})
+        fd = flux_divergence(H_rest, vxm, vym, estimator=estimator)
+        if log_every:
+            print(f"    flux_restored: {len(bin_geom)} restoration filter(s), "
+                  f"{n_restore_guarded} trunk-guarded (lift_umax_myr={umax})",
+                  flush=True)
+    fd_np = np.nan_to_num(fd.values)
+    # The flux divergence of the OBSERVED (already bridged) mean thickness must
+    # not pass through the operator a second time, so it goes on the
+    # observation side; `flux_in_operator=True` restores the pre-fix double
+    # count for the audit A/B only. With `flux_restored` it is the divergence
+    # of the RESTORED thickness and belongs inside T -- the residual is
+    # T{m + a - div(H_rest u)} - dHdt_obs, dHdt_obs staying the observed
+    # (bridged) rate.
+    if flux_restored and bridging:
+        known_in = np.where(fit, a_np - fd_np, 0.0)
+        known_out = np.zeros_like(known_in)
+    elif flux_in_operator:
+        known_in = np.where(fit, a_np - fd_np, 0.0)
+        known_out = np.zeros_like(known_in)
+    else:
+        known_in = np.where(fit, a_np, 0.0)
+        known_out = np.where(fit, -fd_np, 0.0)
 
     # NB: there is deliberately no melt-RATE term here -- no `-tau*div(m u)`,
     # no advective shift of the recovered melt. The E2a departure from flotation
@@ -830,6 +870,9 @@ def budget_bridging_melt_rate(
             "transfer": transfer if bridging else "identity",
             "flux_in_operator": int(bool(flux_in_operator)),
             "flux_restored": int(bool(flux_restored)),
+            "flux_restored_bins": len(bin_geom) if (flux_restored and bridging) else 0,
+            "flux_restored_guarded_bins": n_restore_guarded,
+            "lift_umax_myr": float(umax) if umax is not None else float("nan"),
             "H_ref_m": H_ref,
             "u0x_myr": u0x,
             "u0y_myr": u0y,

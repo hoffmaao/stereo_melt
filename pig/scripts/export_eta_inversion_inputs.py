@@ -17,9 +17,14 @@ own boundary loop (components with an all-front boundary are dropped: no
 Dirichlet pin). Per-component outlines land in ``polys``/``vclasses``.
 
 BOUNDARY CLASSES for the dual form's calving terminus: each outline vertex is
-classified by the modal BedMachine class of its just-outside neighborhood —
-ocean (0) => FRONT (class 2, natural calving-stress BC); rock/grounded/other
-floating ice => DIRICHLET (class 1, u = u_obs).
+classified from the BedMachine codes of its just-outside neighborhood. A vertex
+is FRONT (class 2, natural calving-stress BC) when MORE THAN 25% of those cells
+are ocean (0); otherwise it is DIRICHLET (class 1, u = u_obs). The threshold
+is deliberately a quarter, not a majority: the min-extent outline sits a
+dilation away from the BedMachine coast, so a true calving-front vertex sees
+rock/ice on much of its neighborhood, and under-classifying a front — pinning
+it to u_obs — is the worse failure mode for the dual inversion. The shipped
+production eta field was built with this rule.
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
     $PY pig/scripts/export_eta_inversion_inputs.py [--t0 2021-01-01 --t1 2024-01-01]
@@ -157,10 +162,11 @@ def main() -> int:
             ring = np.vstack([ring, ring[:1]])
         return ring
 
-    # Per-vertex class: modal BedMachine code of just-outside cells in a
-    # (2r+1)^2 neighborhood; ocean-majority => front. A component whose
-    # boundary is ALL front has no Dirichlet pin (free-floating, singular
-    # momentum balance) and is dropped.
+    # Per-vertex class from the BedMachine codes of the just-outside cells in
+    # a (2r+1)^2 neighborhood: > 25% ocean => front (dilation-tolerant; a
+    # missed front pinned to u_obs is the worse error, see the module
+    # docstring). A component whose boundary is ALL front has no Dirichlet
+    # pin (free-floating, singular momentum balance) and is dropped.
     dx_g = float(abs(x[1] - x[0]))
     r = 8
 

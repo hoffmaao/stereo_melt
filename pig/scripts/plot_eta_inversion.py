@@ -83,7 +83,12 @@ def main() -> int:
     dsp = None
     if os.path.exists(inp):
         di = np.load(inp, allow_pickle=True)
-        if di["ux"].shape == mask.shape:
+        win = tuple(str(d[k]) if k in d.files else None for k in ("t0", "t1"))
+        win_in = tuple(str(di[k]) if k in di.files else None for k in ("t0", "t1"))
+        if di["ux"].shape != mask.shape or win != win_in:
+            print(f"[misfit] skipped: {os.path.basename(inp)} window {win_in} "
+                  f"does not match the inversion's {win}", file=sys.stderr)
+        else:
             dsp = np.where(mask, np.hypot(d["u_model_x"] - di["ux"],
                                           d["u_model_y"] - di["uy"]), np.nan)
 

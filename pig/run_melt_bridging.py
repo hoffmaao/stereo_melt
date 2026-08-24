@@ -10,7 +10,7 @@ mask):
 * ``restored_local``      restore-then-budget, per-(H, u) local filters,
                           trunk-guarded (no lift where u > ``--lift-umax-myr``)
 * ``restored_local_helm`` + the Helmholtz divergence (the 2026-08-24
-                          headline: 92.1 Gt/yr)
+                          headline: 90.4 Gt/yr, fused velocity)
 * ``monolithic``          budget+bridging fit @ the ML-II lam, local bins,
                           PIG eta field, Helmholtz divergence, and the
                           CORRECTED forward model (``flux_restored``,
@@ -185,6 +185,7 @@ def main() -> int:
     win = f"{file_start}_{file_end}"
     ds_out = xr.Dataset({k: v for k, v in out.items()})
     ds_out.attrs.update(velocity=vel_source, tag=args.tag, res_m=args.res,
+                        min_extent_mask=floating.attrs["min_extent_mask"],
                         ml2_lam=ML2_LAM, n_bins=args.n_bins,
                         fluxes_gt_yr=";".join(f"{k}={v:.2f}" for k, v in fluxes.items()))
     out_nc = config.PROCESSED_DIR / f"pig_melt_bridging_{res_i}m_{args.tag}_{win}.nc"

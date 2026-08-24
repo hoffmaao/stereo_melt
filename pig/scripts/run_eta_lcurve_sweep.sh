@@ -20,7 +20,7 @@ GAMMAS=("$@")
 if [ ${#GAMMAS[@]} -eq 0 ]; then
     GAMMAS=(1e-2 1e-1 1e0 1e1 1e2 1e3)
 fi
-CACHE_ROOT=/tmp/claude-15579/-wd2-projects-stereo-melt/lcurve_cache
+CACHE_ROOT="${TMPDIR:-/tmp}/stereo_melt_lcurve_cache"
 mkdir -p "$CACHE_ROOT" "$REPO/pig/logs"
 
 echo "L-curve sweep: gammas ${GAMMAS[*]}  max_iters $MAX_ITERS"

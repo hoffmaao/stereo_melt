@@ -274,7 +274,7 @@ def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArr
 
 def apply_min_extent(
     floating: xr.DataArray,
-    mask_suffix: str = "_250m_is2ctempo",
+    mask_suffix: str | None = None,
     file_start: str | None = None,
     file_end: str | None = None,
 ) -> xr.DataArray:
@@ -287,14 +287,33 @@ def apply_min_extent(
     out. The cached file covers the FULL stack window, so a --start/--end
     sub-window run gets the (conservative) full-window minimum.
 
-    Shared by run_melt's main() and the standalone solver rigs
-    (pig/scripts/fused_melt_map.py) so every product sees the same geometry --
-    a rig that skips it re-admits the calved sector, whose ice-to-ocean cliff
-    is ~28 Gt/yr of spurious melt in the budget legs and a large-scale
-    dh/dt mode the DC-blind legs cannot represent.
+    ``mask_suffix`` is the stack variant the cached mask was built for
+    (``"_250m_is2ctempo"``, i.e. the ``<res>m_<tag>`` suffix of the loaded
+    stack) and is required: the mask is per geometry, and a default would
+    silently intersect another stack's coastline. A missing cached file is
+    an error, not a fallback -- the product would otherwise re-admit the
+    calved sector with nothing in its metadata to say so.
+
+    The returned mask carries ``attrs["min_extent_mask"]``: the cached
+    file's name when applied, or the literal ``"not applied"`` under
+    ``PIG_MIN_EXTENT=0``; drivers copy it onto their products.
+
+    Shared by run_melt's main(), pig.run_melt_bridging and the standalone
+    solver rigs (pig/scripts/fused_melt_map.py) so every product sees the
+    same geometry -- a rig that skips it re-admits the calved sector, whose
+    ice-to-ocean cliff is ~28 Gt/yr of spurious melt in the budget legs and
+    a large-scale dh/dt mode the DC-blind legs cannot represent.
     """
     if os.environ.get("PIG_MIN_EXTENT", "1") == "0":
+        floating = floating.copy(deep=False)
+        floating.attrs["min_extent_mask"] = "not applied"
         return floating
+    if mask_suffix is None:
+        raise ValueError(
+            "apply_min_extent needs mask_suffix (the loaded stack's "
+            "'_<res>m_<tag>' suffix, e.g. '_250m_is2ctempo'): the cached "
+            "min-extent mask is per stack geometry"
+        )
     file_start = file_start or config.START_TIME
     file_end = file_end or config.END_TIME
     min_ext_nc = (
@@ -302,15 +321,17 @@ def apply_min_extent(
         / f"pig_min_extent{mask_suffix}_{file_start}_{file_end}.nc"
     )
     if not min_ext_nc.exists():
-        print(
-            f"  min-extent mask not found ({min_ext_nc.name}); "
-            "static floating mask only"
+        raise FileNotFoundError(
+            f"min-extent mask {min_ext_nc} not found. Build it with "
+            "`python -m pig.build_min_extent_mask` for this stack, or set "
+            "PIG_MIN_EXTENT=0 to deliberately run on the static floating "
+            "mask (re-admits the calved sector)."
         )
-        return floating
     with xr.open_dataset(min_ext_nc) as _mds:
         min_ext = _mds["min_extent_mask"].astype(bool).load()
     _n_static = int(floating.sum())
     floating = floating & min_ext
+    floating.attrs["min_extent_mask"] = min_ext_nc.name
     print(
         f"  min-extent mask {min_ext_nc.name}: removed "
         f"{_n_static - int(floating.sum())} of {_n_static} floating px"
@@ -645,6 +666,7 @@ def main(
     print(f"  floating-ice fraction of AOI: {frac_floating:.3f}")
 
     floating = apply_min_extent(floating, mask_suffix, file_start, file_end)
+    min_extent_src = floating.attrs["min_extent_mask"]
     stack = stack.where(floating)
 
     print("Loading velocity...")
@@ -928,6 +950,7 @@ def main(
         "stack_file_window": f"{file_start} to {file_end}",
         "grid_res_m": float(config.RES),
         "velocity_source": vel_source,
+        "min_extent_mask": min_extent_src,
         "smb_source": "RACMO2.4p1 smbgl (Zenodo 19255213), window-integrated",
     }
     if linv is not None:

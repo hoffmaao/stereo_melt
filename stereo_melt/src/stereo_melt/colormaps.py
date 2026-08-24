@@ -114,6 +114,6 @@ def add_melt_colorbar(fig, im, ax=None, *,
     vmax = float(im.norm.vmax)
     ticks = melt_ticks(vmax)
     cb = fig.colorbar(im, ax=ax, ticks=ticks, extend="both", **kw)
-    cb.ax.set_yticklabels([f"{t:g}" for t in ticks])
+    cb.set_ticklabels([f"{t:g}" for t in ticks])
     cb.set_label(label)
     return cb

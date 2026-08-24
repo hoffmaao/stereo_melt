@@ -164,15 +164,15 @@ def main() -> int:
         eta_bar=1e13, alpha_scale=0.34, lam=1e-4, iters=ITERS, lr=3e-3,
         sigma_hp_H=5.0, log_every=500, n_bins=8, blend_km=4.0, **RHO).melt_rate)
 
-    # Momentum-balance effective viscosity (single-field TDDA inversion,
-    # pig/scripts/infer_eta_icepack_pig.py): per-bin eta replaces the hand-set
+    # Momentum-balance effective viscosity: per-bin eta replaces the hand-set
     # scalar wherever the field exists; the scalar stays as fallback.
     #
-    # 2026-07-28 PRODUCTION ADOPTION: the source is now the v4 DUAL-form
+    # 2026-07-28 PRODUCTION ADOPTION: the source is the v4 DUAL-form
     # whole-shelf inversion (infer_eta_icepack2_pig.py, unbounded, min-extent
-    # domain, 2 lobes) -- MAP rel vel misfit 1.9% against the v1 single-field
-    # primal's 5.6%, and a median eta 1.33e14 vs the primal's 2.47e14 Pa s.
-    # PIG_ETA_NPZ overrides (set it to pig_eta_field_250m.npz for the v1 A/B).
+    # domain, 2 lobes) -- MAP rel vel misfit 1.9% against the retired v1
+    # single-field primal's 5.6%, and a median eta 1.33e14 vs the primal's
+    # 2.47e14 Pa s (A/B in the project record; the v1 script is gone).
+    # PIG_ETA_NPZ overrides the field file.
     eta_da = None
     ETA_NPZ = os.environ.get("PIG_ETA_NPZ") or os.path.join(
         REPO, "pig", "processed", "pig_eta_field_250m_dual_embayment.npz")

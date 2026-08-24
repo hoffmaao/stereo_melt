@@ -498,8 +498,9 @@ def restored_budget_melt_rate(
     xarray.Dataset
         ``melt_rate`` (m ice/yr, negative = melt), ``H_restored``,
         ``dHdt_restored``, ``dHdt_obs``, ``H_f_mean``, ``flux_div``; attrs
-        record the filter geometry (``H_ref_m``, ``band_lam_min_m``,
-        ``n_bins``, ``bin_geometry``).
+        record the filter geometry (``H_ref_m``, ``band_lam_min_m`` for the
+        reference bin, ``bin_band_lam_min_m`` per bin, ``n_bins``,
+        ``bin_geometry``).
     """
     from ..freeboard import freeboard_to_thickness
     from ..kinematics import SECONDS_PER_YEAR, dh_dt, flux_divergence
@@ -529,8 +530,7 @@ def restored_budget_melt_rate(
         Fb, _ = bridging_restoration_filter(
             2 * ny, 2 * nx, dxg, dyg, Hb, uxb, uyb, eta_bar=eta_bar,
             alpha_scale=alpha_scale, lift_cap=lift_cap,
-            band_lam_min=(band_lam_min if band_lam_min is None
-                          else band_lam_min),
+            band_lam_min=band_lam_min,
             rho_i=rho_i, rho_w=rho_w, g=g, gamma=gamma, theta=theta)
         return Fb
 
@@ -593,4 +593,7 @@ def restored_budget_melt_rate(
                "lift_cap": lift_cap,
                "band_lam_min_m": float(band_lam_min if band_lam_min
                                        else 2.5 * H_ref),
+               "bin_band_lam_min_m": ";".join(
+                   f"{(band_lam_min if band_lam_min else 2.5 * h):.1f}"
+                   for h, _a, _b in bin_geom),
                "units": "m ice yr^-1; Shean convention: negative = melt"})

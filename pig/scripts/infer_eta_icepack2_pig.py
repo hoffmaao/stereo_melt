@@ -1,6 +1,6 @@
 """PIG fluidity inversion v2 — icepack2 DUAL form + window-consistent inputs.
 
-Differences from v1 (infer_eta_icepack_pig.py, primal icepack):
+Differences from the retired v1 (single-field primal icepack, all-Dirichlet):
   * DUAL (mixed velocity/membrane-stress) formulation from icepack2: the
     problem stays well-posed toward zero thickness and tolerates the
     discontinuities of a real calving front; the front is the NATURAL
@@ -395,6 +395,16 @@ def main() -> int:
           f"{np.nanmedian(eta_pas_g):.2e}  p90 "
           f"{np.nanpercentile(eta_pas_g, 90):.2e} Pa s", flush=True)
 
+    # gradient at the SAVED control (best["x"]): re-evaluate the tape there so
+    # the adjoint is not replayed at the last L-BFGS-B trial point, in the
+    # same (non-Riesz) representation as the per-eval |g| readouts
+    Jhat(theta)
+    try:
+        dJ_final = Jhat.derivative(options={"riesz_representation": None})
+    except TypeError:
+        dJ_final = Jhat.derivative()
+    grad_norm_final = float(np.linalg.norm(np.asarray(dJ_final.dat.data_ro)))
+
     # summary.json — the L-curve reader's input (one per sweep point)
     summary = {
         "gamma": float(args.gamma), "sigma_u": float(args.sigma_u),
@@ -405,8 +415,7 @@ def main() -> int:
         "rel_misfit0": rel0, "rel_misfit_map": rel1,
         "n_iters": int(res.nit), "n_evals": int(nev["n"]),
         "n_failures": int(nev["fail"]), "opt_message": str(res.message),
-        "grad_norm_final": float(np.linalg.norm(
-            np.asarray(Jhat.derivative().dat.data_ro))),
+        "grad_norm_final": grad_norm_final,
         "max_abs_theta": float(np.max(np.abs(theta.dat.data_ro))),
         "n_dof": int(n_dof), "area_km2": area / 1e6,
         "n_components": len(polys), "lc": float(args.lc),
