@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.flux import grounding_buffer
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.smb import smb_over_window
@@ -214,10 +215,11 @@ def main() -> None:
         fig, axes = plt.subplots(1, len(panels), figsize=(5.6 * len(panels), 4.8),
                                  constrained_layout=True, squeeze=False)
         for ax, key in zip(axes[0], panels):
-            im = ax.imshow(data_vars[key].values, cmap="RdBu_r", vmin=-10,
-                           vmax=10, interpolation="nearest")
+            im = ax.imshow(data_vars[key].values, cmap=melt_cmap(),
+                           norm=melt_norm(vmax=10.0),
+                           interpolation="nearest")
             ax.set_title(f"{key} [{args.label}] (m ice/yr)", fontsize=10)
-            fig.colorbar(im, ax=ax, shrink=0.8)
+            add_melt_colorbar(fig, im, ax=ax, shrink=0.8)
             ax.set_xticks([])
             ax.set_yticks([])
         out_png = config.FIGURES_DIR / f"melt_era_{tag_out}.png"

@@ -20,6 +20,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
+
 TAG = sys.argv[1] if len(sys.argv) > 1 else "is2ctempo"
 RES = "250m"
 RESULTS = Path("/wd2/projects/stereo_melt/pig/results")
@@ -73,10 +75,11 @@ for r, (label, _) in enumerate(WINDOWS):
     l = np.where(fm, ds["melt_rate_lagrangian"].values, np.nan)
     cnt = np.where(fm, ds["eulerian_count"].values, np.nan)
 
+    mcmap, mnorm = melt_cmap(), melt_norm(vmax=CLIM)
     ims[0] = axes[r, 0].imshow(e, extent=extent, origin="upper",
-                               cmap="RdBu_r", vmin=-CLIM, vmax=CLIM, aspect="equal")
+                               cmap=mcmap, norm=mnorm, aspect="equal")
     ims[1] = axes[r, 1].imshow(l, extent=extent, origin="upper",
-                               cmap="RdBu_r", vmin=-CLIM, vmax=CLIM, aspect="equal")
+                               cmap=mcmap, norm=mnorm, aspect="equal")
     ims[2] = axes[r, 2].imshow(cnt, extent=extent, origin="upper",
                                cmap="viridis", vmin=0, aspect="equal")
 
@@ -93,15 +96,17 @@ for r, (label, _) in enumerate(WINDOWS):
                          fontsize=10)
     axes[r, 2].set_title("Eulerian coverage (epochs/pixel)", fontsize=10)
 
-for c, lab in [(0, "melt rate (m ice/yr)"), (1, "melt rate (m ice/yr)"),
-               (2, "epochs/pixel")]:
-    cb = fig.colorbar(ims[c], ax=axes[:, c], location="bottom",
-                      fraction=0.045, pad=0.02, shrink=0.9)
-    cb.set_label(lab, fontsize=9)
+for c in (0, 1):
+    cb = add_melt_colorbar(fig, ims[c], ax=axes[:, c], location="bottom",
+                           fraction=0.045, pad=0.02, shrink=0.9)
+    cb.ax.tick_params(labelsize=8)
+cb = fig.colorbar(ims[2], ax=axes[:, 2], location="bottom",
+                  fraction=0.045, pad=0.02, shrink=0.9)
+cb.set_label("epochs/pixel", fontsize=9)
 
 fig.suptitle(
     f"PIG calving-split melt A/B  -  alignment = {TAG}\n"
-    f"RdBu_r +/-{CLIM:.0f} m ice/yr (blue = melt, red = accretion); "
+    f"symmetric-log +/-{CLIM:.0f} m ice/yr (warm = melt, cool = accretion); "
     f"black = whole-window floating-ice outline",
     fontsize=13,
 )

@@ -143,6 +143,12 @@ ASE_QUARTERLY_VEL_DIR = DATA_DIR / "ASE_vel_quarterly_v05"
 BM_DIR = DATA_DIR / "bedmachine"
 BEDMACHINE_NC = BM_DIR / "BedMachineAntarctica-v3.nc"
 
+# Greene et al. 2022 time-evolving Antarctic ice masks (annual, 240 m,
+# 1997.75-2021.2; Zenodo 5903643) — the observed-coastline input to the
+# window-minimum shelf extent (pig.build_min_extent_mask).
+GREENE_DIR = DATA_DIR / "Greene2022"
+GREENE_ICEMASK_MAT = GREENE_DIR / "icemask_composite.mat"
+
 MDT_DIR = DATA_DIR / "MDT"
 DTU22_MDT_XYZ = MDT_DIR / "dtuuh22mdt.xyz"
 

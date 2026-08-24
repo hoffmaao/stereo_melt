@@ -42,7 +42,11 @@ _ICE_ANCHORS = [
 ]
 
 # Log-scale tick anchors LADDIE labels (m ice/yr), symmetric about zero.
-_MELT_TICKS = np.array([-10, -3, -1, -0.3, -0.1, 0, 0.1, 0.3, 1, 3, 10], float)
+# LADDIE stops at +/-10; the 1-3 pattern is continued to +/-100 so the fast
+# shelves (PIG runs to ~100 m/yr near the grounding line) get their top decades
+# labelled instead of an unbroken ramp into the extend arrow.
+_MELT_TICKS = np.array([-100, -30, -10, -3, -1, -0.3, -0.1, 0,
+                        0.1, 0.3, 1, 3, 10, 30, 100], float)
 
 #: NaN / masked cells render as neutral gray (LADDIE land/ocean tone), so
 #: they are never confused with the white strong-accretion extreme.
@@ -110,6 +114,6 @@ def add_melt_colorbar(fig, im, ax=None, *,
     vmax = float(im.norm.vmax)
     ticks = melt_ticks(vmax)
     cb = fig.colorbar(im, ax=ax, ticks=ticks, extend="both", **kw)
-    cb.ax.set_yticklabels([f"{t:g}" for t in ticks])
+    cb.set_ticklabels([f"{t:g}" for t in ticks])
     cb.set_label(label)
     return cb

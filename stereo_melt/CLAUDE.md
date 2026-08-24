@@ -79,6 +79,18 @@ correction:
 - **`corrections/` + `pipeline.py`** — post-coreg statics in Shean order
   (tide via CATS2008/pyTMD, scalar-per-strip IBE from ERA5 MSL, MDT, geoid)
   with the 3 km feathered floating mask. Pre-ASP corrections are forbidden.
+- **`kinematics.py::HelmholtzDivergence`** (2026-08-23) — the mass-consistent
+  flux-divergence estimator (FluxNet's q = J∇ψ + ∇φ construction with a linear
+  spectral representation; ∇·q = ∇²φ exact, Gauss holds on the fitted field;
+  potential smoothed at a GCV-selected length). Drop-in via
+  `flux_divergence(estimator=HelmholtzDivergence())` in every budget solver;
+  default is still `FiniteDifferenceDivergence`. Gate
+  `tests/gate_helmholtz_divergence.py`. On survey-realistic stacks the strip-edge
+  steps in H̄ are not white, so GCV picks ℓ ≈ 0.5 px — pair it with the strip
+  noise model for the coherent part.
+- **`spectra.py`** (2026-08-24) — `radial_psd`: masked, apodized, Welch-normalized
+  radially averaged PSD for comparing melt products across grids (the
+  Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py`.
 - **`melt.py`** — the production solvers: `eulerian_melt_rate` (Shean Eq. 10)
   and `lagrangian_melt_rate` (path solver; Δt floor 1.5 yr). Units: velocity
   m/yr, melt m ice-eq/yr, sign negative = melt. `freeboard.py`,
@@ -99,6 +111,32 @@ correction:
     products 2026-06-13, survives as an optional `melt_rate_linear_inverse`
     extra in some `run_melt` drivers and the stationary/pseudospectral
     diagnostics. NOT the budget linear inverse.
+  `powerlaw_layer.py` (2026-08-23) — the linearised-Glen **anisotropic**
+  layer transfer functions `R_n(kH, θ)`, `B_n(kH, θ)` (exact six-exponential
+  solve; tangent viscosity η⁰/n for normal perturbations along the background
+  extension, η⁰ for shear); `LinearPerturbation(n=, Exx=, Eyy=, Ephi=)` swaps
+  them in with `eta_bar` = the secant viscosity (`glen_secant_viscosity`).
+  n=1 is the Stubblefield closed form; gate `tests/gate_powerlaw_layer.py`.
+  **A documented negative result, deliberately NOT wired into the production
+  operator**: its transfer has a zero at ~2.3H and on the E1b Glen quartet it
+  made the monolithic solution worse than the Newtonian kernel (0.69 vs 0.89
+  gain at 3H); the constitutive 1/n it predicts at long λ is what
+  `alpha_scale` 0.34 already absorbs. The production kernel stays isotropic
+  and Newtonian in form with `eta_bar`/`eta_field` = local SECANT viscosity.
+  `budget_bridging.py::budget_bridging_melt_rate(n_bins=, blend_px=)` —
+  the **local** monolithic operator (2026-08-23): per-(H, uₓ, uᵧ[, η])
+  geometry bins, one transfer each applied to the whole padded domain and
+  blended with partition-of-unity weights (the `BlendedStubblefieldForward`
+  construction; `eta_field` is used PER BIN, not collapsed to a median).
+  `n_bins=1` (default) is the single global `H_ref` multiplier. Gate
+  `tests/gate_budget_bridging_local.py`.
+  `strip_mode_design()` + `budget_bridging_melt_rate(strip_modes=, strip_prior=,
+  sigma2=)` (2026-08-23) — the **coloured noise model**: per-strip offset/plane
+  errors propagated through the OLS slope weights and the mean-thickness
+  divergence into rate-space mode fields, amplitudes estimated jointly with the
+  melt (standardised internally). Gate `tests/gate_strip_noise_model.py`. On
+  survey-realistic stacks the rate field identifies the amplitudes poorly;
+  the strip errors belong to the tilt fit (its prior), this is second-line.
   Plus `bridging_restoration.py` (bounded complex 1/T(k; α_eff) filter that
   restores bridging-damped along-flow melt structure on the Eulerian-family
   outputs; band-limited ≥2.5H, mirror-padded, α calibrated ×0.34 vs E1b —

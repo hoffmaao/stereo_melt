@@ -70,6 +70,7 @@ import numpy as np
 import xarray as xr
 from scipy.ndimage import gaussian_filter
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.dynamics import linear_inverse_budget_melt_rate
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
 from stereo_melt.io.bedmachine import load_firn_on_grid
@@ -258,11 +259,13 @@ def main() -> None:
         ("hydrostatic part", np.asarray(ds.melt_rate_hydro.values, float), 25),
         ("non-hydro correction", np.asarray(ds.nonhydro_corr.values, float), 8),
     ]
+    mcmap = melt_cmap()
     for ax, (name, v, vmax) in zip(axes, panels):
-        im = ax.imshow(v, cmap="RdBu_r", vmin=-vmax, vmax=vmax, interpolation="nearest")
+        im = ax.imshow(v, cmap=mcmap, norm=melt_norm(vmax=float(vmax)),
+                       interpolation="nearest")
         ax.set_title(name, fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
-        fig.colorbar(im, ax=ax, shrink=0.75)
+        add_melt_colorbar(fig, im, ax=ax, shrink=0.75)
     fig.suptitle(
         "PIG 250 m is2ctempo — budget-corrected linear inverse vs production path solver "
         "(m ice/yr, negative = melt)", fontsize=11,

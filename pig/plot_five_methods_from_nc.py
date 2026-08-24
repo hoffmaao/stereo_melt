@@ -15,13 +15,18 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 import numpy as np
 import xarray as xr
 
 from pig import config
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin, vmax):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     return ax.imshow(
         da.values,
         extent=[
@@ -30,9 +35,8 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin, vmax):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
         aspect="equal",
+        **kw,
     )
 
 
@@ -69,14 +73,15 @@ def main(nc_path: Path, vlim: float = 20.0, fig_path: Path | None = None) -> Pat
 
     fig, axes = plt.subplots(1, len(panels), figsize=(len(panels) * 4, 6.5), constrained_layout=True)
     for col, (title, da) in enumerate(panels):
-        im = _imshow_xr(axes[col], da, cmap="RdBu_r", vmin=-vlim, vmax=vlim)
+        im = _imshow_xr(axes[col], da, cmap=melt_cmap(),
+                        norm=melt_norm(vmax=vlim))
         axes[col].set_title(
             f"{title}\nmedian={float(da.median()):+.2f}  "
             f"IQR=[{float(da.quantile(0.25)):+.2f}, {float(da.quantile(0.75)):+.2f}]  "
             f"abs_max={float(np.abs(da).max()):.0f}",
             fontsize=10,
         )
-        fig.colorbar(im, ax=axes[col], fraction=0.045)
+        add_melt_colorbar(fig, im, ax=axes[col], fraction=0.045)
         axes[col].set_xlabel("x (m)")
     axes[0].set_ylabel("y (m)")
     fig.suptitle(

@@ -67,6 +67,15 @@ $PY -m ruff check stereo_melt/src/           # lint (ruff installed in the env)
   `nansen/`, which still hold pre-migration date lists (migrate them on
   their next tilt pass).
 
+## Consolidation plan (staged, 2026-08-22)
+
+[`literature/plan_consolidation.md`](./literature/plan_consolidation.md) is
+the staged plan to collapse the layered solvers and photocopied drivers into
+one library + thin drivers (stage 0 = track `elmer_synth/` and tag; stage 1 =
+one implementation per concept in `dynamics/`; 2 = solver registry; 3 =
+config split + shared heavies; 4 = driver pruning; 5 = `elmer_synth/`
+hygiene; 6 = docs). Each stage has a gate; decisions A–E are listed there.
+
 ## "Where we left off" — resume state
 
 Live session state is in the **memory system**, not in any `CLAUDE.md`.

@@ -48,6 +48,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.melt import lagrangian_melt_rate
@@ -166,10 +167,10 @@ def main() -> None:
     print(f"Saved -> {out_nc}")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), constrained_layout=True)
-    im = axes[0].imshow(mr.values, cmap="RdBu_r", vmin=-10, vmax=10,
+    im = axes[0].imshow(mr.values, cmap=melt_cmap(), norm=melt_norm(vmax=10.0),
                         interpolation="nearest")
     axes[0].set_title(f"Venable path melt {tag} (m ice/yr)", fontsize=10)
-    fig.colorbar(im, ax=axes[0], shrink=0.8)
+    add_melt_colorbar(fig, im, ax=axes[0], shrink=0.8)
     im2 = axes[1].imshow(np.where(floating.values, lagr["count"].values, np.nan),
                          cmap="viridis", interpolation="nearest")
     axes[1].set_title("path deposit count", fontsize=10)

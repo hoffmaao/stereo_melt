@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.melt import eulerian_melt_rate, lagrangian_melt_rate
 
@@ -50,19 +51,21 @@ def plot_two_panel(
 ) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
 
-    im0 = _imshow_xr(axes[0], euler.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
+    im0 = _imshow_xr(axes[0], euler.melt_rate, cmap=mcmap, norm=mnorm)
     axes[0].set_title(
         f"Eulerian melt (m ice/yr)\n"
         f"median={float(euler.melt_rate.median()):.2f}"
     )
-    fig.colorbar(im0, ax=axes[0], fraction=0.045)
+    add_melt_colorbar(fig, im0, ax=axes[0], fraction=0.045)
 
-    im1 = _imshow_xr(axes[1], lagr.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im1 = _imshow_xr(axes[1], lagr.melt_rate, cmap=mcmap, norm=mnorm)
     axes[1].set_title(
         f"Lagrangian (path-integrated) melt (m ice/yr)\n"
         f"median={float(lagr.melt_rate.median()):.2f}"
     )
-    fig.colorbar(im1, ax=axes[1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[1], fraction=0.045)
 
     diff = lagr.melt_rate - euler.melt_rate
     im2 = _imshow_xr(axes[2], diff, cmap="PuOr", vmin=-2.0, vmax=2.0)

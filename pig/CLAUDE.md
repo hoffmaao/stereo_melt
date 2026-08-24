@@ -33,6 +33,11 @@ parity/benchmark study). Canonical stage sequence: [`../PIPELINE.md`](../PIPELIN
 - **Calving 2017–2020** removed much of the historical ice tongue; the AOI
   reflects post-2020 geometry, and calving windows split melt-run epochs
   (berg-contaminated epochs are handled by windowed runs, not dropped strips).
+  Since 2026-07-27 the window-minimum extent mask
+  (`pig.build_min_extent_mask`, PIPELINE.md stage 6b) removes the calved
+  sector (6149 → 4946 km²) from every `run_melt` product by default
+  (`PIG_MIN_EXTENT=0` opts out); the eta-inversion exporter applies the same
+  constraint live over its own window.
 - Production finals carry the `_tv_path_dfix` lineage: time-varying velocity
   + trend-H + endpoint-exact firn Δd. Treat any new estimator as opt-in
   diagnostic alongside the path solver, not a replacement.

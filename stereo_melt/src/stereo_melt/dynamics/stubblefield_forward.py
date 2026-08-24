@@ -115,6 +115,35 @@ __all__ = [
 ]
 
 
+def _keep_band_np(a: np.ndarray, mask: np.ndarray, sigma_px: float,
+                  short_lambda_px: float | None = None) -> np.ndarray:
+    """Numpy replica of the fit's band projector (see the ``anchor_lp`` /
+    ``anchor_short`` machinery in :func:`variational_melt_inverse`): the
+    component of ``a`` in the KEPT band, mask-zero-filled, mirror-padded.
+    Used so the reported fit diagnostics live in exactly the subspace the
+    objective saw."""
+    a0 = np.where(mask, a, 0.0)
+    ny, nx = a0.shape
+    py, px = ny // 2, nx // 2
+    f = np.pad(a0, ((py, py), (px, px)), mode="reflect")
+    ky = np.fft.fftfreq(f.shape[0])[:, None]
+    kx = np.fft.rfftfreq(f.shape[1])[None, :]
+    kk = np.hypot(ky, kx)
+
+    def cos_lp(k_cut: float) -> np.ndarray:
+        k_lo, k_hi = k_cut / 1.2, k_cut * 1.2
+        t = np.clip((k_hi - kk) / (k_hi - k_lo), 0.0, 1.0)
+        return np.where(kk <= k_lo, 1.0, np.where(kk >= k_hi, 0.0,
+                        0.5 - 0.5 * np.cos(math.pi * t)))
+
+    keep = 1.0 - cos_lp(math.sqrt(2.0 * math.log(2.0))
+                        / (2.0 * math.pi * float(sigma_px)))
+    if short_lambda_px:
+        keep = keep * cos_lp(1.0 / float(short_lambda_px))
+    out = np.fft.irfft2(np.fft.rfft2(f) * keep, s=f.shape)
+    return out[py:py + ny, px:px + nx]
+
+
 def _nan_gauss(a: np.ndarray, sigma: float) -> np.ndarray:
     """NaN-aware Gaussian smoothing (smooth value / smooth mask)."""
     m = np.isfinite(a)
@@ -290,6 +319,10 @@ class BlendedStubblefieldForward(torch.nn.Module):
     H_field, ux_field, uy_field : (ny, nx) arrays
         Local thickness (m) and velocity (m/yr). Non-finite cells (off-shelf) do
         not vote on the clustering and take the nearest valid weights.
+    eta_field : (ny, nx) array, optional
+        Spatially varying effective viscosity (Pa s). When given it joins the
+        clustering features and each bin's multiplier is built with its own
+        ``eta_bar`` (overriding the scalar in ``mult_kwargs``).
     n_bins :
         Number of distinct multipliers. Cost is linear in it.
     blend_px :
@@ -306,6 +339,7 @@ class BlendedStubblefieldForward(torch.nn.Module):
         ux_field: np.ndarray,
         uy_field: np.ndarray,
         *,
+        eta_field: np.ndarray | None = None,
         n_bins: int = 6,
         blend_px: float = 8.0,
         **mult_kwargs,
@@ -318,10 +352,21 @@ class BlendedStubblefieldForward(torch.nn.Module):
         uy_field = np.asarray(uy_field, dtype=float)
         valid = (np.isfinite(H_field) & np.isfinite(ux_field)
                  & np.isfinite(uy_field) & (H_field > 0))
+        cols = [H_field, ux_field, uy_field]
+        if eta_field is not None:
+            # Spatially varying effective viscosity (e.g. inferred from a
+            # momentum-balance inversion): eta joins the geometry clustering and
+            # each bin's multiplier is built with its own eta_bar, overriding
+            # the scalar from mult_kwargs. Soft shear margins and stiff trunk
+            # ice then get different bridging responses.
+            eta_field = np.asarray(eta_field, dtype=float)
+            valid &= np.isfinite(eta_field) & (eta_field > 0)
+            cols.append(eta_field)
         if not valid.any():
-            raise ValueError("no finite (H, ux, uy) cells for the blended operator")
+            raise ValueError("no finite (H, ux, uy[, eta]) cells for the "
+                             "blended operator")
 
-        feats = np.stack([H_field[valid], ux_field[valid], uy_field[valid]], axis=1)
+        feats = np.stack([c[valid] for c in cols], axis=1)
         n_bins = max(1, min(int(n_bins), len(np.unique(feats, axis=0))))
         if n_bins == 1:
             lab_v = np.zeros(len(feats), dtype=int)
@@ -331,10 +376,15 @@ class BlendedStubblefieldForward(torch.nn.Module):
         self.n_bins = n_bins
         self.bin_geometry = [tuple(float(c) for c in row) for row in cent]
 
+        def _bin_kwargs(row):
+            if eta_field is None:
+                return mult_kwargs
+            return {**mult_kwargs, "eta_bar": row[3]}
+
         mults = [stubblefield_forward_multiplier(
-                     2 * self.ny, 2 * self.nx, dx, dy, H_b, ux_b, uy_b,
-                     **mult_kwargs)
-                 for H_b, ux_b, uy_b in self.bin_geometry]
+                     2 * self.ny, 2 * self.nx, dx, dy, row[0], row[1], row[2],
+                     **_bin_kwargs(row))
+                 for row in self.bin_geometry]
         self.register_buffer(
             "M", torch.from_numpy(np.ascontiguousarray(np.stack(mults))))
 
@@ -440,9 +490,12 @@ def variational_melt_inverse(
     H_field: np.ndarray | None = None,
     ux_field: np.ndarray | None = None,
     uy_field: np.ndarray | None = None,
+    eta_field: np.ndarray | None = None,
     n_bins: int | None = None,
     blend_px: float = 8.0,
     m_prior: np.ndarray | None = None,
+    anchor_lp_sigma_px: float | None = None,
+    anchor_short_lambda_px: float | None = None,
     bg_degree: int | None = None,
     bg_extra: np.ndarray | None = None,
 ) -> MeltInverseResult:
@@ -473,6 +526,12 @@ def variational_melt_inverse(
     log_every :
         If > 0, print the data/reg terms every ``log_every`` iterations (heavy
         fits run under ``nohup``; the log is the only visibility).
+    eta_field : (ny, nx) array, optional
+        Spatially varying effective (Newtonian-equivalent) viscosity, Pa s —
+        e.g. a momentum-balance inversion linearized about the observed strain
+        rate. Joins the geometry clustering, and each bin's multiplier is built
+        with its own ``eta_bar`` (the scalar ``eta_bar`` is then only a
+        fallback for cells outside the field). Requires ``n_bins``.
     H_field, ux_field, uy_field, n_bins, blend_px :
         Set ``n_bins`` to use the spatially varying
         :class:`BlendedStubblefieldForward` instead of the single-``(H, u)``
@@ -488,6 +547,35 @@ def variational_melt_inverse(
         operator cannot constrain the mean or the global ramp, so those modes
         relax to ``m_prior`` while the data only moves melt off it where the
         operator has gain (the channel band). ``None`` = the toward-zero pin.
+    anchor_lp_sigma_px : float, optional
+        Prior-owned long-wavelength band: Gaussian sigma (pixels) of a low-pass
+        that splits the problem in two, consistently on both sides of the
+        objective. Melt side: the low-pass component of the fitted deviation
+        ``dm`` is projected out every step (the scale generalization of the
+        mask-mean pin), so structure broader than this scale comes from
+        ``m_prior`` *by construction* — no scalar ``lam`` can otherwise separate
+        the genuine channel-band correction from long-λ melt modes recruited to
+        absorb unmodeled smooth surface structure (a DATA-FAVORED leak). Data
+        side: the same low-pass is removed from the residual, blinding the fit
+        to the scales the model refuses to explain — without this the leak does
+        not vanish but ALIASES into superposed channel-band wiggles (worse).
+        Choose so the cutoff wavelength (~5.3 sigma) sits above BOTH the
+        bridging knee ``2*pi*H`` (where the budget prior is near-exact anyway)
+        AND the melt anomalies' own spectral support: ~``4*H/dx`` (cutoff
+        ~21 H) in practice — the E2a A/B showed ``2*H/dx`` (cutoff ~10.7 H)
+        already clips band-scale corrections, whose content peaks near 12.6 H
+        for a 3.3 H-wide channel. ``None`` = pin only the mask mean (legacy).
+    anchor_short_lambda_px : float, optional
+        Short-wavelength edge of the correction band (a cutoff WAVELENGTH in
+        pixels, not a sigma), active only with ``anchor_lp_sigma_px``. Below
+        this scale the operator transfer sits on its floor, so any fitted melt
+        there is amplified noise by construction — with the long-wavelength
+        residual blinded, the optimizer otherwise pumps exactly that junk
+        (E2a patch: lam had to rise to ~1 to suppress it, killing genuine
+        corrections elsewhere). The pin becomes a band-pass and the residual is
+        blinded to match, which returns ``lam`` to a benign default. ~2.5 H in
+        pixels (the ``bridging_restoration`` band limit; the transfer knee is
+        ``2*pi*H``). ``None`` = long-side pin only.
     bg_degree : int, optional
         Degree of a polynomial background basis (0=DC, 1=plane, 2=quadratic)
         fitted *in the model* and projected out of the data residual each step
@@ -514,6 +602,8 @@ def variational_melt_inverse(
     mult_kw = dict(eta_bar=eta_bar, alpha_scale=alpha_scale,
                    rho_i=rho_i, rho_w=rho_w, g=g)
     if n_bins is None:
+        if eta_field is not None:
+            raise ValueError("eta_field requires n_bins (the blended operator)")
         M_h = stubblefield_forward_multiplier(
             2 * ny, 2 * nx, dx, dy, H, ux_myr, uy_myr, **mult_kw)
         fwd = StubblefieldForward(M_h, ny, nx)
@@ -522,15 +612,19 @@ def variational_melt_inverse(
             return np.full((ny, nx), float(v)) if a is None else np.asarray(a)
         fwd = BlendedStubblefieldForward(
             ny, nx, dx, dy, _fld(H_field, H), _fld(ux_field, ux_myr),
-            _fld(uy_field, uy_myr), n_bins=int(n_bins), blend_px=blend_px,
-            **mult_kw)
+            _fld(uy_field, uy_myr), eta_field=eta_field,
+            n_bins=int(n_bins), blend_px=blend_px, **mult_kw)
         if log_every:
             gh = np.array([g[0] for g in fwd.bin_geometry])
             gu = np.hypot([g[1] for g in fwd.bin_geometry],
                           [g[2] for g in fwd.bin_geometry])
+            eta_note = ""
+            if len(fwd.bin_geometry[0]) > 3:
+                ge = np.array([g[3] for g in fwd.bin_geometry])
+                eta_note = f"  eta {ge.min():.2e}-{ge.max():.2e} Pa s"
             print(f"    blended operator: {fwd.n_bins} geometry bins  "
                   f"H {gh.min():.0f}-{gh.max():.0f} m  "
-                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr", flush=True)
+                  f"|u| {gu.min():.0f}-{gu.max():.0f} m/yr{eta_note}", flush=True)
     rep_net = (GridMelt(ny, nx) if rep == "grid"
                else SirenMelt(ny, nx, **(siren_kwargs or {})))
 
@@ -576,16 +670,80 @@ def variational_melt_inverse(
     # constant): Adam's per-pixel normalization drifts it even though the data
     # gradient is mean-zero, so we pin it -- the melt's unobservable level then
     # comes from the prior, not the optimizer. m_prior=None => dm=m (legacy).
+    # anchor_lp_sigma_px generalizes the pin from the mean to the whole
+    # long-wavelength band: dm <- dm - LP(dm), so the prior owns every scale
+    # the low-pass keeps and the data can only shape the channel band. LP MUST
+    # be a true spectral projector (idempotent): a spatial Gaussian I-G leaks
+    # G(1-G) (max 25% at its half-power band) and is invertible at low k, so
+    # the optimizer tunnels through it and near-cutoff junk contaminates the
+    # fit (first gate attempt). We therefore build a 0/1 low-pass mask (narrow
+    # raised-cosine ramp against Gibbs) on the mirror-padded FFT grid, with the
+    # cutoff at the Gaussian-equivalent half-power wavelength ~5.34*sigma.
+    rm_W = None                      # spectral mask of the REMOVED band(s)
+    if anchor_lp_sigma_px:
+        py_, px_ = ny // 2, nx // 2
+        ky = np.fft.fftfreq(ny + 2 * py_)[:, None]
+        kx = np.fft.rfftfreq(nx + 2 * px_)[None, :]
+        kk = np.hypot(ky, kx)
+
+        def _cos_lp(k_cut: float) -> np.ndarray:
+            """1 below the cut, 0 above, raised-cosine ramp over /1.2..*1.2."""
+            k_lo, k_hi = k_cut / 1.2, k_cut * 1.2
+            t = np.clip((k_hi - kk) / (k_hi - k_lo), 0.0, 1.0)
+            return np.where(kk <= k_lo, 1.0, np.where(kk >= k_hi, 0.0,
+                            0.5 - 0.5 * np.cos(math.pi * t)))
+
+        s = float(anchor_lp_sigma_px)
+        k_c = math.sqrt(2.0 * math.log(2.0)) / (2.0 * math.pi * s)
+        keep = 1.0 - _cos_lp(k_c)          # long side: prior-owned band out
+        note = f"cutoff lambda ~{1.0 / k_c:.0f} px"
+        if anchor_short_lambda_px:
+            # short side: below the transfer floor any melt is amplified
+            # noise -- remove it from the fittable band and the residual alike
+            keep = keep * _cos_lp(1.0 / float(anchor_short_lambda_px))
+            note += f", short cut {float(anchor_short_lambda_px):.0f} px"
+        rm_W = torch.from_numpy(np.ascontiguousarray(1.0 - keep))
+        if log_every:
+            print(f"    anchor band pin: {note} (spectral projector) -- "
+                  f"long-wavelength dm follows the prior; data residual "
+                  f"blinded to the kept band", flush=True)
+
+    def _rm(field: torch.Tensor) -> torch.Tensor:
+        """The removed-band component of a field (mirror-padded rfft2)."""
+        py, px = ny // 2, nx // 2
+        f = torch.nn.functional.pad(field[None, None], (px, px, py, py),
+                                    mode="reflect")[0, 0]
+        F = torch.fft.rfft2(f)
+        out = torch.fft.irfft2(F * rm_W.to(F.dtype), s=f.shape)
+        return out[py:py + ny, px:px + nx]
+
+    def _pin(dm: torch.Tensor) -> torch.Tensor:
+        if rm_W is not None:
+            dm = dm - _rm(dm)
+        if anchor:
+            dm = dm - dm[mask_t].mean()
+        return dm
+
+    def _blind(r_field: torch.Tensor) -> torch.Tensor:
+        # Consistency of the projection contract: the data term must not SEE
+        # the bands the model refuses to explain -- long-wavelength residual
+        # would otherwise be mis-attributed by ALIASING into channel-band
+        # wiggles (the gate's dome-leak failure without this), and
+        # sub-transfer-floor residual would be chased with amplified melt
+        # noise. Zero-fill outside the mask before filtering (NaN-safe).
+        if rm_W is None:
+            return r_field
+        r0 = torch.where(mask_t, r_field, torch.zeros((), dtype=r_field.dtype))
+        return r_field - _rm(r0)
+
     opt = torch.optim.Adam(rep_net.parameters(), lr=lr)
     history: list = []
     for it in range(iters):
         opt.zero_grad()
-        dm = rep_net()
-        if anchor:
-            dm = dm - dm[mask_t].mean()
+        dm = _pin(rep_net())
         m = dm + m_prior_t
         pred = fwd(m)
-        r = (pred - dzs_t)[mask_t]
+        r = _blind(pred - dzs_t)[mask_t]
         if Qb is not None:                       # remove the fitted background
             r = r - Qb @ (Qb.t() @ r)
         data = (r ** 2).mean()
@@ -599,15 +757,13 @@ def variational_melt_inverse(
                   flush=True)
 
     with torch.no_grad():
-        m_hat = rep_net()
-        if anchor:
-            m_hat = m_hat - m_hat[mask_t].mean()
-        m_final = m_hat + m_prior_t
+        m_final = _pin(rep_net()) + m_prior_t
         melt = m_final.cpu().numpy()
-        dzs_fit = fwd(m_final).cpu().numpy()
+        dzs_fit_t = fwd(m_final)
+        dzs_fit = dzs_fit_t.cpu().numpy()
         bg_field = None
         if Qb is not None:
-            r_fin = (torch.from_numpy(np.ascontiguousarray(dzs_fit)) - dzs_t)[mask_t]
+            r_fin = _blind(dzs_fit_t - dzs_t)[mask_t]
             theta = -(Rinv @ (Qb.t() @ r_fin))    # coeffs in the raw basis
             bg_field = (B_full_t @ theta).reshape(ny, nx).cpu().numpy()
     return MeltInverseResult(melt=melt, loss_history=history, n_iter=iters,
@@ -636,7 +792,10 @@ def variational_melt_rate(
     log_every: int = 0,
     n_bins: int | None = None,
     blend_km: float = 4.0,
+    eta_field: xr.DataArray | None = None,
     m_prior: xr.DataArray | None = None,
+    anchor_lp_sigma_H: float | None = None,
+    anchor_short_lambda_H: float | None = 2.5,
     bg_degree: int | None = None,
     bg_extra: xr.DataArray | None = None,
 ) -> xr.Dataset:
@@ -679,12 +838,40 @@ def variational_melt_rate(
         Passed through to :func:`variational_melt_inverse` (see there and the
         module docstring; ``eta_bar``/``alpha_scale`` are per-geometry study
         parameters, not constants).
+    eta_field : xarray.DataArray, optional
+        Spatially varying effective (Newtonian-equivalent) viscosity on the
+        stack grid, Pa s — e.g. an icepack/momentum-balance inversion
+        linearized about the observed strain rate,
+        :math:`\bar\eta = \tfrac12 A^{-1/n}\,\dot\varepsilon_e^{(1-n)/n}`.
+        Joins the geometry clustering of the blended operator so soft shear
+        margins and stiff trunk ice get different bridging responses; the
+        scalar ``eta_bar`` remains the study-parameter fallback. Requires
+        ``n_bins``.
     m_prior : xarray.DataArray, optional
         Budget/level melt field (Shean sign, negative = melt) on the stack grid.
         Anchors the fit's null-space (mean + global ramp, which the DC-blind
         operator cannot see) to the budget, so the fused melt carries an absolute
         level and flux/gain become meaningful. Negated internally to the
         operator's sign. ``None`` = the DC-blind toward-zero pin.
+    anchor_lp_sigma_H : float, optional
+        Prior-owned long-wavelength band, as a Gaussian sigma in units of the
+        reference thickness ``H_ref`` (converted to pixels and passed to
+        :func:`variational_melt_inverse` as ``anchor_lp_sigma_px``). ~2.0 puts
+        the half-power split at ~10.7 H, above the bridging knee ``2*pi*H``:
+        melt structure broader than that follows ``m_prior`` by construction,
+        which stops the data term from recruiting long-λ melt modes to absorb
+        large-scale surface structure the background basis cannot represent
+        (the failure mode on localized-anomaly geometries). ``None`` = mask-mean
+        pin only.
+    anchor_short_lambda_H : float, optional
+        Short-wavelength edge of the correction band (cutoff wavelength,
+        x ``H_ref``), active only with ``anchor_lp_sigma_H``. Below it the
+        operator transfer sits on its floor, so fitted melt there is amplified
+        noise; removing the band from both the fit and the residual keeps the
+        freed optimizer from chasing unfittable short-scale content once the
+        long wavelengths are blinded (E2a patch behavior), and returns ``lam``
+        to a benign default. Default 2.5 (the ``bridging_restoration`` band
+        limit). ``None`` = long-side pin only.
     bg_degree : int, optional
         Fit a polynomial background of this degree (1=plane, 2=quadratic) in the
         model and feed the RAW median surface, instead of the legacy Gaussian
@@ -707,6 +894,11 @@ def variational_melt_rate(
         ``fit_var_explained`` means the surface structure is not something this
         (single-``H``, single-mean-``u``, steady) operator can make from *any*
         melt field, and the recovered melt should be read with that caveat.
+        With the band contract active this becomes a KEPT-BAND variance
+        explained and a working channel detector (E2a: ~0.7 where a genuine
+        channel exists vs ~0.1 on a channel-free shelf, where the correction is
+        noise): low values say trust the prior — raise ``lam`` or report the
+        budget melt alone.
     """
     # strip-robust surface (median over time, not mean)
     h_med = h_stack.median("time", skipna=True)
@@ -766,21 +958,31 @@ def variational_melt_rate(
     # Local geometry for the blended operator: thickness and velocity on the same
     # crop, masked off the shelf so the geometry clustering is not pulled by open
     # ocean or grounded ice.
-    H_crop = ux_crop = uy_crop = None
+    H_crop = ux_crop = uy_crop = eta_crop = None
     if n_bins is not None:
         H_full = freeboard_to_thickness(h_med, d=d, rho_w=rho_w, rho_i=rho_i).values
         H_crop = np.where(fl_crop, H_full[y0:y1, x0:x1], np.nan)
         ux_crop = np.where(fl_crop, vxm.values[y0:y1, x0:x1], np.nan)
         uy_crop = np.where(fl_crop, vym.values[y0:y1, x0:x1], np.nan)
+        if eta_field is not None:
+            eta_crop = np.where(
+                fl_crop, np.asarray(eta_field.values)[y0:y1, x0:x1], np.nan)
 
     result = variational_melt_inverse(
         dzs, fit_mask, res, res, H_ref, u0x, u0y,
         rep=rep, eta_bar=eta_bar, alpha_scale=alpha_scale, lam=lam,
         iters=iters, lr=lr, rho_i=rho_i, rho_w=rho_w, g=g,
         siren_kwargs=siren_kwargs, log_every=log_every,
-        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop, n_bins=n_bins,
+        H_field=H_crop, ux_field=ux_crop, uy_field=uy_crop,
+        eta_field=eta_crop, n_bins=n_bins,
         blend_px=blend_km * 1000.0 / res,
-        m_prior=m_prior_crop, bg_degree=bg_degree, bg_extra=bg_extra_crop)
+        m_prior=m_prior_crop,
+        anchor_lp_sigma_px=(None if anchor_lp_sigma_H is None
+                            else anchor_lp_sigma_H * H_ref / res),
+        anchor_short_lambda_px=(None if (anchor_lp_sigma_H is None
+                                         or anchor_short_lambda_H is None)
+                                else anchor_short_lambda_H * H_ref / res),
+        bg_degree=bg_degree, bg_extra=bg_extra_crop)
 
     def _embed(crop: np.ndarray, name: str) -> xr.DataArray:
         """Place a bbox-cropped field back on the full grid, masked to the fit."""
@@ -798,10 +1000,22 @@ def variational_melt_rate(
     # legacy high-pass the anomaly is the high-passed dzs and the model dzs_fit.
     if result.bg_field is not None:
         dzs_anom = dzs - result.bg_field
-        resid = (result.dzs_fit + result.bg_field - dzs)[fit_mask]
+        resid_f = result.dzs_fit + result.bg_field - dzs
     else:
         dzs_anom = dzs
-        resid = (result.dzs_fit - dzs)[fit_mask]
+        resid_f = result.dzs_fit - dzs
+    if anchor_lp_sigma_H is not None:
+        # Evaluate in the kept band only -- the objective the fit actually
+        # saw. Long-wavelength residual is prior-owned by contract and
+        # sub-transfer-floor residual is unfittable noise; counting either
+        # here would swamp the diagnostic (they are not the fit's to explain).
+        short_px = (None if anchor_short_lambda_H is None
+                    else anchor_short_lambda_H * H_ref / res)
+        dzs_anom = _keep_band_np(dzs_anom, fit_mask,
+                                 anchor_lp_sigma_H * H_ref / res, short_px)
+        resid_f = _keep_band_np(resid_f, fit_mask,
+                                anchor_lp_sigma_H * H_ref / res, short_px)
+    resid = resid_f[fit_mask]
     obs = dzs_anom[fit_mask]
     rms_resid = float(np.sqrt(np.mean(resid ** 2)))
     rms_obs = float(np.sqrt(np.mean(obs ** 2)))
@@ -829,7 +1043,9 @@ def variational_melt_rate(
                 f"variational forward-operator inverse ({rep})"
                 + ("; budget-anchored null-space + in-model background"
                    if (m_prior is not None or bg_degree is not None)
-                   else "; DC-blind channel correction")),
+                   else "; DC-blind channel correction")
+                + ("; long-wavelength band pinned to prior and blinded in data"
+                   if anchor_lp_sigma_H is not None else "")),
             "rho_w": rho_w, "rho_i": rho_i, "eta_bar": eta_bar,
             "H_ref_m": H_ref, "t_r_yr": t_r_yr,
             "u0x_myr": u0x, "u0y_myr": u0y,
@@ -837,8 +1053,15 @@ def variational_melt_rate(
             "sigma_hp_H": (-1.0 if bg_degree is not None else sigma_hp_H),
             "bg_degree": (-1 if bg_degree is None else int(bg_degree)),
             "budget_anchored": int(m_prior is not None),
+            "anchor_lp_sigma_H": (-1.0 if anchor_lp_sigma_H is None
+                                  else float(anchor_lp_sigma_H)),
+            "anchor_short_lambda_H": (
+                -1.0 if (anchor_lp_sigma_H is None
+                         or anchor_short_lambda_H is None)
+                else float(anchor_short_lambda_H)),
             "n_bins": -1 if n_bins is None else int(result.n_bins_used),
             "blend_km": -1.0 if n_bins is None else float(blend_km),
+            "eta_field": int(eta_field is not None),
             # aliases so this Dataset slots into run_melt's linv plot/save plumbing
             "gamma_dimless": 0.0, "tr_yr": t_r_yr,
             "note": (

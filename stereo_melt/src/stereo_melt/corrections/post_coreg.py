@@ -128,13 +128,24 @@ def apply_tide_ibe_to_stack(
     corrected = stack.copy(deep=True)
     data = corrected.values
 
+    # Memoize the tide field on the epoch timestamp. Strip filenames carry no
+    # time of day, so build_stack dates every strip at 00:00 of its acquisition
+    # day and same-day siblings share a timestamp exactly -- and a pyTMD
+    # evaluation costs ~9.5 s regardless of point count, dominated by loading
+    # the CATS2008 constituents. Bit-identical results; on a stack with many
+    # same-day strips (PIG has ~1.8 strips/date, beardmore_shelf more) this is
+    # the difference between minutes and half an hour.
+    tide_cache: dict[np.datetime64, np.ndarray] = {}
     for k, t in enumerate(times):
         center_time = np.datetime64(t)
-        tide_field = _tide_on_stack_grid(
-            x_axis, y_axis, center_time,
-            tide_model=tide_model, tide_model_dir=tide_model_dir,
-            grid_step_m=tide_grid_step_m,
-        )
+        cached = center_time in tide_cache
+        if not cached:
+            tide_cache[center_time] = _tide_on_stack_grid(
+                x_axis, y_axis, center_time,
+                tide_model=tide_model, tide_model_dir=tide_model_dir,
+                grid_step_m=tide_grid_step_m,
+            )
+        tide_field = tide_cache[center_time]
         ibe_scalar = _scalar_ibe_at(ibe_interp, center_time)
 
         correction = (tide_field + ibe_scalar) * mask
@@ -142,7 +153,7 @@ def apply_tide_ibe_to_stack(
         print(
             f"   epoch {k+1}/{len(times)}  {str(center_time)[:19]}  "
             f"tide(median)={np.nanmedian(tide_field):+.3f} m  "
-            f"IBE={ibe_scalar:+.4f} m"
+            f"IBE={ibe_scalar:+.4f} m" + ("  [same-date reuse]" if cached else "")
         )
 
     corrected.values = data

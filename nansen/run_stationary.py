@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.dynamics import stationary_pseudospectral_lagrangian_inverse
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.stack import load_basin_stack
@@ -47,14 +48,17 @@ def _load_any_stack(stack_prefix: str = "nansen_stack") -> tuple[xr.DataArray, P
     )
 
 
-def _imshow_xr(ax, da, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     return ax.imshow(
         da.values,
         extent=[
             float(da["x"].min()), float(da["x"].max()),
             float(da["y"].min()), float(da["y"].max()),
         ],
-        origin="upper", cmap=cmap, vmin=vmin, vmax=vmax, aspect="equal",
+        origin="upper", cmap=cmap, aspect="equal", **kw,
     )
 
 
@@ -72,7 +76,8 @@ def plot_tikhonov_sweep(results: list[tuple[float, xr.Dataset]], out_path: Path)
         r, c = divmod(i, ncols)
         ax = axes[r, c]
         m = ds.melt_rate
-        im = _imshow_xr(ax, m, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im = _imshow_xr(ax, m, cmap=melt_cmap(),
+                        norm=melt_norm(vmax=max(abs(clim[0]), abs(clim[1]))))
         med = float(m.median())
         iqr = (float(m.quantile(0.25)), float(m.quantile(0.75)))
         ax.set_title(
@@ -81,7 +86,7 @@ def plot_tikhonov_sweep(results: list[tuple[float, xr.Dataset]], out_path: Path)
             f"cg_iter={ds.attrs['cg_iter']} conv={ds.attrs['cg_converged']}",
             fontsize=10,
         )
-        fig.colorbar(im, ax=ax, fraction=0.045)
+        add_melt_colorbar(fig, im, ax=ax, fraction=0.045)
     for k in range(n, nrows * ncols):
         r, c = divmod(k, ncols)
         axes[r, c].axis("off")

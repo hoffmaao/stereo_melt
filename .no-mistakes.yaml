@@ -1,0 +1,14 @@
+# Repository no-mistakes configuration.
+#
+# Deterministic test step: run the library gates for the solvers this branch
+# ships. The interpreter must be the stereo_melt conda env python by absolute
+# path (the sandbox cannot `conda activate`); the gates resolve the library
+# from their own file location, so they test the checked-out worktree.
+test:
+  commands:
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_restored_budget.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_helmholtz_divergence.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_budget_bridging_local.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_strip_noise_model.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_powerlaw_layer.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_budget_bridging_identity.py

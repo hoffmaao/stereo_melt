@@ -30,6 +30,8 @@ if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_LIB"] = _env_proj
 
 import matplotlib.pyplot as plt
+
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 import numpy as np
 import xarray as xr
 from scipy.ndimage import uniform_filter
@@ -158,16 +160,15 @@ def main() -> None:
     # Row 1: melt-rate maps
     for c, (name, a) in enumerate(fields):
         ax = axes[0, c]
-        im = ax.imshow(a, extent=extent, origin="upper", cmap="RdBu_r",
-                       vmin=-vlim, vmax=vlim, aspect="equal")
+        im = ax.imshow(a, extent=extent, origin="upper", cmap=melt_cmap(),
+                       norm=melt_norm(vmax=vlim), aspect="equal")
         f = a[np.isfinite(a)]
         ax.set_title(f"{name}\nmed={np.median(f):+.2f} "
                      f"IQR=[{np.percentile(f,25):+.1f},{np.percentile(f,75):+.1f}]",
                      fontsize=9)
         ax.set_xticks([]); ax.set_yticks([])
         if c == ncol - 1:
-            fig.colorbar(im, ax=axes[0, :].tolist(), fraction=0.012,
-                         label="melt rate (m ice/yr)")
+            add_melt_colorbar(fig, im, ax=axes[0, :].tolist(), fraction=0.012)
     axes[0, 0].set_ylabel("melt rate", fontsize=10)
 
     # Row 2: estimate - Lagrangian difference maps (anchor column blank)

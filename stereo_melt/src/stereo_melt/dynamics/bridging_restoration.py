@@ -84,6 +84,7 @@ __all__ = [
     "bridging_restoration_filter",
     "bridging_inverse",
     "bridging_inverse_filter",
+    "restored_budget_melt_rate",
 ]
 
 _TINY = 1e-30
@@ -105,6 +106,11 @@ def _bridging_transfer(ny, nx, dx, dy, H, ux_myr, uy_myr, eta_bar, alpha_scale,
     ``T`` carries no anisotropy weight and no cap — the shared Stubblefield
     surface transfer behind both the restoration post-filter and the regularized
     inverse. ``alpha_{x,y} = alpha_scale * u_{x,y} * t_r / H`` (E1b calibration).
+    The layer is Stubblefield's Newtonian one by design: the linearised-Glen
+    (tangent, anisotropic) kernel in :mod:`.powerlaw_layer` was tested in the
+    monolithic solution on the E1b Glen quartet (2026-08-23) and made it worse
+    — its transfer has a zero at ~2.3H — so ``eta_bar`` here is the local
+    SECANT viscosity and the constitutive 1/n sits in ``alpha_scale``.
     """
     fb = 1.0 - rho_i / rho_w
     u_mag = float(np.hypot(ux_myr, uy_myr))
@@ -393,3 +399,201 @@ def bridging_inverse(
             "lam": lam, "reg": reg, "ux_myr": ux, "uy_myr": uy,
         },
     )
+
+
+def restored_budget_melt_rate(
+    h_stack: xr.DataArray,
+    vx: xr.DataArray,
+    vy: xr.DataArray,
+    a_dot=0.0,
+    floating_mask: xr.DataArray | None = None,
+    *,
+    d=0.0,
+    eta_bar: float = 1e14,
+    alpha_scale: float = 0.34,
+    lift_cap: float = 6.0,
+    band_lam_min: float | None = None,
+    min_count: int = 3,
+    robust_dh_dt: bool = False,
+    estimator=None,
+    n_bins: int = 1,
+    blend_px: float = 8.0,
+    lift_umax_myr: float | None = None,
+    rho_i: float = rhoi,
+    rho_w: float = rhow,
+    g: float = G_GRAVITY,
+    gamma: float = 0.0,
+    theta: float = 1e-14,
+) -> xr.Dataset:
+    r"""Estimate melt by restoring the thickness, then closing the mass budget.
+
+    The hydrostatically inferred thickness is deconvolved with the bounded
+    inverse of the bridging transfer before the budget is closed:
+
+    .. math::
+        H = \mathcal{F}^{-1}\bigl[F(\mathbf k)\,\hat H_f\bigr], \qquad
+        \dot m = \frac{\partial H}{\partial t} + \nabla\!\cdot(H u) - \dot a,
+
+    where :math:`F = 1 + w\,b\,(T^{-1} - 1)` is the flow-projected
+    restoration filter of :func:`bridging_restoration_filter` — flow
+    projection :math:`w = (\mathbf k\cdot\hat u)^2/|\mathbf k|^2`, band
+    limit :math:`b` (half-power at ``band_lam_min``, default
+    :math:`2.5\,H`) — applied to the mean thickness and its observed rate.
+
+    Restoring before budgeting never lifts the velocity-carried melt
+    :math:`H\nabla\!\cdot u` and advects the restored thickness anomaly,
+    so the along-flow over-read of the joint fit (whose forward model lifts
+    the entire budget residual by :math:`T^{-1}`) cannot occur; the two
+    orderings differ by the commutator of :math:`T^{-1}` with
+    :math:`\nabla\!\cdot(\,\cdot\,u)`. For fields varying only across
+    flow the solver reduces exactly to
+    :func:`~stereo_melt.melt.eulerian_melt_rate`.
+
+    Parameters
+    ----------
+    h_stack : xarray.DataArray, dims ``(time, y, x)``
+        Corrected surface-elevation stack (m), as in
+        :func:`~stereo_melt.melt.eulerian_melt_rate`.
+    vx, vy : xarray.DataArray
+        Column-averaged velocity (m/yr); the time-mean is used if
+        time-varying.
+    a_dot, d : xarray.DataArray or float, optional
+        Surface mass balance (m ice/yr) and firn air content (m).
+    floating_mask : xarray.DataArray, optional
+        Cells entering the fit and the reference-geometry medians.
+    eta_bar : float
+        Depth-averaged viscosity (Pa s) of the bridging transfer.
+    alpha_scale : float
+        Calibration of the advection parameter
+        :math:`\alpha = \bar u\,t_r/H` (0.34, fitted against the E1b
+        full-Stokes twin).
+    lift_cap : float
+        Upper bound on :math:`|F|`; keeps the deconvolution bounded.
+    band_lam_min : float, optional
+        Half-power wavelength (m) of the Butterworth band limit
+        (default :math:`2.5\,H_{\mathrm{ref}}`).
+    min_count : int
+        Minimum finite samples per pixel for the thickness trend.
+    robust_dh_dt : bool
+        Huber-robust per-pixel trend, as in the Eulerian solver.
+    estimator : DivergenceEstimator, optional
+        Flux-divergence estimator for the restored thickness, e.g.
+        :class:`~stereo_melt.kinematics.HelmholtzDivergence`.
+    n_bins : int
+        With ``n_bins > 1`` one filter is built per ``(H, u_x, u_y)``
+        cluster and the restored fields are blended with Gaussian
+        partition-of-unity weights (``blend_px``) — the local filter for
+        shelves whose geometry spans the transfer's sensitivity range.
+    lift_umax_myr : float, optional
+        Bins faster than this receive the identity filter (no lift): over a
+        fast crevassed trunk the wide-band deconvolution amplifies surface
+        noise into O(100 m/yr) artifacts while hydrostasy is itself
+        marginal.
+    rho_i, rho_w, g, gamma, theta : float
+        Densities, gravity, and the kernel's extension / regularisation
+        parameters, passed through to the transfer.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``melt_rate`` (m ice/yr, negative = melt), ``H_restored``,
+        ``dHdt_restored``, ``dHdt_obs``, ``H_f_mean``, ``flux_div``; attrs
+        record the filter geometry (``H_ref_m``, ``band_lam_min_m`` for the
+        reference bin, ``bin_band_lam_min_m`` per bin, ``n_bins``,
+        ``bin_geometry``).
+    """
+    from ..freeboard import freeboard_to_thickness
+    from ..kinematics import SECONDS_PER_YEAR, dh_dt, flux_divergence
+
+    H_f_stack = freeboard_to_thickness(h_stack, d=d, rho_w=rho_w, rho_i=rho_i)
+    reg = dh_dt(H_f_stack, min_count=min_count, robust=robust_dh_dt)
+    dHdt_obs = reg["slope"] * SECONDS_PER_YEAR
+    H_f_mean = H_f_stack.mean("time", skipna=True)
+    vxm = vx.mean("time", skipna=True) if "time" in vx.dims else vx
+    vym = vy.mean("time", skipna=True) if "time" in vy.dims else vy
+
+    fit = np.isfinite(dHdt_obs.values) & np.isfinite(H_f_mean.values)
+    if floating_mask is not None:
+        fit &= np.asarray(floating_mask.values, bool)
+    if not fit.any():
+        raise ValueError("no cells satisfy the fit mask")
+    ny, nx = H_f_mean.sizes["y"], H_f_mean.sizes["x"]
+    dxg = float(abs(H_f_mean.x.values[1] - H_f_mean.x.values[0]))
+    dyg = float(abs(H_f_mean.y.values[1] - H_f_mean.y.values[0]))
+    H_ref = float(np.nanmedian(H_f_mean.values[fit]))
+    u0x = float(np.nanmedian(to_numpy(vxm.values)[fit]))
+    u0y = float(np.nanmedian(to_numpy(vym.values)[fit]))
+
+    def _filter(Hb, uxb, uyb):
+        if lift_umax_myr is not None and float(np.hypot(uxb, uyb)) > lift_umax_myr:
+            return xp.ones((2 * ny, 2 * nx), dtype=complex)
+        Fb, _ = bridging_restoration_filter(
+            2 * ny, 2 * nx, dxg, dyg, Hb, uxb, uyb, eta_bar=eta_bar,
+            alpha_scale=alpha_scale, lift_cap=lift_cap,
+            band_lam_min=band_lam_min,
+            rho_i=rho_i, rho_w=rho_w, g=g, gamma=gamma, theta=theta)
+        return Fb
+
+    bin_geom, bins_w = [(H_ref, u0x, u0y)], None
+    if int(n_bins) > 1:
+        from scipy.ndimage import gaussian_filter
+        from .stubblefield_forward import _kmeans_geometry
+        cols = [to_numpy(H_f_mean.values), to_numpy(vxm.values), to_numpy(vym.values)]
+        valid = fit & np.isfinite(cols[0]) & np.isfinite(cols[1]) \
+            & np.isfinite(cols[2]) & (cols[0] > 0)
+        feats = np.stack([np.asarray(c, float)[valid] for c in cols], axis=1)
+        scale = np.maximum(np.abs(feats).max(0), 1e-30)
+        n_uniq = len(np.unique(np.round(feats / scale, 6), axis=0))
+        nb = max(1, min(int(n_bins), n_uniq))
+        if nb > 1:
+            lab_v, cent = _kmeans_geometry(feats, nb)
+            bin_geom = [tuple(float(c) for c in row) for row in cent]
+            w = np.zeros((nb, ny, nx))
+            for b in range(nb):
+                ind = np.zeros((ny, nx))
+                ind[valid] = (lab_v == b)
+                w[b] = gaussian_filter(ind, blend_px, mode="nearest")
+            w[0][w.sum(0) < 1e-8] = 1.0
+            bins_w = w / np.maximum(w.sum(0), 1e-30)
+    Fs = [_filter(*row) for row in bin_geom]
+
+    def _apply(field: xr.DataArray) -> xr.DataArray:
+        vals = to_numpy(field.values).astype(np.float64)
+        finite = np.isfinite(vals)
+        fill = float(vals[finite].mean())
+        padded = asarray(np.pad(np.where(finite, vals, fill),
+                                ((0, ny), (0, nx)), mode="symmetric"))
+        spec = xp.fft.fft2(padded)
+        if bins_w is None:
+            out = to_numpy(xp.fft.ifft2(Fs[0] * spec).real)[:ny, :nx]
+        else:
+            out = np.zeros((ny, nx))
+            for b, Fb in enumerate(Fs):
+                out += bins_w[b] * to_numpy(xp.fft.ifft2(Fb * spec).real)[:ny, :nx]
+        out[~finite] = np.nan
+        return xr.DataArray(out, dims=("y", "x"),
+                            coords={"y": field.y.values, "x": field.x.values})
+
+    H_rest = _apply(H_f_mean)
+    dHdt_rest = _apply(dHdt_obs)
+    fd = flux_divergence(H_rest, vxm, vym, estimator=estimator)
+    a_field = a_dot if isinstance(a_dot, xr.DataArray) else xr.DataArray(a_dot)
+    melt = (dHdt_rest + fd - a_field.broadcast_like(H_rest)).where(
+        xr.DataArray(fit, dims=("y", "x"),
+                     coords={"y": H_rest.y.values, "x": H_rest.x.values}))
+    return xr.Dataset(
+        {"melt_rate": melt, "H_restored": H_rest, "dHdt_restored": dHdt_rest,
+         "dHdt_obs": dHdt_obs, "H_f_mean": H_f_mean, "flux_div": fd},
+        attrs={"method": "restore-then-budget",
+               "H_ref_m": H_ref, "u0x_myr": u0x, "u0y_myr": u0y,
+               "n_bins": len(bin_geom),
+               "bin_geometry": ";".join(f"{h:.1f},{a:.1f},{b:.1f}"
+                                        for h, a, b in bin_geom),
+               "eta_bar": eta_bar, "alpha_scale": alpha_scale,
+               "lift_cap": lift_cap,
+               "band_lam_min_m": float(band_lam_min if band_lam_min
+                                       else 2.5 * H_ref),
+               "bin_band_lam_min_m": ";".join(
+                   f"{(band_lam_min if band_lam_min else 2.5 * h):.1f}"
+                   for h, _a, _b in bin_geom),
+               "units": "m ice yr^-1; Shean convention: negative = melt"})

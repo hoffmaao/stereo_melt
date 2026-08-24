@@ -56,6 +56,7 @@ import pandas as pd
 import xarray as xr
 from scipy.ndimage import gaussian_filter, map_coordinates
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.constants import rhoi, rhow
 from stereo_melt.dynamics import linear_inverse_dhdt_lagrangian_melt_rate
 from stereo_melt.kinematics import divergence
@@ -405,12 +406,11 @@ def plot_rung(rung, m_true, maps):
     fig, axes = plt.subplots(1, n, figsize=(3.4 * n, 3.6), constrained_layout=True)
     vmax = float(np.nanpercentile(np.abs(m_true.values), 99.5))
     for ax, (name, da) in zip(np.atleast_1d(axes), panels):
-        im = ax.imshow(np.asarray(da.values, float), cmap="RdBu_r",
-                       vmin=-vmax, vmax=vmax, interpolation="nearest")
+        im = ax.imshow(np.asarray(da.values, float), cmap=melt_cmap(),
+                       norm=melt_norm(vmax=vmax), interpolation="nearest")
         ax.set_title(name, fontsize=9)
         ax.set_xticks([]); ax.set_yticks([])
-    fig.colorbar(im, ax=np.atleast_1d(axes).tolist(), shrink=0.8,
-                 label="m ice/yr (neg = melt)")
+    add_melt_colorbar(fig, im, ax=np.atleast_1d(axes).tolist(), shrink=0.8)
     fig.suptitle(f"gate_match_lagrangian — {rung}", fontsize=11)
     out = OUT_DIR / f"gate_match_{rung}.png"
     fig.savefig(out, dpi=110)

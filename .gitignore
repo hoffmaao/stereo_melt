@@ -41,6 +41,8 @@ literature/
 # ---------------------------------------------------------------------------
 figures/
 */figures/
+# bundled figure exports: regenerable, and the PIG one is over GitHub's limit
+*/figures.zip
 scripts/deletable_strips.txt
 scripts.tar.gz
 

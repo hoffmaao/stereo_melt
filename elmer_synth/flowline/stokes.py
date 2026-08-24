@@ -3,6 +3,8 @@
 # inflow Dirichlet u_x = u0 on the left wall; the right wall is an OPEN front
 # (water pressure below the waterline via ds(3), traction-free above) with no
 # velocity constraint; hardness carries the spatial prefactor hook bfac(x).
+import os
+
 from bdry_conds import LeftBoundary, mark_boundary
 from dolfinx.fem import (Constant, Function, FunctionSpace, dirichletbc,
                          locate_dofs_topological)
@@ -89,10 +91,25 @@ def stokes_solve(domain, w_init=None):
         # level cold-started solves converge to (~0.1-17 vs force scale 1e10).
         solver.atol = 1.0
         solver.rtol = 1e-9
-        solver.max_it = 100
+        solver.max_it = int(os.environ.get("E1B_NEWTON_MAXIT", "600"))
+        solver.error_on_nonconvergence = False
 
+        # Full Newton on the regularized power law (rm2 != 0) falls into a
+        # period-2 limit cycle on warm-started steps once the mesh has moved
+        # (r oscillates 2.4e5 <-> 3.2e5 forever); relaxation 0.5 converges
+        # the same steps in ~30 iterations. n = 1 is linear, so full Newton
+        # is exact in one step — keep it undamped. The ladder halves the
+        # relaxation on any residual failure before giving up.
+        relax0 = float(os.environ.get(
+            "E1B_NEWTON_RELAX", "1.0" if rm2 == 0.0 else "0.5"))
+        w0 = w.x.array.copy()
         set_log_level(LogLevel.WARNING)
-        n, converged = solver.solve(w)
+        for relax in (relax0, 0.5*relax0, 0.25*relax0):
+            w.x.array[:] = w0
+            solver.relaxation_parameter = relax
+            n, converged = solver.solve(w)
+            if converged:
+                break
         assert(converged)
 
         return w

@@ -7,7 +7,11 @@ import os
 
 # Model parameters
 n = float(os.environ.get("E1B_GLEN_N", "4.0"))  # 1.0 = Newtonian (eta = eta0 everywhere)
-A0 = 1e-32 if n != 1.0 else 5.0e-15             # n=1: A0 = 1/(2*eta0) so eta = 0.5*B = eta0
+# A0 units are Pa^-n s^-1, so a fixed number is only meaningful at ONE n. The
+# hardcoded n=4 default gives eta_eff ~ 5.8e14 at the E1b background strain
+# rate (0.012 /yr); for other n set E1B_A0 explicitly — e.g. n=3 wants
+# A0 = edot^(1-n)/(2*eta_target)^n = 8.60e-25 for eta_eff = 1e14 at background.
+A0 = float(os.environ.get("E1B_A0", str(1e-32 if n != 1.0 else 5.0e-15)))
 
 
 B0 = A0**(-1/n)                    # Ice hardness (Pa s^{1/n})
@@ -27,7 +31,12 @@ t_r = 2*eta0/(rho_i*g*H)           # viscous relaxation time scale
 
 # Numerical parameters
 # rm2 = 0 (n=1) makes the regularization exponent moot: (s+eps_v)^0 = 1.
-eps_v = (2*eta0/B)**(2.0/rm2) if rm2 != 0.0 else 1e-30
+# eps_v pins eta(0) = eta_cap. With the default cap (= eta0) an A0 calibrated
+# to eta_eff = eta0 AT background puts the background right at the knee, so the
+# medium behaves half-Newtonian there — a real Glen experiment must raise
+# E1B_ETA_CAP well above the background secant viscosity (e.g. 1e16).
+eta_cap = float(os.environ.get("E1B_ETA_CAP", str(eta0)))
+eps_v = (2*eta_cap/B)**(2.0/rm2) if rm2 != 0.0 else 1e-30
 
 # Mesh parameters
 Nx = int(L/100)                    # Number of elements in x direction

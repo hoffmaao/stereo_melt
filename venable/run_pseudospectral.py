@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.dynamics import (
     pseudospectral_eulerian_inverse,
     pseudospectral_lagrangian_inverse,
@@ -59,7 +60,10 @@ def _load_any_stack() -> tuple[xr.DataArray, Path]:
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     im = ax.imshow(
         da.values,
         extent=[
@@ -68,7 +72,7 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
             float(da["y"].min()),
             float(da["y"].max()),
         ],
-        origin="upper", cmap=cmap, vmin=vmin, vmax=vmax, aspect="equal",
+        origin="upper", cmap=cmap, aspect="equal", **kw,
     )
     return im
 
@@ -86,13 +90,16 @@ def plot_pseudospectral_summary(
     lag_mean = lag.melt_rate.mean("time", skipna=True)
     eul_mean = eul.melt_rate.mean("time", skipna=True)
 
-    im0 = _imshow_xr(axes[0, 0], lag_mean, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    # LADDIE symmetric-log melt scale (black at zero, log decades outward).
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
+    im0 = _imshow_xr(axes[0, 0], lag_mean, cmap=mcmap, norm=mnorm)
     axes[0, 0].set_title("Lagrangian PS time-mean (m ice/yr)")
-    fig.colorbar(im0, ax=axes[0, 0], fraction=0.045)
+    add_melt_colorbar(fig, im0, ax=axes[0, 0], fraction=0.045)
 
-    im1 = _imshow_xr(axes[0, 1], eul_mean, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im1 = _imshow_xr(axes[0, 1], eul_mean, cmap=mcmap, norm=mnorm)
     axes[0, 1].set_title("Eulerian PS time-mean (m ice/yr)")
-    fig.colorbar(im1, ax=axes[0, 1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
     diff = eul_mean - lag_mean
     im2 = _imshow_xr(axes[0, 2], diff, cmap="PuOr", vmin=-2.0, vmax=2.0)
@@ -103,10 +110,10 @@ def plot_pseudospectral_summary(
     sel = [0, n_t // 2, max(0, n_t - 2)]  # first / mid / second-to-last
     for col, ti in enumerate(sel):
         im = _imshow_xr(axes[1, col], lag.melt_rate.isel(time=ti),
-                        cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+                        cmap=mcmap, norm=mnorm)
         t_label = str(lag["time"].values[ti])[:10]
         axes[1, col].set_title(f"Lagrangian PS  t={t_label}")
-        fig.colorbar(im, ax=axes[1, col], fraction=0.045)
+        add_melt_colorbar(fig, im, ax=axes[1, col], fraction=0.045)
 
     for ax in axes.ravel():
         ax.set_xlabel("x (m)")

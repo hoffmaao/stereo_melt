@@ -30,6 +30,17 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
 
 ## Experiments (status 2026-07-13)
 
+**2026-08-03 directive: Elmer 3D is the sole truth generator going forward.**
+The Stubblefield-derived FEniCSx flowline tier (E1/E1b, `flowline/`, the
+`fenicsx` env above) is **FROZEN** — redundant with Elmer 3D for any new
+question; its results below (incl. the Glen H1 quartet) stand as the
+historical record, but author no new flowline experiments. This retires the
+flowline *simulator only*: the Stubblefield linear transfer function inside
+the inverse solvers is the operator under test, not a truth generator, and is
+unaffected. Corollary: the shipped `alpha_scale` 0.34 was measured on
+Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
+(`fit_alpha_factor.py`), not on new flowline runs.
+
 - **E1** — vendored Stubblefield FEniCSx nonlinear flowline (closed box, paper
   config λ=20H, m0=5 m/yr): `scripts/e1_run_nonlinear.py` →
   `results/e1_nonlinear_result.npz`; scored by `scripts/e1_score_vs_linear.py`
@@ -52,15 +63,114 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
   sine-modulated Gaussian channels at requalified dt=0.25, and the
   survey-realistic DEM-stack tier (`scripts/make_dem_stack.py` →
   `score_dem_stack_tilt.py` → `run_dem_stack_melt.py`, with `--sweep`
-  time-series and `--solvers full` bridging modes). Findings consolidated in
-  `../literature/bridging_approximation_assessment.md`. Beware the dt
-  time-splitting artifact (surface amp ≈ 0.97·dt for along-flow-oscillating
-  forcing): requalify any short-λ axis-x surface metric with a dt pair.
-  **Why 3D:** the bridging kernel is isotropic in |k| (`linear_perturbation.py`
+  time-series and `--solvers full` bridging modes; the tilt scorer's
+  `--min-width` defaults to **5 km** since 08-22 — the crop's widest strip is
+  9.0 km p95−p5, so anything ≥10 km silently yields an offset-only
+  "corrected" stack, which is what the 08-21 `chany`/`chany_snr` runs got).
+  The artifact-free across-flow row is `--tag steady_bmb --pert
+  trans_gauss_bmb` (stack `--t0 110`, epochs 113.8–124.9); the orientation
+  matrix takes it via `fig_orientation_solver_matrix.py --across
+  trans_gauss_bmb:steady_bmb:e2a_channel_orientation_bmb`. Findings consolidated in
+  `../literature/bridging_approximation_assessment.md`.
+  **Observation-error ladder (08-22):** `run_error_ladder.sh <pert> <t0>
+  <base_tag> <s>` scales every injected error range by `s` (same seed ⇒ one
+  realization scaled; `make_dem_stack.py --corrupt-bias-m` scales the
+  corrupted strips' bias too, default 3.0 = old behaviour) and runs the full
+  chain → tags `<base>_x050/x025/x010`; `fig_error_ladder.py` draws
+  nrmse/flux× vs `s` per solver, `fig_melt_maps.py` the 2-D truth-vs-solver
+  map grids (LADDIE symlog) from the `e2a_demstack_<tag>_fields.npz` that
+  `run_dem_stack_melt.py` writes beside the profiles. Result: nrmse ∝ `s` for
+  every solver but fused; the along-flow accretion ramp is survey error.
+  **Monolithic regularisation (08-22):** `sweep_mono_lcurve.py` (per tag;
+  lam/ridge axes, both L-curve axes, truth scores, rate-space noise true +
+  truth-free, `--no-bridging` identity control) + `fig_mono_lcurve.py`
+  (oracle / Menger corner / discrepancy / Wiener pickers). Verdict: the
+  L-curve corner under-regularises by 1–2 decades; `lam = σ²_est` (the
+  truth-free total noise, dh/dt + ∇·H̄u, from the per-pixel regression) is
+  within 6 % of the oracle at every error scale; ridge is always worse than
+  lam; the identity control scores identically, i.e. the bridging operator is
+  inert at λ ≥ 2H and the regularised solver's gain is smoothing. `MONO_LAM`
+  is still the constant 1e-3 — do not read monolithic-vs-Eulerian
+  differences on noisy stacks as bridging physics.
+  `E2A_MONO_NBINS` (default 1) / `E2A_MONO_BLEND_PX` select the LOCAL
+  per-(H, u) operator (2026-08-23); on the E2a window it changes the
+  monolithic answer by ≤3 % — the along-flow over-read is the velocity-carried
+  term + the along-flow transfer gradient, not H_ref.
+  **Restore-then-budget + EB tilt prior (08-23/24):** solver "restored
+  budget" (`restored_budget_melt_rate`; in `--solvers all` and `rbonly`;
+  `E2A_RESTORE_BAND_H`) deconvolves the THICKNESS with the flow-projected
+  bounded 1/T filter then runs the plain Eulerian budget — along-flow
+  over-read gone by construction, across-flow recovered, no lam.
+  `score_dem_stack_tilt.py --eb` iterates Ex/Ey to the variance fixed point
+  (finds the injected tilt scale from 2e-6 within 13 %; residual slope 92 %
+  → 35 %, corrected rms 0.99 → 0.72 m vs 0.62 floor); melt reruns on the
+  `_eb` stacks via `--corrected-suffix _eb`.
+  **Regularisation selectors (08-23):** `sweep_mono_lsurface.py` (joint
+  lam × ridge grid) + `fig_mono_lsurface.py` (L-hypersurface corner, 1-D
+  corners, discrepancy contour) + `gcv_mono.py` (GCV via Hutchinson trace
+  through the solver). Verdict: ridge never helps; corners are not
+  data-adaptive; GCV ×1.03 on the realistic mixed field but under-regularises
+  smooth-truth / low-noise rungs. No truth-free scalar selector works on every
+  geometry — see the 08-23 memory note.
+  **Multi-wavenumber forcing (08-22):** `run_e2a.py --melt multicos
+  --component AXIS:LAMBDA_H:AMP[:PHASE_M]` (repeatable) superposes zero-mean
+  cosines, each on its own axis (`Melt.components`; two-coordinate MATC).
+  Runs `multix_bmb` / `multiy_bmb` / `multixy_bmb` = λ 2H + 3H across-,
+  along-, both (50 a from `control_200`, bmb). λ = 2H is 5 elements per
+  wavelength on the 200 m mesh — the floor; anything shorter needs `--dx 100`.
+  `truth_profile` refuses a 1-D profile when components lie on both axes —
+  score mixed runs in 2-D via `run_dem_stack_melt.truth_field2d`.
+  **⚠ THE FLOTATION ARTIFACT (attributed 2026-08-21 — read before using any
+  E2a surface).** Every E2a run's surface carries
+  `ε = z_s − f_b H = S·M·Δt` — one timestep's worth of melt thickness, a rigid
+  upward offset over any melt anomaly, at *every* wavelength and *both*
+  orientations. It is `ElmerIceUSF::SeaSpring` (`Buoyancy.F90`:546,
+  `C = ρ_w g Δt N_s`): the spring anticipates the base moving by `u_n Δt`
+  within the step, which is exact only where `u_n = 0`, and a melting steady
+  state has `u_n N_s = −ṁ`. So it is **not** "a short-λ axis-x dt artifact" as
+  this file said before — it is everywhere, and it is inert along-flow only
+  because `u·∇ε = 0` there. A free 2-parameter fit measures it at
+  `c = 1.00 ± 0.05` and leaves `r_bridge = 1.00` at r² ≥ 0.999.
+  Consequences: **E2a measures no viscous bridging at all**, the "strongly
+  anisotropic transfer" finding is retracted, and the across-flow melt-inverse
+  error extrapolates to **zero** in both dt and the spring coefficient.
+  Diagnose/remove with `scripts/diagnose_dt_splitting.py --part {law,attrib,
+  spring,bridge}`; the spring is load-bearing for stability, so it cannot
+  simply be weakened (×0.2 and ×0 both diverge — see the run table there).
+  **✅ FIXED 2026-08-22 — `run_e2a.py --basal-melt-buoyancy` is now the
+  standing configuration for every new E2a run.** It sets Elmer's own
+  `Buoyancy Use Basal Melt` / `Bottom Surface Name`, switching `SeaPressure`
+  to `pw = −ρ_w g (Z_sl − S − a_perp·Δt·N_s)` (`Buoyancy.F90`:355). That term
+  anticipates the base moving by `a_perp Δt`, the spring anticipates `u_n Δt`,
+  and a melting steady state has `u_n N_s = −ṁ = −a_perp`, so they cancel
+  exactly — keeping the spring at ×1 (and its conditioning) while removing the
+  bias. Measured on `runs/trans_gauss_bmb`, a single-knob A/B of
+  `trans_gauss_a5`: `ε/(MΔt)` **0.996 → −0.007**, peak |ε| **2.4805 → 0.0854 m**,
+  free-fit `c_artifact` **+0.995 → −0.022**, and the across-flow melt inverse
+  **nrmse 2.155 → 0.039 at corr 0.9991 with zero shift** (monolithic 0.035;
+  perfect-H ceiling 0.022) — better than post-hoc subtraction (0.069), at
+  2.75 min/step, i.e. no cost. `trans_gauss_a5`'s "2.15 physics floor" was
+  entirely the artifact. See [[project-e2a-bmb-artifact-fix-2026-08-22]].
+  ~~**Why 3D:** the bridging kernel is isotropic in |k| (`linear_perturbation.py`
   :215) and hardcodes `alpha=0` (`budget_linear_inverse.py:588`), so it *must*
   correct across-flow and along-flow channels of equal width identically —
   3D Stokes with through-flow will not, and a 2D flowline cannot pose the
-  question. Forcing is a **zero-mean cosine at a single |k|**, not a Gaussian:
+  question.~~ *(The motivation is still sound; the 07-19 campaign did not
+  deliver it. **The isotropy test is OPEN but now answerable**: the axis-y arm
+  measured the artifact, and the axis-x arm had no signal — advection erases
+  the thickness anomaly at the forcing k to 0.17–0.23 m while the artifact was
+  2.5 m, S/N ≈ 0.09. With `--basal-melt-buoyancy` the artifact is ~0.085 m, so
+  **S/N ≈ 2.7** and both arms become measurable. **DONE 2026-08-22** on the
+  quartet `cos{x,y}_L{3,4}H_bmb` (`results/e2a_bmb_quartet_bridge.json`,
+  `--part bridge` single-k fit): **k ⊥ u 0.90 / 0.99 @ phase 0; k ∥ u 0.35 /
+  0.80 @ 1.18 / 0.83 rad** at λ = 3H / 4H. Anisotropic in the advective sense,
+  phases match the α=2.2 closed form to 0.2–0.3 rad, and both orientations sit
+  above the linear theory (α=0 wants 0.70 / 0.86; α=2.2 wants 0.12 / 0.40; the
+  E1b flowline gave 0.31 / 0.71). The 3H k ∥ u value is S/N-limited (±0.2–0.3);
+  a 5× amplitude `cosx` rerun would pin it. Table + argument in
+  `../literature/bridging_approximation_assessment.md` item 1.)* Forcing is a
+  **zero-mean cosine at
+  a single |k|**, not a Gaussian:
   E1b's lambda~20H Gaussian sat on the kernel's flat k->0 floor (+3.85%), which
   `_pooled_kernel_correction` median-subtracts (`:598`) — which is why the 07-16
   score saw a ~1% correction. Probe **lambda/H ~ 3-5** (knee is lambda~2*pi*H,
@@ -95,7 +205,11 @@ proot, serial/OpenMP first (MPI-under-proot unproven). `sif/` holds configs.
   vendored (u·n) form adds ~13% fake backpressure on the front); surface
   kinematics are numpy per-column **upwind** (centered slope = FTCS =
   unconditionally unstable; front CFL needs dt=0.05 yr); Newton warm-start
-  needs `atol=1.0` (rtol alone stalls at the LU roundoff floor).
+  needs `atol=1.0` (rtol alone stalls at the LU roundoff floor). For n>1
+  (Glen), warm-started full Newton falls into a period-2 residual limit
+  cycle after the first mesh move — `stokes_solve` defaults to relaxation
+  0.5 for `rm2 != 0` (~30 iters/step; env `E1B_NEWTON_RELAX`), full Newton
+  stays the n=1 default (linear ⇒ exact in one iteration).
 - First-order upwind ⇒ numerical diffusion κ≈u·dx/2 (Pe≈55 at the anomaly):
   quasi-steady profiles shift ~2%, transients smear — fine for M6/M8, revisit
   for M1 short-λ work.

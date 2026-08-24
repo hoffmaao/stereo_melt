@@ -34,6 +34,7 @@ import pandas as pd
 import xarray as xr
 
 from stereo_melt.dynamics import lagrangian_frame_stack
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.davison import load_davison_gridded_in_shean
 from stereo_melt.io.smb import smb_over_window
@@ -187,7 +188,10 @@ def load_smb_on_grid(stack: xr.DataArray) -> xr.DataArray:
 # ----------------------------------------------------------------------
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     im = ax.imshow(
         da.values,
         extent=[
@@ -198,9 +202,8 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
         aspect="equal",
+        **kw,
     )
     return im
 
@@ -263,10 +266,14 @@ def plot_melt_comparison(
     fig, axes = plt.subplots(1, n, figsize=(n * 4.4, 5.6), constrained_layout=True)
     if n == 1:
         axes = [axes]
+    # LADDIE symmetric-log scale: black at zero, log decades outward. A linear
+    # shared stretch buries the sub-m/yr structure that dominates these shelves.
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
     for ax, (title, da) in zip(axes, panels):
-        im = _imshow_xr(ax, da, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im = _imshow_xr(ax, da, cmap=mcmap, norm=mnorm)
         ax.set_title(f"{title}\n{_panel_stats(da)}", fontsize=10)
-        fig.colorbar(im, ax=ax, fraction=0.045)
+        add_melt_colorbar(fig, im, ax=ax, fraction=0.045)
         ax.set_xlabel("x (m)")
     axes[0].set_ylabel("y (m)")
     fig.suptitle(

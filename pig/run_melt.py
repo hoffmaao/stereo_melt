@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 from stereo_melt.flux import grounding_buffer, integrate_basal_flux
 from stereo_melt.io.bedmachine import load_firn_on_grid
 from stereo_melt.io.smb import smb_over_window
@@ -271,6 +272,73 @@ def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArr
     return vx, vy, source
 
 
+def apply_min_extent(
+    floating: xr.DataArray,
+    mask_suffix: str | None = None,
+    file_start: str | None = None,
+    file_end: str | None = None,
+) -> xr.DataArray:
+    """Intersect a static floating mask with the window-minimum shelf extent.
+
+    Window-minimum shelf extent (calving-aware): built by
+    pig.build_min_extent_mask from Greene 2022 observed coastlines + the
+    stack's per-epoch ocean test. Pixels the shelf lost mid-window must not
+    enter the solvers as ice-to-ocean dh/dt cliffs. ``PIG_MIN_EXTENT=0`` opts
+    out. The cached file covers the FULL stack window, so a --start/--end
+    sub-window run gets the (conservative) full-window minimum.
+
+    ``mask_suffix`` is the stack variant the cached mask was built for
+    (``"_250m_is2ctempo"``, i.e. the ``<res>m_<tag>`` suffix of the loaded
+    stack) and is required: the mask is per geometry, and a default would
+    silently intersect another stack's coastline. A missing cached file is
+    an error, not a fallback -- the product would otherwise re-admit the
+    calved sector with nothing in its metadata to say so.
+
+    The returned mask carries ``attrs["min_extent_mask"]``: the cached
+    file's name when applied, or the literal ``"not applied"`` under
+    ``PIG_MIN_EXTENT=0``; drivers copy it onto their products.
+
+    Shared by run_melt's main(), pig.run_melt_bridging and the standalone
+    solver rigs (pig/scripts/fused_melt_map.py) so every product sees the
+    same geometry -- a rig that skips it re-admits the calved sector, whose
+    ice-to-ocean cliff is ~28 Gt/yr of spurious melt in the budget legs and
+    a large-scale dh/dt mode the DC-blind legs cannot represent.
+    """
+    if os.environ.get("PIG_MIN_EXTENT", "1") == "0":
+        floating = floating.copy(deep=False)
+        floating.attrs["min_extent_mask"] = "not applied"
+        return floating
+    if mask_suffix is None:
+        raise ValueError(
+            "apply_min_extent needs mask_suffix (the loaded stack's "
+            "'_<res>m_<tag>' suffix, e.g. '_250m_is2ctempo'): the cached "
+            "min-extent mask is per stack geometry"
+        )
+    file_start = file_start or config.START_TIME
+    file_end = file_end or config.END_TIME
+    min_ext_nc = (
+        config.PROCESSED_DIR
+        / f"pig_min_extent{mask_suffix}_{file_start}_{file_end}.nc"
+    )
+    if not min_ext_nc.exists():
+        raise FileNotFoundError(
+            f"min-extent mask {min_ext_nc} not found. Build it with "
+            "`python -m pig.build_min_extent_mask` for this stack, or set "
+            "PIG_MIN_EXTENT=0 to deliberately run on the static floating "
+            "mask (re-admits the calved sector)."
+        )
+    with xr.open_dataset(min_ext_nc) as _mds:
+        min_ext = _mds["min_extent_mask"].astype(bool).load()
+    _n_static = int(floating.sum())
+    floating = floating & min_ext
+    floating.attrs["min_extent_mask"] = min_ext_nc.name
+    print(
+        f"  min-extent mask {min_ext_nc.name}: removed "
+        f"{_n_static - int(floating.sum())} of {_n_static} floating px"
+    )
+    return floating
+
+
 def load_floating_mask(stack: xr.DataArray) -> xr.DataArray:
     """Return a boolean floating-ice mask on the stack grid.
 
@@ -362,7 +430,10 @@ def load_smb_on_grid(stack: xr.DataArray) -> xr.DataArray:
 # ----------------------------------------------------------------------
 
 
-def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
+def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None, norm=None):
+    # `norm` and `vmin`/`vmax` are mutually exclusive in matplotlib; melt-rate
+    # panels pass the symmetric-log `melt_norm`, everything else stays linear.
+    kw = {"norm": norm} if norm is not None else {"vmin": vmin, "vmax": vmax}
     im = ax.imshow(
         da.values,
         extent=[
@@ -373,9 +444,8 @@ def _imshow_xr(ax, da: xr.DataArray, *, cmap, vmin=None, vmax=None):
         ],
         origin="upper",
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
         aspect="equal",
+        **kw,
     )
     return im
 
@@ -424,18 +494,26 @@ def plot_melt_comparison(
     """QC: side-by-side Eulerian vs Lagrangian vs linear-inverse melt."""
     fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
 
-    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
-    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
-    fig.colorbar(im0, ax=axes[0, 0], fraction=0.045)
+    # Melt panels share the LADDIE symmetric-log scale (black at zero, log
+    # decades outward): a linear +/-60 stretch buries everything below ~5 m/yr
+    # in the white middle, which on PIG is most of the shelf. Difference and
+    # flux-divergence panels below stay linear -- they are not melt rates and
+    # the negative=melt palette would misread on them.
+    mcmap = melt_cmap()
+    mnorm = melt_norm(vmax=max(abs(clim[0]), abs(clim[1])))
 
-    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+    im0 = _imshow_xr(axes[0, 0], euler.melt_rate, cmap=mcmap, norm=mnorm)
+    axes[0, 0].set_title("Eulerian melt_rate (m ice/yr)")
+    add_melt_colorbar(fig, im0, ax=axes[0, 0], fraction=0.045)
+
+    im1 = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=mcmap, norm=mnorm)
     axes[0, 1].set_title("Lagrangian melt_rate (m ice/yr)")
-    fig.colorbar(im1, ax=axes[0, 1], fraction=0.045)
+    add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
     if linv is not None:
-        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap="RdBu_r", vmin=clim[0], vmax=clim[1])
+        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap=mcmap, norm=mnorm)
         axes[0, 2].set_title("Stubblefield non-hydrostatic inverse")
-        fig.colorbar(im2, ax=axes[0, 2], fraction=0.045)
+        add_melt_colorbar(fig, im2, ax=axes[0, 2], fraction=0.045)
     else:
         axes[0, 2].set_visible(False)
 
@@ -514,6 +592,9 @@ def main(
     if tag:
         stack_prefix += f"_{tag}"
         out_suffix += f"_{tag}"
+    # The min-extent mask file is named by res/tag only (no MELT_OUT_SUFFIX):
+    # every output variant of the same stack shares one geometry.
+    mask_suffix = out_suffix
     # MELT_OUT_SUFFIX appends to the OUTPUT name only (not the stack loaded), so a
     # variant run (e.g. fused velocity on the same is2ctempo stack) writes beside
     # the baseline instead of overwriting it -- enables a clean A/B.
@@ -583,6 +664,9 @@ def main(
     floating = load_floating_mask(stack)
     frac_floating = float(floating.mean())
     print(f"  floating-ice fraction of AOI: {frac_floating:.3f}")
+
+    floating = apply_min_extent(floating, mask_suffix, file_start, file_end)
+    min_extent_src = floating.attrs["min_extent_mask"]
     stack = stack.where(floating)
 
     print("Loading velocity...")
@@ -777,6 +861,20 @@ def main(
         from stereo_melt.dynamics.stubblefield_forward import variational_melt_rate
 
         print("Running variational forward-fit inverse (4th solver; narrates)...")
+        # PIG_VAR_BG_DEGREE selects HOW the reference state is removed, which is
+        # a choice about the INPUT, independent of the forward fit itself:
+        #   unset (default) -> legacy Gaussian high-pass of the input at
+        #                      sigma_hp_H (a band CUT: melt beyond ~13 km at
+        #                      PIG's H is deleted from the target and cannot be
+        #                      recovered).
+        #   0/1/2           -> feed the RAW surface and fit a polynomial
+        #                      background inside the model, projected out of the
+        #                      residual each step. No wavelength band is
+        #                      discarded; sigma_hp_H is then ignored.
+        # The operator stays DC-blind either way (that is a property of T(k),
+        # not of the filter), but with bg_degree the unconstrained long
+        # wavelengths are left to the background/prior instead of deleted.
+        _bg = os.environ.get("PIG_VAR_BG_DEGREE", "").strip()
         varfit = variational_melt_rate(
             stack, vx, vy, floating_mask=floating, d=firn,
             rep=os.environ.get("PIG_VAR_REP", "grid"),
@@ -786,6 +884,7 @@ def main(
             iters=int(os.environ.get("PIG_VAR_ITERS", "4000")),
             lr=float(os.environ.get("PIG_VAR_LR", "3e-3")),
             sigma_hp_H=float(os.environ.get("PIG_VAR_SIGMA_HP_H", "5.0")),
+            bg_degree=int(_bg) if _bg else None,
             log_every=int(os.environ.get("PIG_VAR_LOG_EVERY", "250")),
             # PIG spans ~300-4000 m/yr, so a single mean u is wrong nearly
             # everywhere; cluster the shelf into geometry bins instead. Tiling
@@ -851,6 +950,7 @@ def main(
         "stack_file_window": f"{file_start} to {file_end}",
         "grid_res_m": float(config.RES),
         "velocity_source": vel_source,
+        "min_extent_mask": min_extent_src,
         "smb_source": "RACMO2.4p1 smbgl (Zenodo 19255213), window-integrated",
     }
     if linv is not None:
@@ -995,12 +1095,13 @@ def main(
         parcel_png = config.FIGURES_DIR / f"melt_parcel_lsq{out_suffix}{win_tag}.png"
         pfloat = parcel.melt_rate.where(floating)
         fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
-        im = _imshow_xr(axes[0, 0], pfloat, cmap="RdBu_r", vmin=-60, vmax=60)
+        pcmap, pnorm = melt_cmap(), melt_norm(vmax=60.0)
+        im = _imshow_xr(axes[0, 0], pfloat, cmap=pcmap, norm=pnorm)
         axes[0, 0].set_title("parcel-LSQ melt_rate (m ice/yr)")
-        fig.colorbar(im, ax=axes[0, 0], fraction=0.045)
-        im = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap="RdBu_r", vmin=-60, vmax=60)
+        add_melt_colorbar(fig, im, ax=axes[0, 0], fraction=0.045)
+        im = _imshow_xr(axes[0, 1], lagr.melt_rate, cmap=pcmap, norm=pnorm)
         axes[0, 1].set_title("endpoint-pair Lagrangian (reference)")
-        fig.colorbar(im, ax=axes[0, 1], fraction=0.045)
+        add_melt_colorbar(fig, im, ax=axes[0, 1], fraction=0.045)
         im = _imshow_xr(axes[0, 2], pfloat - lagr.melt_rate, cmap="PuOr", vmin=-10, vmax=10)
         axes[0, 2].set_title("parcel − pair (m ice/yr)")
         fig.colorbar(im, ax=axes[0, 2], fraction=0.045)
