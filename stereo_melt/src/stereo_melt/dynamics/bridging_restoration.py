@@ -419,6 +419,8 @@ def restored_budget_melt_rate(
     n_bins: int = 1,
     blend_px: float = 8.0,
     lift_umax_myr: float | None = None,
+    common_epoch: bool = False,
+    epoch_rate_sigma_px: float = 2.0,
     rho_i: float = rhoi,
     rho_w: float = rhow,
     g: float = G_GRAVITY,
@@ -484,6 +486,10 @@ def restored_budget_melt_rate(
         cluster and the restored fields are blended with Gaussian
         partition-of-unity weights (``blend_px``) — the local filter for
         shelves whose geometry spans the transfer's sensitivity range.
+    common_epoch, epoch_rate_sigma_px
+        Refer the mean thickness to a single epoch before restoring it
+        (:func:`~stereo_melt.kinematics.common_epoch_mean`); see
+        :func:`~stereo_melt.melt.eulerian_melt_rate`.
     lift_umax_myr : float, optional
         Bins faster than this receive the identity filter (no lift): over a
         fast crevassed trunk the wide-band deconvolution amplifies surface
@@ -503,12 +509,19 @@ def restored_budget_melt_rate(
         ``bin_geometry``).
     """
     from ..freeboard import freeboard_to_thickness
-    from ..kinematics import SECONDS_PER_YEAR, dh_dt, flux_divergence
+    from ..kinematics import (
+        SECONDS_PER_YEAR,
+        common_epoch_mean,
+        dh_dt,
+        flux_divergence,
+    )
 
     H_f_stack = freeboard_to_thickness(h_stack, d=d, rho_w=rho_w, rho_i=rho_i)
     reg = dh_dt(H_f_stack, min_count=min_count, robust=robust_dh_dt)
     dHdt_obs = reg["slope"] * SECONDS_PER_YEAR
-    H_f_mean = H_f_stack.mean("time", skipna=True)
+    H_f_mean = (common_epoch_mean(H_f_stack, reg["slope"],
+                                  sigma_px=epoch_rate_sigma_px)
+                if common_epoch else H_f_stack.mean("time", skipna=True))
     vxm = vx.mean("time", skipna=True) if "time" in vx.dims else vx
     vym = vy.mean("time", skipna=True) if "time" in vy.dims else vy
 

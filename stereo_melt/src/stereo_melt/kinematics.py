@@ -38,6 +38,7 @@ import xarray as xr
 from .backend import asarray, map_coordinates, to_numpy, xp
 
 __all__ = [
+    "common_epoch_mean",
     "dh_dt",
     "gradient",
     "divergence",
@@ -734,6 +735,70 @@ def build_streamline_dataset(
         rho_i=rho_i,
     )
 
+
+
+def common_epoch_mean(
+    stack: xr.DataArray,
+    slope: xr.DataArray,
+    sigma_px: float = 2.0,
+    t0: float | None = None,
+) -> xr.DataArray:
+    r"""Return the stack mean referred to a single common epoch.
+
+    A repeat-DEM stack samples each pixel at whatever times its strips
+    happen to cover, so the plain time-mean is the field evaluated at a
+    per-pixel mean epoch :math:`ar t(x, y)`, not at one instant. Where the
+    surface is changing this makes the mean carry a spatially structured
+    sampling artifact, :math:`ar H - H(t_0) \simeq \dot H\,(ar t - t_0)`,
+    whose pattern follows strip footprints rather than the ice. The
+    correction
+
+    .. math::
+        H(t_0) = ar H - \mathcal{S}_\sigma[\dot H]\,igl(ar t - t_0igr)
+
+    refers every pixel to the same epoch, with the rate field spatially
+    smoothed (:func:`gaussian_smooth_nan`, scale ``sigma_px``) so that
+    poorly-sampled pixels borrow their neighbourhood's trend instead of
+    extrapolating on their own noisy slope — the per-pixel fit alone is
+    markedly rougher than the raw mean and over-corrects. This is the
+    time-consistency of an interpolated DEM product (Shean 2019 builds
+    epoch mosaics for the same reason), at the linear order the steady-melt
+    budget already assumes.
+
+    Parameters
+    ----------
+    stack : xarray.DataArray, dims ``(time, y, x)``
+        Field to average, e.g. ice-equivalent thickness.
+    slope : xarray.DataArray
+        Per-pixel trend in stack units per second, as returned by
+        :func:`dh_dt` (``reg["slope"]``).
+    sigma_px : float
+        Gaussian smoothing scale of the rate field, in pixels.
+    t0 : float, optional
+        Reference epoch in seconds from the stack's earliest sample;
+        defaults to the median sample time.
+
+    Returns
+    -------
+    xarray.DataArray
+        The mean of ``stack`` referred to ``t0``, on the ``(y, x)`` grid.
+    """
+    t = (stack.time.values - stack.time.values.min()) / np.timedelta64(1, "s")
+    t = np.asarray(t, dtype=float)
+    finite = np.isfinite(to_numpy(stack.values))
+    n = finite.sum(0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        t_bar = np.tensordot(t, finite, axes=(0, 0)) / np.maximum(n, 1)
+    t_bar[n == 0] = np.nan
+    t_ref = float(np.median(t)) if t0 is None else float(t0)
+
+    mean = stack.mean("time", skipna=True)
+    slope_s = gaussian_smooth_nan(slope, sigma_px)
+    lever = xr.DataArray(t_bar - t_ref, dims=("y", "x"),
+                         coords={"y": mean.y, "x": mean.x})
+    out = mean - slope_s * lever
+    out.attrs.update(common_epoch_s=t_ref, rate_sigma_px=float(sigma_px))
+    return out
 
 def gaussian_smooth_nan(field: xr.DataArray, sigma_px: float) -> xr.DataArray:
     r"""NaN-aware Gaussian smoothing of a 2-D field, preserving its NaN gaps.
