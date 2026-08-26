@@ -12,3 +12,4 @@ test:
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_strip_noise_model.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_powerlaw_layer.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_budget_bridging_identity.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_common_epoch_mean.py

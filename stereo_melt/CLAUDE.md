@@ -91,6 +91,16 @@ correction:
 - **`spectra.py`** (2026-08-24) — `radial_psd`: masked, apodized, Welch-normalized
   radially averaged PSD for comparing melt products across grids (the
   Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py`.
+- **`kinematics.py::common_epoch_mean`** (2026-08-25) — stack mean referred to
+  one epoch, `H̄ − S_σ[Ḣ]·(t̄ − t₀)` (Shean-style temporal consistency for the
+  thickness entering ∇·(H̄u)); opt-in `common_epoch=` on `eulerian_melt_rate` /
+  `restored_budget_melt_rate`, gate `tests/gate_common_epoch_mean.py`.
+  **A measured negative result on PIG, default OFF**: the ragged-sampling
+  artifact is real in thickness (~29 m rms, corr +0.13) but does not reach the
+  melt field (corr −0.066 → −0.069), while the correction's rate-error × lever
+  arm adds variance — half-stack noise floor λ(SNR=1) 2.52 → 11.18 km. Strips
+  are tens of km wide, so the artifact lives at long λ, not in the 1–3 km band
+  that limits resolution.
 - **`melt.py`** — the production solvers: `eulerian_melt_rate` (Shean Eq. 10)
   and `lagrangian_melt_rate` (path solver; Δt floor 1.5 yr). Units: velocity
   m/yr, melt m ice-eq/yr, sign negative = melt. `freeboard.py`,
