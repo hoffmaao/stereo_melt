@@ -17,6 +17,7 @@ Assumes :mod:`pig.build_stack` has already produced
 from __future__ import annotations
 
 import os
+import warnings
 import sys
 
 # Force PROJ database to the active env before any pyproj import. This env's
@@ -87,6 +88,10 @@ def _subset_velocity(
     return sub[[vx_name, vy_name]].rename({vx_name: "vx", vy_name: "vy"}).load()
 
 
+_VELOCITY_FALLBACK = "measures"
+_VELOCITY_PRODUCTION = "fused"   # pig/CLAUDE.md decision record
+
+
 def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArray, str]:
     """Load velocity ``vx``/``vy`` cropped + resampled onto the stack grid.
 
@@ -100,7 +105,21 @@ def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArr
     sub-annual time-resolved advection). Remaining NaN gaps are filled with
     0 m/yr.
     """
-    requested = os.environ.get("PIG_VELOCITY", "measures").strip().lower()
+    # PIG_VELOCITY unset is a silent trap: the fallback here is NOT the
+    # documented production choice (pig/CLAUDE.md: `fused`), and a caller that
+    # forgets it gets a different velocity field with no error — which has
+    # twice produced contaminated melt comparisons. Callers that genuinely
+    # want another source pin it with os.environ.setdefault (reproduce_shean,
+    # compare_shean2019, compare_budget_inverse) and never see this.
+    if "PIG_VELOCITY" not in os.environ:
+        warnings.warn(
+            "PIG_VELOCITY is not set: falling back to "
+            f"{_VELOCITY_FALLBACK!r}, which is NOT the documented production "
+            f"choice ({_VELOCITY_PRODUCTION!r}). Set PIG_VELOCITY explicitly "
+            "(or os.environ.setdefault it) before comparing against a stored "
+            "product; melt products carry the source in their `velocity` attr.",
+            RuntimeWarning, stacklevel=2)
+    requested = os.environ.get("PIG_VELOCITY", _VELOCITY_FALLBACK).strip().lower()
     source = None
     if requested == "nsidc-0525":
         from stereo_melt.io.velocity import load_nsidc_0525
