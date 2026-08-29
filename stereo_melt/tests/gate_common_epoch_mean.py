@@ -20,6 +20,10 @@ C4  NO COVERAGE LOSS. A block of pixels seen in fewer epochs than the
     regression's min_count (own slope undefined) beside well-sampled
     neighbours stays finite, borrows the neighbourhood's trend, and lands
     on H(t0); coverage is identical to the plain mean's.
+C5  SOLVER PLUMBING. ``eulerian_melt_rate`` and ``restored_budget_melt_rate``
+    default to the plain mean (attr ``common_epoch=0``); ``common_epoch=True``
+    feeds the common-epoch mean to the divergence (attr 1) and changes the
+    melt on a ragged stack — the switch is live and OFF by default.
 
 Run::
 
@@ -180,6 +184,32 @@ def main() -> int:
     outside[hole] = False
     d_out = float(np.nanmax(np.abs(ce_h.values - plain_h)[outside]))
     check("well-sampled neighbours are untouched", d_out < 1e-9, f"max|delta| {d_out:.1e}")
+
+    print("C5  solver plumbing: common_epoch= is honoured, stamped, and DEFAULT OFF")
+    from stereo_melt.dynamics.bridging_restoration import restored_budget_melt_rate
+    from stereo_melt.freeboard import freeboard_to_thickness
+    from stereo_melt.melt import eulerian_melt_rate
+    vx = xr.DataArray(np.full((NY, NX), 300.0), dims=("y", "x"),
+                      coords={"y": stack.y, "x": stack.x})
+    vy = xr.zeros_like(vx)
+    H_stack = freeboard_to_thickness(stack)
+    plain_H = H_stack.mean("time", skipna=True)
+    ce_H = common_epoch_mean(H_stack, dh_dt(H_stack)["slope"], sigma_px=2.0)
+    solvers = (("eulerian_melt_rate", lambda **kw: eulerian_melt_rate(stack, vx, vy, **kw)),
+               ("restored_budget_melt_rate",
+                lambda **kw: restored_budget_melt_rate(stack, vx, vy, **kw)))
+    for name, solve in solvers:
+        off, on = solve(), solve(common_epoch=True)
+        d_off = float(np.nanmax(np.abs(off.H_f_mean.values - plain_H.values)))
+        d_on = float(np.nanmax(np.abs(on.H_f_mean.values - ce_H.values)))
+        d_melt = float(np.nanmax(np.abs(on.melt_rate.values - off.melt_rate.values)))
+        check(f"{name}: default is the plain mean, attr common_epoch=0",
+              off.attrs.get("common_epoch") == 0 and d_off < 1e-9,
+              f"attr {off.attrs.get('common_epoch')!r}  max|H_f_mean - plain| {d_off:.1e}")
+        check(f"{name}: common_epoch=True uses the common-epoch mean, attr 1, melt changes",
+              on.attrs.get("common_epoch") == 1 and d_on < 1e-9 and d_melt > 0.1,
+              f"attr {on.attrs.get('common_epoch')!r}  max|H_f_mean - ce| {d_on:.1e}  "
+              f"max|melt on - off| {d_melt:.2f} m/yr")
 
     print()
     if FAILS:

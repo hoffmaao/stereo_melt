@@ -31,7 +31,8 @@ The **Eulerian** form (Shean 2019 Eq. 10), implemented by
 
 fits :math:`\partial H_f/\partial t` by per-pixel regression of the
 stack against time and evaluates :math:`\nabla\!\cdot(H_f u)` on the
-time-mean field.
+time-mean field (or, with ``common_epoch=True``, on that mean referred to
+one epoch by :func:`~stereo_melt.kinematics.common_epoch_mean`).
 
 The **Lagrangian** form (Shean 2019 Eq. 7), implemented by
 :func:`lagrangian_melt_rate`:
@@ -171,6 +172,9 @@ def eulerian_melt_rate(
     -------
     xarray.Dataset
         See :func:`lagrangian_melt_rate` for the matching variable set.
+        With ``common_epoch=True``, ``H_f_mean`` is the common-epoch mean
+        rather than the time-mean; the choice is stamped in the
+        ``common_epoch`` attr.
     """
     vx = _smooth_velocity_da(vx, vel_smooth_sigma_m)
     vy = _smooth_velocity_da(vy, vel_smooth_sigma_m)

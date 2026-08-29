@@ -27,28 +27,28 @@ if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = _env_proj
     os.environ["PROJ_LIB"] = _env_proj
 
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import xarray as xr
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import xarray as xr  # noqa: E402
 
-from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
-from stereo_melt.flux import grounding_buffer, integrate_basal_flux
-from stereo_melt.io.bedmachine import load_firn_on_grid
-from stereo_melt.io.smb import smb_over_window
-from stereo_melt.kinematics import clean_temporal_outliers, gaussian_smooth_nan
-from stereo_melt.dynamics.stubblefield_inverse import stubblefield_inverse_melt_rate
-from stereo_melt.melt import (
+from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm  # noqa: E402
+from stereo_melt.flux import grounding_buffer, integrate_basal_flux  # noqa: E402
+from stereo_melt.io.bedmachine import load_firn_on_grid  # noqa: E402
+from stereo_melt.io.smb import smb_over_window  # noqa: E402
+from stereo_melt.kinematics import clean_temporal_outliers, gaussian_smooth_nan  # noqa: E402
+from stereo_melt.dynamics.stubblefield_inverse import stubblefield_inverse_melt_rate  # noqa: E402
+from stereo_melt.melt import (  # noqa: E402
     eulerian_melt_rate,
     lagrangian_melt_rate,
     lagrangian_parcel_lsq_melt_rate,
 )
-from stereo_melt.stack import load_basin_stack
-from stereo_melt.visualization import plot_variational_fit
+from stereo_melt.stack import load_basin_stack  # noqa: E402
+from stereo_melt.visualization import plot_variational_fit  # noqa: E402
 
-from pig import config
+from pig import config  # noqa: E402
 
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
@@ -96,14 +96,22 @@ def load_velocity_on_grid(stack: xr.DataArray) -> tuple[xr.DataArray, xr.DataArr
     """Load velocity ``vx``/``vy`` cropped + resampled onto the stack grid.
 
     Velocity source is selected by the ``PIG_VELOCITY`` env var:
-    ``measures`` (default, NSIDC-0754 phase map at 450 m), ``nsidc-0525``
+    ``measures`` (NSIDC-0754 phase map at 450 m), ``nsidc-0525``
     (Scheuchl 2012 Central Antarctica 2009 mosaic at 900 m), ``its_live``
     (single annual mosaic at 120 m), ``itslive-multiyear`` (the annual
     ITS_LIVE mosaics stacked along ``time`` → time-varying advection in the
-    Lagrangian solver), or ``ase-quarterly`` (quarterly ASE velocity mosaics
+    Lagrangian solver), ``ase-quarterly`` (quarterly ASE velocity mosaics
     at 250 m, 2015 Q1–2024 Q1 / Joughin v05.0, stacked along ``time`` for
-    sub-annual time-resolved advection). Remaining NaN gaps are filled with
-    0 m/yr.
+    sub-annual time-resolved advection), or ``fused`` (those quarterlies
+    after EOF + Kalman temporal fusion and a 1 km spatial Gaussian — the
+    production choice, ``pig/CLAUDE.md``). Remaining NaN gaps are filled
+    with 0 m/yr.
+
+    When ``PIG_VELOCITY`` is unset the source falls back to ``measures``
+    and a ``RuntimeWarning`` is raised; the fallback itself is unchanged.
+    Drivers should pin their source (``os.environ.setdefault``). The
+    chosen source is returned and stamped on melt products as the
+    ``velocity`` attr.
     """
     # PIG_VELOCITY unset is a silent trap: the fallback here is NOT the
     # documented production choice (pig/CLAUDE.md: `fused`), and a caller that
@@ -483,7 +491,7 @@ def plot_inputs(stack, vx, vy, a_dot, firn, out_path: Path) -> None:
 
     speed = np.sqrt(vx**2 + vy**2)
     im1 = _imshow_xr(axes[1], speed, cmap="viridis")
-    axes[1].set_title(f"|v| (m/yr)")
+    axes[1].set_title("|v| (m/yr)")
     fig.colorbar(im1, ax=axes[1], fraction=0.045)
 
     im2 = _imshow_xr(axes[2], a_dot, cmap="RdBu_r", vmin=-1.0, vmax=1.0)

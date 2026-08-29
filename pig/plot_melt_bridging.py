@@ -6,6 +6,12 @@ on the LADDIE symlog scale with a range wide enough for the trunk
 (``--vmax``, default 300 m/yr — the 250 m Eulerian spans p1 −295 / p99 +186)
 and Δ-vs-Eulerian maps, at high dpi.
 
+Shelf fluxes (panel titles and the printed table) are LIKE-FOR-LIKE: summed
+over the pixels finite in EVERY field. Fields that cover more of the shelf
+(the Helmholtz variants fill stencil gaps the finite-difference divergence
+drops) also report their own-domain flux and extra pixel count, so a
+coverage gain is never read as a solver difference.
+
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python

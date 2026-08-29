@@ -16,7 +16,10 @@ parity/benchmark study). Canonical stage sequence: [`../PIPELINE.md`](../PIPELIN
 - **Geoid + MDT** both apply (−75°S, north of the DTU22 limit).
 - **Velocity:** `PIG_VELOCITY` env — `fused` (Kalman EOF+GP fusion with
   King-2020-style smoothing) is the production choice; `ase-quarterly`
-  (37-quarter v05 COGs) and `measures` available. Fast ice → ITS_LIVE/feature
+  (37-quarter v05 COGs) and `measures` available. Unset falls back to
+  `measures` with a `RuntimeWarning` (`run_melt.load_velocity_on_grid`), so
+  pin the source in every driver (`os.environ.setdefault`); melt products
+  record it in their `velocity` attr. Fast ice → ITS_LIVE/feature
   tracking works here, unlike the slow Ross-sector basins. Time-varying
   velocity is first-order for flux (time-mean inflated path flux ~40%).
 - **Tide model CATS2008**; open-ocean adjacency → larger tide/IBE amplitudes

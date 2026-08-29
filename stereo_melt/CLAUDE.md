@@ -90,7 +90,10 @@ correction:
   noise model for the coherent part.
 - **`spectra.py`** (2026-08-24) — `radial_psd`: masked, apodized, Welch-normalized
   radially averaged PSD for comparing melt products across grids (the
-  Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py`.
+  Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py` and by
+  `pig/plot_noise_floor.py`, the half-stack DEM/strip noise floor of the
+  PIG product (instrument `pig/run_noise_floor.py`; method and the
+  `PSD_noise = PSD[m_A − m_B]/4` derivation in its docstring).
 - **`kinematics.py::common_epoch_mean`** (2026-08-25) — stack mean referred to
   one epoch, `H̄ − S_σ[Ḣ]·(t̄ − t₀)` (Shean-style temporal consistency for the
   thickness entering ∇·(H̄u)); opt-in `common_epoch=` on `eulerian_melt_rate` /
