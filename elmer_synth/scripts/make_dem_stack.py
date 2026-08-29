@@ -106,7 +106,12 @@ def main() -> None:
                          "wavenumber, so along the band direction wavelengths up "
                          "to corr_aniso * corr_lmax_km still pass; the plane the "
                          "field then carries is recorded per strip as "
-                         "corr_tilt_slope_m_per_m / corr_tilt_azimuth_rad")
+                         "corr_tilt_slope_m_per_m / corr_tilt_azimuth_rad. The "
+                         "field is zero-mean over the full crop, so its mean over "
+                         "the strip's kept footprint is an extra per-strip offset; "
+                         "it is recorded as corr_offset_m and deliberately NOT "
+                         "removed (it moves the twin's post-correction offset "
+                         "spread toward the real stack's)")
     ap.add_argument("--corrupt-bias-m", type=float, default=3.0,
                     help="offset sigma of the deliberately corrupted strips "
                          "(their tilt is 8x the drawn slope); scale it with "
@@ -168,7 +173,7 @@ def main() -> None:
             bias = float(rng.normal(0, args.corrupt_bias_m))
         plane = slope * (np.cos(azim) * x2d + np.sin(azim) * y2d)
         z = zs + plane + bias + rng.normal(0, sigma, zs.shape)
-        corr_rms, corr_tilt, corr_azim = 0.0, 0.0, 0.0
+        corr_rms, corr_tilt, corr_azim, corr_off = 0.0, 0.0, 0.0, 0.0
         if args.corr_rms_m[1] > 0:
             # banded correlated error (jitter/coreg ripple): anisotropic
             # power-law field at a random azimuth, high-passed so scales
@@ -193,6 +198,7 @@ def main() -> None:
             f -= f.mean()
             g = corr_rms * (f / max(f.std(), 1e-12))
             corr_tilt, corr_azim = plane_fit(g, mask, x2d, y2d)
+            corr_off = float(g[mask].mean()) if mask.any() else 0.0
             z = z + g
         z[~mask] = np.nan
 
@@ -206,7 +212,7 @@ def main() -> None:
             tilt_slope_m_per_m=slope, tilt_azimuth_rad=azim,
             bias_m=bias, noise_sigma_m=sigma, corr_rms_m=corr_rms,
             corr_tilt_slope_m_per_m=corr_tilt, corr_tilt_azimuth_rad=corr_azim,
-            corrupted=corrupted,
+            corr_offset_m=corr_off, corrupted=corrupted,
         ))
         if args.max_strips and len(kept) >= args.max_strips:
             break

@@ -46,45 +46,13 @@ import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 
 from pig import config  # noqa: E402
-from pig.plot_noise_floor import provenance  # noqa: E402
+from pig.plot_noise_floor import check_provenance  # noqa: E402
 from pig.run_melt import load_stack  # noqa: E402
 
 NC_HALF = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt.nc"
 NC_Q = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc"
 HALVES = ("eulerian_A", "eulerian_B")
 QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
-
-
-def check_ladder_provenance(half, q):
-    """Refuse halves and quarters solved with different instruments.
-
-    ``run_noise_floor`` stamps ``common_epoch`` and ``velocity`` on its
-    output, so the files say which solver settings produced each rung. A
-    slope fitted between rungs from different settings measures the
-    settings, not the count scaling. Returns the agreed ``(common_epoch,
-    velocity)``.
-    """
-    problems, agreed = [], set()
-    for qk in QUARTERS:
-        qce, qvel = provenance(q, qk)
-        for hk in HALVES:
-            hce, hvel = provenance(half, hk)
-            if hce != qce:
-                problems.append(f"halves {hk} common_epoch={hce} vs quarters {qk} "
-                                f"common_epoch={qce}")
-            if hvel is None or qvel is None:
-                print(f"  WARNING velocity provenance missing (halves {hvel!r}, "
-                      f"quarters {qvel!r}); cannot verify", flush=True)
-            elif hvel != qvel:
-                problems.append(f"halves {hk} velocity={hvel!r} vs quarters {qk} "
-                                f"velocity={qvel!r}")
-            agreed.add((qce, qvel))
-    if problems:
-        raise SystemExit(
-            "instrument mismatch between the halves and quarters rungs — the "
-            "count scaling is only meaningful when both come from the same "
-            "solver settings:\n  " + "\n  ".join(sorted(set(problems))))
-    return agreed.pop()
 
 
 def open_ladder(quarters_nc, half_nc=None):
@@ -100,7 +68,11 @@ def open_ladder(quarters_nc, half_nc=None):
         print(f"  halves and quarters from one run: {quarters_nc}", flush=True)
         return q, q
     half = xr.open_dataset(half_nc or NC_HALF)
-    ce, vel = check_ladder_provenance(half, q)
+    ce, vel = check_provenance(
+        q, half, [(f"ladder {qk}", qk, *HALVES, None) for qk in QUARTERS],
+        full_name="quarters", purpose="the count scaling",
+        hint="re-run run_noise_floor --quarters with the halves' settings (its "
+             "output carries both rungs) or pass a matching --half-nc")[0]
     print(f"  halves {half_nc or NC_HALF} + quarters {quarters_nc}: "
           f"provenance agrees (common_epoch={ce}, velocity={vel!r})", flush=True)
     return half, q
