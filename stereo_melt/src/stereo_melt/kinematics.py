@@ -746,14 +746,14 @@ def common_epoch_mean(
 
     A repeat-DEM stack samples each pixel at whatever times its strips
     happen to cover, so the plain time-mean is the field evaluated at a
-    per-pixel mean epoch :math:`ar t(x, y)`, not at one instant. Where the
+    per-pixel mean epoch :math:`\bar t(x, y)`, not at one instant. Where the
     surface is changing this makes the mean carry a spatially structured
-    sampling artifact, :math:`ar H - H(t_0) \simeq \dot H\,(ar t - t_0)`,
+    sampling artifact, :math:`\bar H - H(t_0) \simeq \dot H\,(\bar t - t_0)`,
     whose pattern follows strip footprints rather than the ice. The
     correction
 
     .. math::
-        H(t_0) = ar H - \mathcal{S}_\sigma[\dot H]\,igl(ar t - t_0igr)
+        H(t_0) = \bar H - \mathcal{S}_\sigma[\dot H]\,\bigl(\bar t - t_0\bigr)
 
     refers every pixel to the same epoch, with the rate field spatially
     smoothed (:func:`gaussian_smooth_nan`, scale ``sigma_px``) so that

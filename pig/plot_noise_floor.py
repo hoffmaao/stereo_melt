@@ -66,19 +66,35 @@ def crossing(k, snr):
     return float(np.exp(np.log(kk[i - 1]) + f * (np.log(kk[i]) - np.log(kk[i - 1]))))
 
 
-def available_pairs(full, half):
+def available_pairs(full, half, full_var_suffix=""):
     """The PAIRS whose product and half-stack variables all exist.
 
-    ``run_noise_floor --skip-rb`` writes Eulerian halves only, so the
-    restored pair is dropped (loudly) rather than raising a KeyError.
+    ``full_var_suffix`` is appended to every full-product variable name, so
+    halves solved with a variant (e.g. ``--common-epoch`` -> ``_ce``) are
+    compared against the SAME variant of the full product. A requested
+    variant that the full product lacks is an error, never a silent fall
+    back to the default product: the noise floor is only meaningful when
+    both sides come from the same instrument.
+
+    ``run_noise_floor --skip-rb`` writes Eulerian halves only, so a pair
+    whose half-stack variables are absent is dropped (loudly) rather than
+    raising a KeyError.
     """
     pairs = []
-    for p in PAIRS:
-        missing = [v for v, ds in ((p[1], full), (p[2], half), (p[3], half)) if v not in ds]
+    for label, fk, ak, bk, colour in PAIRS:
+        fk = fk + full_var_suffix
+        if fk not in full:
+            if full_var_suffix:
+                raise SystemExit(
+                    f"full product has no variable {fk!r} for --full-var-suffix "
+                    f"{full_var_suffix!r}; available: {', '.join(sorted(full.data_vars))}")
+            print(f"  skipping {label!r}: full product has no {fk!r}", flush=True)
+            continue
+        missing = [v for v in (ak, bk) if v not in half]
         if missing:
-            print(f"  skipping {p[0]!r}: missing {', '.join(missing)}", flush=True)
-        else:
-            pairs.append(p)
+            print(f"  skipping {label!r}: halves have no {', '.join(missing)}", flush=True)
+            continue
+        pairs.append((label, fk, ak, bk, colour))
     if not pairs:
         raise SystemExit("no product/half-stack pair is complete; nothing to plot")
     return pairs
@@ -111,7 +127,8 @@ def main() -> int:
     ap.add_argument("--half-suffix", default="",
                     help="use pig_noise_floor_...<suffix>.nc (e.g. _ce)")
     ap.add_argument("--full-var-suffix", default="",
-                    help="compare against these vars in the full product")
+                    help="suffix of the full-product variables to compare against "
+                         "(e.g. _ce); every PAIRS variable must exist with it")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -121,7 +138,9 @@ def main() -> int:
                f"pig_noise_floor_250m_is2ctempo_sheltilt{args.half_suffix}.nc")
     half = xr.open_dataset(half_nc)
     print(f"  halves: {half_nc.name}", flush=True)
-    pairs = available_pairs(full, half)
+    pairs = available_pairs(full, half, args.full_var_suffix)
+    print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
+    tag = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
 
     # common mask: every field finite (halves lose thin-coverage pixels)
     m = np.isfinite(full.eulerian.values)
@@ -205,20 +224,20 @@ def main() -> int:
         print(f"  {label:24s} {s:8.1f} {n:8.1f} {pct:9.0f}% {lam_s:>9s}")
 
     if args.stratify:
-        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args)
+        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, tag)
 
     fig.suptitle("PIG melt products: how much of the short-wavelength power is real?\n"
                  "noise floor from independent half-stacks (alternating epochs, disjoint "
                  "strips); shaded = the 3H bridging band (1.3–3.0 km)", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     out = args.out or (config.FIGURES_DIR /
-                       f"melt_noise_floor_250m_is2ctempo_sheltilt{args.half_suffix}.png")
+                       f"melt_noise_floor_250m_is2ctempo_sheltilt{tag}.png")
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"\nwrote {out}")
     return 0
 
 
-def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args):
+def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, tag=""):
     """Is the lambda <~ 3H bridging band observable ANYWHERE at PIG?
 
     The bridging correction acts below ~3H. 3H is 1.3 km on the thin shelf but
@@ -272,7 +291,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args):
     ax.set_title("Is the bridging band (λ ≲ 3H) observable at PIG?\n"
                  "dotted line = each region's own 3H; ● = SNR 1. Bridging is measurable "
                  "only where ● lies LEFT of the dotted line.", fontsize=10.5)
-    out = config.FIGURES_DIR / "melt_noise_floor_regions_250m_is2ctempo_sheltilt.png"
+    out = config.FIGURES_DIR / f"melt_noise_floor_regions_250m_is2ctempo_sheltilt{tag}.png"
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"\nwrote {out}")
