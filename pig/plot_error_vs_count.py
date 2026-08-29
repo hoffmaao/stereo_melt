@@ -5,7 +5,10 @@ band to SNR 1") assumes noise variance ~ 1/n. Two measurements of the actual
 scaling:
 
 1. SUBSET LADDER (clean). The stack is dealt into interleaved halves and
-   quarters (disjoint strips, full time span), the Eulerian melt is solved
+   quarters (disjoint strips, full time span; ``run_noise_floor --quarters``
+   writes both rungs from one run, and a halves file from another run is
+   only accepted if its recorded solver settings match), the Eulerian melt
+   is solved
    from each, and pairwise differences give the noise at n/2 and n/4 over
    the SAME pixels: sigma(n/2) = rms(A - B)/2? no - Var[A-B] = 2 sigma^2 at
    that count, so sigma_{n/2} = rms(A-B)/sqrt(2) and sigma_{n/4} =
@@ -43,20 +46,79 @@ import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 
 from pig import config  # noqa: E402
+from pig.plot_noise_floor import provenance  # noqa: E402
 from pig.run_melt import load_stack  # noqa: E402
 
 NC_HALF = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt.nc"
 NC_Q = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc"
+HALVES = ("eulerian_A", "eulerian_B")
+QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
+
+
+def check_ladder_provenance(half, q):
+    """Refuse halves and quarters solved with different instruments.
+
+    ``run_noise_floor`` stamps ``common_epoch`` and ``velocity`` on its
+    output, so the files say which solver settings produced each rung. A
+    slope fitted between rungs from different settings measures the
+    settings, not the count scaling. Returns the agreed ``(common_epoch,
+    velocity)``.
+    """
+    problems, agreed = [], set()
+    for qk in QUARTERS:
+        qce, qvel = provenance(q, qk)
+        for hk in HALVES:
+            hce, hvel = provenance(half, hk)
+            if hce != qce:
+                problems.append(f"halves {hk} common_epoch={hce} vs quarters {qk} "
+                                f"common_epoch={qce}")
+            if hvel is None or qvel is None:
+                print(f"  WARNING velocity provenance missing (halves {hvel!r}, "
+                      f"quarters {qvel!r}); cannot verify", flush=True)
+            elif hvel != qvel:
+                problems.append(f"halves {hk} velocity={hvel!r} vs quarters {qk} "
+                                f"velocity={qvel!r}")
+            agreed.add((qce, qvel))
+    if problems:
+        raise SystemExit(
+            "instrument mismatch between the halves and quarters rungs — the "
+            "count scaling is only meaningful when both come from the same "
+            "solver settings:\n  " + "\n  ".join(sorted(set(problems))))
+    return agreed.pop()
+
+
+def open_ladder(quarters_nc, half_nc=None):
+    """``(halves, quarters)`` datasets for the ladder.
+
+    The quarters file carries the same run's halves, so by default both rungs
+    are read from it; an explicit ``half_nc`` (or a quarters file without
+    halves, from an older run) falls back to the separate halves file and
+    is checked for matching provenance.
+    """
+    q = xr.open_dataset(quarters_nc)
+    if half_nc is None and all(k in q for k in HALVES):
+        print(f"  halves and quarters from one run: {quarters_nc}", flush=True)
+        return q, q
+    half = xr.open_dataset(half_nc or NC_HALF)
+    ce, vel = check_ladder_provenance(half, q)
+    print(f"  halves {half_nc or NC_HALF} + quarters {quarters_nc}: "
+          f"provenance agrees (common_epoch={ce}, velocity={vel!r})", flush=True)
+    return half, q
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--quarters-nc", default=str(NC_Q),
+                    help="run_noise_floor --quarters output (halves + quarters)")
+    ap.add_argument("--half-nc", default=None,
+                    help="separate halves file (default: the halves solved in the "
+                         "same run as the quarters); refused if its common_epoch/"
+                         "velocity provenance differs from the quarters")
     ap.add_argument("--dpi", type=int, default=200)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    half = xr.open_dataset(NC_HALF)
-    q = xr.open_dataset(NC_Q)
+    half, q = open_ladder(args.quarters_nc, args.half_nc)
     st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
     n_full = np.isfinite(st.values).sum(0).astype(float)
     z = np.load(config.PROCESSED_DIR / "pig_eta_field_250m_dual_20260730_t0era5.npz")
@@ -66,7 +128,7 @@ def main() -> int:
 
     # common pixels: finite in halves and all four quarters
     fin = np.isfinite(half.eulerian_A.values) & np.isfinite(half.eulerian_B.values)
-    for k in ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3"):
+    for k in QUARTERS:
         fin &= np.isfinite(q[k].values)
     d_half = (half.eulerian_A - half.eulerian_B).values
     d_q01 = (q.eulerian_Q0 - q.eulerian_Q1).values

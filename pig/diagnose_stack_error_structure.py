@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import NamedTuple
 
@@ -128,6 +129,57 @@ def per_epoch_stats(stack: xr.DataArray, block_kms=(2.0, 4.0), min_px=500):
     return rows
 
 
+def stack_fingerprint(stack: xr.DataArray, nc=None) -> dict:
+    """Identity of the stack the rows were measured on.
+
+    Shape and time span alone do not separate twin tiers built from one
+    template and seed (identical footprints), so the fingerprint also carries
+    two value statistics: the stack mean and the mean squared x-difference,
+    which the injected error model changes by orders of magnitude. ``nc`` is
+    the source file (``None`` for the production PIG stack).
+    """
+    z = stack.values
+    with np.errstate(invalid="ignore"):
+        d2 = float(np.nanmean(np.diff(z, axis=-1) ** 2))
+    return dict(nc=None if nc is None else os.path.realpath(nc),
+                n_epochs=int(z.shape[0]), ny=int(z.shape[1]), nx=int(z.shape[2]),
+                time_first=str(stack.time.values.min())[:19],
+                time_last=str(stack.time.values.max())[:19],
+                finite_px=int(np.isfinite(z).sum()),
+                mean_m=float(np.nanmean(z)), dx2_m2=d2)
+
+
+def check_fingerprint(d: dict, stack: xr.DataArray, nc, what: str) -> None:
+    """Refuse a diagnostic JSON that was not measured on ``stack``.
+
+    ``d`` is the JSON written by :func:`main`; ``nc`` is the file ``stack``
+    was opened from (``None`` for the production PIG stack). A JSON written
+    before fingerprints were recorded cannot be verified and is only warned
+    about. Any recorded field that disagrees is an error: the JSON's rows,
+    epoch indices and captions would otherwise describe a different stack
+    from the one drawn.
+    """
+    want = d.get("fingerprint")
+    if not want:
+        print(f"  WARNING {what}: JSON carries no stack fingerprint; cannot verify "
+              "it was measured on the stack being drawn (re-run "
+              "diagnose_stack_error_structure to record one)", flush=True)
+        return
+    have = stack_fingerprint(stack, nc)
+    problems = []
+    for k in ("nc", "n_epochs", "ny", "nx", "time_first", "time_last", "finite_px"):
+        if want.get(k) != have[k]:
+            problems.append(f"{k}: JSON {want.get(k)!r} vs stack {have[k]!r}")
+    for k in ("mean_m", "dx2_m2"):
+        if not np.isclose(want.get(k, np.nan), have[k], rtol=1e-4, atol=1e-6):
+            problems.append(f"{k}: JSON {want.get(k)!r} vs stack {have[k]!r}")
+    if problems:
+        raise SystemExit(
+            f"{what}: the diagnostic JSON was not measured on the stack being "
+            "drawn — captions and example epoch would describe a different "
+            "stack:\n  " + "\n  ".join(problems))
+
+
 def summarize(rows, label):
     def pct(key, q):
         v = np.array([r[key] for r in rows if np.isfinite(r.get(key, np.nan))])
@@ -166,6 +218,7 @@ def main() -> int:
     if args.json_out:
         with open(args.json_out, "w") as f:
             json.dump({"label": label, "summary": summary,
+                       "fingerprint": stack_fingerprint(st, args.nc),
                        "rows": rows}, f)
         print(f"  wrote {args.json_out}")
     return 0

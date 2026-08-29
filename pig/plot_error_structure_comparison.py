@@ -2,7 +2,9 @@
 
 Consumes the JSON summaries from :mod:`pig.diagnose_stack_error_structure`
 (run on the real 250 m PIG stack and on a twin corrected stack — by default
-the white-noise ``multixy_pig`` tier) and shows (a) the per-strip metric
+the white-noise ``multixy_pig`` tier; each JSON must have been measured on
+the stack it is paired with here, which is checked against the fingerprint
+the diagnostic records) and shows (a) the per-strip metric
 distributions and (b) one example detrended residual field from each, on a
 common colour scale. The headline (rms ratio, block excess at 2/4 km) and the
 annotation are derived from the loaded rows, so the figure reports whatever
@@ -37,7 +39,8 @@ import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 
 from pig import config  # noqa: E402
-from pig.diagnose_stack_error_structure import epoch_residual, pixel_trend  # noqa: E402
+from pig.diagnose_stack_error_structure import (  # noqa: E402
+    check_fingerprint, epoch_residual, pixel_trend)
 
 J_REAL = config.PROCESSED_DIR / "error_structure_real.json"
 J_TWIN = config.PROCESSED_DIR / "error_structure_twin.json"
@@ -137,6 +140,8 @@ def main() -> int:
     var = [v for v in ds_t.data_vars if ds_t[v].dims[-2:] == ("y", "x")
            and "time" in ds_t[v].dims][0]
     st_t = ds_t[var]
+    check_fingerprint(real, st_r, None, f"--real-json {args.real_json}")
+    check_fingerprint(twin, st_t, args.twin_nc, f"--twin-json {args.twin_json}")
     for col, (st, rows, lab) in enumerate(
             ((st_r, real["rows"], "REAL PIG strip residual"),
              (st_t, twin["rows"], "TWIN strip residual"))):

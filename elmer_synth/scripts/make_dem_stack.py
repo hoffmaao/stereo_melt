@@ -63,6 +63,19 @@ def pick_crop(count_path: str) -> tuple[int, int]:
     return iyc - CROP_NY // 2, ixc - CROP_NX // 2
 
 
+def plane_fit(field: np.ndarray, mask: np.ndarray, x2d: np.ndarray, y2d: np.ndarray):
+    """Least-squares plane of ``field`` over ``mask`` as ``(slope_m_per_m, azimuth_rad)``.
+
+    Same parameterisation as the injected tilt: the plane is
+    ``slope * (cos(az) * x + sin(az) * y)`` plus an offset.
+    """
+    if mask.sum() < 3:
+        return 0.0, 0.0
+    A = np.stack([x2d[mask], y2d[mask], np.ones(int(mask.sum()))], 1)
+    coef, *_ = np.linalg.lstsq(A, field[mask], rcond=None)
+    return float(np.hypot(coef[0], coef[1])), float(np.arctan2(coef[1], coef[0]))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pert", required=True, help="E2a truth run (e.g. trans_gauss_a5)")
@@ -89,7 +102,11 @@ def main() -> None:
                          "azimuth per strip, like jitter ripple)")
     ap.add_argument("--corr-lmax-km", type=float, default=9.0,
                     help="high-pass: wavelengths above this are left to the "
-                         "offset/tilt terms")
+                         "offset/tilt terms. The cut is applied to the stretched "
+                         "wavenumber, so along the band direction wavelengths up "
+                         "to corr_aniso * corr_lmax_km still pass; the plane the "
+                         "field then carries is recorded per strip as "
+                         "corr_tilt_slope_m_per_m / corr_tilt_azimuth_rad")
     ap.add_argument("--corrupt-bias-m", type=float, default=3.0,
                     help="offset sigma of the deliberately corrupted strips "
                          "(their tilt is 8x the drawn slope); scale it with "
@@ -151,7 +168,7 @@ def main() -> None:
             bias = float(rng.normal(0, args.corrupt_bias_m))
         plane = slope * (np.cos(azim) * x2d + np.sin(azim) * y2d)
         z = zs + plane + bias + rng.normal(0, sigma, zs.shape)
-        corr_rms = 0.0
+        corr_rms, corr_tilt, corr_azim = 0.0, 0.0, 0.0
         if args.corr_rms_m[1] > 0:
             # banded correlated error (jitter/coreg ripple): anisotropic
             # power-law field at a random azimuth, high-passed so scales
@@ -174,7 +191,9 @@ def main() -> None:
             f = np.real(np.fft.ifft2(np.fft.fft2(
                 rng.normal(size=(ny_, nx_))) * filt))
             f -= f.mean()
-            z = z + corr_rms * (f / max(f.std(), 1e-12))
+            g = corr_rms * (f / max(f.std(), 1e-12))
+            corr_tilt, corr_azim = plane_fit(g, mask, x2d, y2d)
+            z = z + g
         z[~mask] = np.nan
 
         kept.append(k)
@@ -186,6 +205,7 @@ def main() -> None:
             Ez=EZ_BY_VARIANT.get(variants[k], 1.0),
             tilt_slope_m_per_m=slope, tilt_azimuth_rad=azim,
             bias_m=bias, noise_sigma_m=sigma, corr_rms_m=corr_rms,
+            corr_tilt_slope_m_per_m=corr_tilt, corr_tilt_azimuth_rad=corr_azim,
             corrupted=corrupted,
         ))
         if args.max_strips and len(kept) >= args.max_strips:
