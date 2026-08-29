@@ -215,6 +215,7 @@ def eulerian_melt_rate(
             "rho_i": rho_i,
             "vel_smooth_sigma_m": float(vel_smooth_sigma_m or 0.0),
             "common_epoch": int(bool(common_epoch)),
+            "epoch_rate_sigma_px": float(epoch_rate_sigma_px),
         },
     )
 

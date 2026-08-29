@@ -736,7 +736,6 @@ def build_streamline_dataset(
     )
 
 
-
 def common_epoch_mean(
     stack: xr.DataArray,
     slope: xr.DataArray,
@@ -760,10 +759,14 @@ def common_epoch_mean(
     smoothed (:func:`gaussian_smooth_nan`, scale ``sigma_px``) so that
     poorly-sampled pixels borrow their neighbourhood's trend instead of
     extrapolating on their own noisy slope — the per-pixel fit alone is
-    markedly rougher than the raw mean and over-corrects. This is the
-    time-consistency of an interpolated DEM product (Shean 2019 builds
-    epoch mosaics for the same reason), at the linear order the steady-melt
-    budget already assumes.
+    markedly rougher than the raw mean and over-corrects. Pixels whose own
+    slope is undefined (fewer samples than the regression's ``min_count``)
+    take the smoothed rate of their finite neighbours; where no neighbour
+    lies within the smoother's support the plain mean is kept, so the
+    result is finite wherever the plain mean is and the correction never
+    reduces coverage. This is the time-consistency of an interpolated DEM
+    product (Shean 2019 builds epoch mosaics for the same reason), at the
+    linear order the steady-melt budget already assumes.
 
     Parameters
     ----------
@@ -776,7 +779,10 @@ def common_epoch_mean(
         Gaussian smoothing scale of the rate field, in pixels.
     t0 : float, optional
         Reference epoch in seconds from the stack's earliest sample;
-        defaults to the median sample time.
+        defaults to the mean sample time, which is the epoch the plain
+        mean of a fully-sampled stack already refers to (so the correction
+        is identically zero under uniform sampling, however the epochs are
+        spaced).
 
     Returns
     -------
@@ -790,25 +796,31 @@ def common_epoch_mean(
     with np.errstate(invalid="ignore", divide="ignore"):
         t_bar = np.tensordot(t, finite, axes=(0, 0)) / np.maximum(n, 1)
     t_bar[n == 0] = np.nan
-    t_ref = float(np.median(t)) if t0 is None else float(t0)
+    t_ref = float(np.mean(t)) if t0 is None else float(t0)
 
     mean = stack.mean("time", skipna=True)
-    slope_s = gaussian_smooth_nan(slope, sigma_px)
+    slope_s = gaussian_smooth_nan(slope, sigma_px, keep_gaps=False)
     lever = xr.DataArray(t_bar - t_ref, dims=("y", "x"),
                          coords={"y": mean.y, "x": mean.x})
-    out = mean - slope_s * lever
+    out = mean - (slope_s * lever).fillna(0.0)
     out.attrs.update(common_epoch_s=t_ref, rate_sigma_px=float(sigma_px))
     return out
 
-def gaussian_smooth_nan(field: xr.DataArray, sigma_px: float) -> xr.DataArray:
-    r"""NaN-aware Gaussian smoothing of a 2-D field, preserving its NaN gaps.
+
+def gaussian_smooth_nan(
+    field: xr.DataArray,
+    sigma_px: float,
+    keep_gaps: bool = True,
+) -> xr.DataArray:
+    r"""NaN-aware Gaussian smoothing of a 2-D field.
 
     Velocity mosaics carry data voids (NaN) that a plain Gaussian filter would
     smear zeros into. This normalizes by the smoothed validity mask
     (Knutsson-Westin style) so smoothing borrows only from finite neighbours,
-    then restores the original NaN footprint. Used to apply Shean-style velocity
-    smoothing (~1-3.5 km) before the flux-divergence term, which tames the
-    near-grounding-line :math:`\nabla\!\cdot(H u)` overshoot.
+    then (by default) restores the original NaN footprint. Used to apply
+    Shean-style velocity smoothing (~1-3.5 km) before the flux-divergence
+    term, which tames the near-grounding-line :math:`\nabla\!\cdot(H u)`
+    overshoot.
 
     Parameters
     ----------
@@ -817,11 +829,17 @@ def gaussian_smooth_nan(field: xr.DataArray, sigma_px: float) -> xr.DataArray:
     sigma_px : float
         Gaussian sigma in pixels (``smooth_m / res_m``). Non-positive returns
         ``field`` unchanged.
+    keep_gaps : bool
+        If True (default) the input's NaN cells stay NaN. If False the
+        normalized estimate is also returned inside the gaps, i.e. a gap
+        pixel takes the Gaussian-weighted mean of the finite pixels within
+        the smoother's support; only cells with no finite neighbour in
+        support remain NaN.
 
     Returns
     -------
     xarray.DataArray
-        Smoothed field on the same coords; original NaN cells stay NaN.
+        Smoothed field on the same coords.
     """
     from scipy.ndimage import gaussian_filter
 
@@ -833,7 +851,8 @@ def gaussian_smooth_nan(field: xr.DataArray, sigma_px: float) -> xr.DataArray:
     num = gaussian_filter(a0, sigma_px, mode="nearest")
     den = gaussian_filter(finite.astype(float), sigma_px, mode="nearest")
     out = np.where(den > 1e-6, num / den, np.nan)
-    out[~finite] = np.nan
+    if keep_gaps:
+        out[~finite] = np.nan
     return xr.DataArray(out, dims=field.dims, coords=field.coords, attrs=field.attrs)
 
 

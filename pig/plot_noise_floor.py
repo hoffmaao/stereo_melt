@@ -46,22 +46,49 @@ PAIRS = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "#1f77b4"),
 
 
 def crossing(k, snr):
-    """Wavenumber where SNR falls through 1 (log-linear interpolation)."""
-    ok = np.isfinite(snr) & (snr > 0)
-    kk, ss = k[ok], np.log(snr[ok])
-    below = np.where(ss < 0)[0]
+    """Wavenumber where SNR first falls below 1.
+
+    Interpolates the un-logged SNR linearly in log-k between the last bin at
+    or above 1 and the first bin below it. A non-positive SNR (product PSD
+    below the noise floor) is a bin definitively below unity and is kept as
+    such; only non-finite bins are dropped. Returns NaN when SNR never falls
+    below 1 in band, or is already below 1 at the longest in-band
+    wavelength, where the crossing lies outside the band and no in-band
+    interpolation is defined.
+    """
+    ok = np.isfinite(snr)
+    kk, ss = k[ok], snr[ok]
+    below = np.where(ss < 1.0)[0]
     if not len(below) or below[0] == 0:
         return np.nan
     i = below[0]
-    f = ss[i - 1] / (ss[i - 1] - ss[i])
+    f = (ss[i - 1] - 1.0) / (ss[i - 1] - ss[i])
     return float(np.exp(np.log(kk[i - 1]) + f * (np.log(kk[i]) - np.log(kk[i - 1]))))
 
 
-def stratify(full, half, mask, xw, yw, r0, r1, c0, c1, label_prefix=""):
+def available_pairs(full, half):
+    """The PAIRS whose product and half-stack variables all exist.
+
+    ``run_noise_floor --skip-rb`` writes Eulerian halves only, so the
+    restored pair is dropped (loudly) rather than raising a KeyError.
+    """
+    pairs = []
+    for p in PAIRS:
+        missing = [v for v, ds in ((p[1], full), (p[2], half), (p[3], half)) if v not in ds]
+        if missing:
+            print(f"  skipping {p[0]!r}: missing {', '.join(missing)}", flush=True)
+        else:
+            pairs.append(p)
+    if not pairs:
+        raise SystemExit("no product/half-stack pair is complete; nothing to plot")
+    return pairs
+
+
+def stratify(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, label_prefix=""):
     """SNR vs wavenumber for one sub-region; returns rows + curves."""
     fmin = 1.0 / 40.0
     out = []
-    for label, fk, ak, bk, colour in PAIRS:
+    for label, fk, ak, bk, colour in pairs:
         mf = full[fk].values[r0:r1, c0:c1]
         d = (half[ak] - half[bk]).values[r0:r1, c0:c1]
         k, psd_f, st_f = radial_psd(mf, mask, 0.25, taper_px=6, fmin=fmin)
@@ -94,12 +121,13 @@ def main() -> int:
                f"pig_noise_floor_250m_is2ctempo_sheltilt{args.half_suffix}.nc")
     half = xr.open_dataset(half_nc)
     print(f"  halves: {half_nc.name}", flush=True)
+    pairs = available_pairs(full, half)
 
     # common mask: every field finite (halves lose thin-coverage pixels)
     m = np.isfinite(full.eulerian.values)
     for k in half.data_vars:
         m &= np.isfinite(half[k].values)
-    for _, fk, _, _, _ in PAIRS:
+    for _, fk, _, _, _ in pairs:
         m &= np.isfinite(full[fk].values)
     ys, xs = np.where(m)
     pad = 8
@@ -114,7 +142,7 @@ def main() -> int:
     fmin = 1.0 / 40.0
     fig, axs = plt.subplots(1, 2, figsize=(15.5, 6.2))
     rows = []
-    for label, fk, ak, bk, colour in PAIRS:
+    for label, fk, ak, bk, colour in pairs:
         mf = full[fk].values[r0:r1, c0:c1]
         d = (half[ak] - half[bk]).values[r0:r1, c0:c1]
         k, psd_f, st_f = radial_psd(mf, mask, 0.25, taper_px=6, fmin=fmin)
@@ -162,7 +190,7 @@ def main() -> int:
     # shelf-integrated flux uncertainty from the same split:
     # Var[flux_A - flux_B] = 2 sigma_half^2, sigma_half^2 ~ 2 sigma_full^2
     print("\n  shelf-flux DEM-noise uncertainty (1 sigma, from the half difference):")
-    for label, fk, ak, bk, _ in PAIRS:
+    for label, fk, ak, bk, _ in pairs:
         fa = -np.nansum(np.where(mask, half[ak].values[r0:r1, c0:c1], np.nan)) * 62500 * 918 / 1e12
         fb = -np.nansum(np.where(mask, half[bk].values[r0:r1, c0:c1], np.nan)) * 62500 * 918 / 1e12
         ff = -np.nansum(np.where(mask, full[fk].values[r0:r1, c0:c1], np.nan)) * 62500 * 918 / 1e12
@@ -177,7 +205,7 @@ def main() -> int:
         print(f"  {label:24s} {s:8.1f} {n:8.1f} {pct:9.0f}% {lam_s:>9s}")
 
     if args.stratify:
-        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, args)
+        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args)
 
     fig.suptitle("PIG melt products: how much of the short-wavelength power is real?\n"
                  "noise floor from independent half-stacks (alternating epochs, disjoint "
@@ -190,7 +218,7 @@ def main() -> int:
     return 0
 
 
-def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, args):
+def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args):
     """Is the lambda <~ 3H bridging band observable ANYWHERE at PIG?
 
     The bridging correction acts below ~3H. 3H is 1.3 km on the thin shelf but
@@ -220,7 +248,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, args):
             continue
         Hmed = float(np.nanmedian(H[rmask]))
         lam3H = 3 * Hmed / 1e3
-        rows = stratify(full, half, rmask, xw, yw, r0, r1, c0, c1)
+        rows = stratify(full, half, rmask, xw, yw, r0, r1, c0, c1, pairs)
         for i, r in enumerate(rows):
             ls = "-" if i == 0 else "--"
             ax.loglog(r["k"], r["snr"], color=colour, lw=1.8, ls=ls,

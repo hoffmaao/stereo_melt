@@ -68,9 +68,6 @@ from stereo_melt.kinematics import HelmholtzDivergence  # noqa: E402
 from stereo_melt.melt import eulerian_melt_rate  # noqa: E402
 
 RHO_I = 918.0
-NC_FULL = (config.PROCESSED_DIR /
-           "pig_melt_bridging_250m_is2ctempo_sheltilt_2010-01-01_2024-01-10.nc")
-OUT_NC = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt.nc"
 
 
 def out_path(suffix):

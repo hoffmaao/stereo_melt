@@ -10,10 +10,16 @@ C1  UNBIASED UNDER RAGGED SAMPLING. A field with a known uniform trend,
     biased by rate * (t_bar - t0) with the artifact's spatial pattern, while
     the common-epoch mean recovers H(t0) to < 5 % of that bias.
 C2  EXACT WHEN SAMPLING IS UNIFORM. With every pixel observed at every
-    epoch the correction is identically zero (both means agree to 1e-9).
+    epoch the correction is identically zero (both means agree to 1e-9),
+    for evenly AND unevenly spaced epochs — the reference epoch is the
+    mean sample time, which is what the plain mean already refers to.
 C3  NO VARIANCE PENALTY. On a noisy stack the corrected field is no rougher
     than the plain mean (the rate is smoothed, so the correction adds
     negligible short-scale variance, unlike a per-pixel refit).
+C4  NO COVERAGE LOSS. A block of pixels seen in fewer epochs than the
+    regression's min_count (own slope undefined) beside well-sampled
+    neighbours stays finite, borrows the neighbourhood's trend, and lands
+    on H(t0); coverage is identical to the plain mean's.
 
 Run::
 
@@ -43,13 +49,20 @@ def check(name, ok, detail=""):
         FAILS.append(name)
 
 
-def build(sampling, noise=0.0, seed=0):
-    """Stack of a trending field, observed through `sampling` (nt, ny, nx)."""
+def build(sampling, noise=0.0, seed=0, t_yr=None):
+    """Stack of a trending field, observed through `sampling` (nt, ny, nx).
+
+    ``t_yr`` gives the epochs in years from the first; default is NT epochs
+    evenly spaced by half a year.
+    """
     rng = np.random.default_rng(seed)
     y = np.arange(NY)[::-1] * RES
     x = np.arange(NX) * RES
+    if t_yr is None:
+        t_yr = np.arange(NT) * 0.5
+    t_yr = np.asarray(t_yr, dtype=float)
     times = pd.to_datetime("2012-01-01") + pd.to_timedelta(
-        np.arange(NT) * 365.25 / 2.0, unit="D")
+        np.round(t_yr * 365.25 * 86400.0), unit="s")
     t_yr = (times - times[0]).total_seconds().values / (86400.0 * 365.25)
     base = 500.0 + 20.0 * np.cos(2 * np.pi * np.arange(NX) / 30.0)[None, :]
     cube = base[None] + RATE * t_yr[:, None, None]
@@ -80,17 +93,26 @@ def ragged_sampling(seed=1):
     return s
 
 
+def truth_at(t_yr_ref):
+    """The noise-free field at one epoch (years from the first sample)."""
+    return (500.0 + 20.0 * np.cos(2 * np.pi * np.arange(NX) / 30.0)[None, :]
+            + RATE * t_yr_ref)
+
+
+def mean_epoch_s(stack):
+    return float(np.mean((stack.time.values - stack.time.values.min())
+                         / np.timedelta64(1, "s")))
+
+
 def main() -> int:
     print("C1  ragged sampling: plain mean is biased, common-epoch mean is not")
     samp = ragged_sampling()
     stack, t_yr = build(samp)
     reg = dh_dt(stack)
     ce = common_epoch_mean(stack, reg["slope"], sigma_px=2.0)
-    t_mid = float(np.median((stack.time.values - stack.time.values.min())
-                            / np.timedelta64(1, "s")))
+    t_mid = mean_epoch_s(stack)
     t_mid_yr = t_mid / (86400.0 * 365.25)
-    truth = (500.0 + 20.0 * np.cos(2 * np.pi * np.arange(NX) / 30.0)[None, :]
-             + RATE * t_mid_yr)
+    truth = truth_at(t_mid_yr)
     plain = stack.mean("time", skipna=True).values
     ok = np.isfinite(plain) & np.isfinite(ce.values)
     e_plain = float(np.sqrt(np.mean((plain - truth)[ok] ** 2)))
@@ -104,7 +126,15 @@ def main() -> int:
     reg_u = dh_dt(stack_u)
     ce_u = common_epoch_mean(stack_u, reg_u["slope"], sigma_px=2.0)
     d = float(np.nanmax(np.abs(ce_u.values - stack_u.mean("time").values)))
-    check("no-op under uniform sampling", d < 1e-9, f"max|delta| {d:.1e}")
+    check("no-op under uniform, evenly spaced sampling", d < 1e-9, f"max|delta| {d:.1e}")
+    t_uneven = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.5, 4.0, 6.5, 9.0, 11.0])
+    stack_v, t_v = build(np.ones((len(t_uneven), NY, NX), bool), t_yr=t_uneven)
+    reg_v = dh_dt(stack_v)
+    ce_v = common_epoch_mean(stack_v, reg_v["slope"], sigma_px=2.0)
+    d = float(np.nanmax(np.abs(ce_v.values - stack_v.mean("time").values)))
+    skew = abs(RATE) * abs(np.mean(t_v) - np.median(t_v))
+    check("no-op under uniform, UNEVENLY spaced sampling", d < 1e-9 and skew > 1.0,
+          f"max|delta| {d:.1e} (median-referenced would be {skew:.2f} m)")
 
     print("C3  no short-scale variance penalty vs the plain mean")
     stack_n, _ = build(samp, noise=1.5, seed=7)
@@ -124,6 +154,32 @@ def main() -> int:
           r_ce < 1.15 * r_plain and r_fit > 1.5 * r_plain,
           f"roughness: plain {r_plain:.2f}  corrected {r_ce:.2f}  "
           f"per-pixel refit {r_fit:.2f} (the naive alternative)")
+
+    print("C4  pixels below min_count beside well-sampled neighbours keep coverage")
+    samp_h = np.ones((NT, NY, NX), bool)
+    hole = (slice(20, 25), slice(40, 45))
+    samp_h[:, hole[0], hole[1]] = False
+    samp_h[:2, hole[0], hole[1]] = True                   # 2 early epochs < min_count
+    stack_h, _ = build(samp_h)
+    reg_h = dh_dt(stack_h, min_count=3)
+    ce_h = common_epoch_mean(stack_h, reg_h["slope"], sigma_px=2.0)
+    plain_h = stack_h.mean("time", skipna=True).values
+    n_hole = int(np.isnan(reg_h["slope"].values[hole]).sum())
+    check("the hole's own slope is undefined (the case under test)",
+          n_hole == 25, f"{n_hole}/25 hole pixels have NaN slope")
+    check("coverage identical to the plain mean",
+          np.array_equal(np.isfinite(ce_h.values), np.isfinite(plain_h)),
+          f"{int(np.isfinite(ce_h.values).sum())} vs {int(np.isfinite(plain_h).sum())} finite px")
+    truth_h = truth_at(mean_epoch_s(stack_h) / (86400.0 * 365.25))
+    e_plain_h = float(np.sqrt(np.mean((plain_h - truth_h)[hole] ** 2)))
+    e_ce_h = float(np.sqrt(np.mean((ce_h.values - truth_h)[hole] ** 2)))
+    check("hole borrows the neighbourhood trend and lands on H(t0)",
+          e_plain_h > 1.0 and e_ce_h < 0.05 * e_plain_h,
+          f"hole rmse vs H(t0): plain {e_plain_h:.2f} m -> corrected {e_ce_h:.3f} m")
+    outside = np.ones((NY, NX), bool)
+    outside[hole] = False
+    d_out = float(np.nanmax(np.abs(ce_h.values - plain_h)[outside]))
+    check("well-sampled neighbours are untouched", d_out < 1e-9, f"max|delta| {d_out:.1e}")
 
     print()
     if FAILS:

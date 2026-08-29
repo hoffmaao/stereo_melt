@@ -604,6 +604,8 @@ def restored_budget_melt_rate(
                                         for h, a, b in bin_geom),
                "eta_bar": eta_bar, "alpha_scale": alpha_scale,
                "lift_cap": lift_cap,
+               "common_epoch": int(bool(common_epoch)),
+               "epoch_rate_sigma_px": float(epoch_rate_sigma_px),
                "band_lam_min_m": float(band_lam_min if band_lam_min
                                        else 2.5 * H_ref),
                "bin_band_lam_min_m": ";".join(

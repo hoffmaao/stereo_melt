@@ -94,7 +94,9 @@ def main() -> int:
     def npx(m):
         return int(np.isfinite(m.values).sum())
 
-    print(f"  common mask {int(common.sum())} px; "
+    n_common = int(common.sum())
+    extra_pct = 100.0 * (max(npx(_v) for _v in fields.values()) - n_common) / n_common
+    print(f"  common mask {n_common} px; "
           f"like-for-like vs own-domain fluxes (Gt/yr):", flush=True)
     for _k, _v in fields.items():
         print(f"    {_k:24s} {flux(_v):6.1f}  |  own {flux_own(_v):6.1f} "
@@ -113,7 +115,7 @@ def main() -> int:
         ax = axs[0, j]
         im = ax.pcolormesh(x, y, crop(m.values), cmap=cmap, norm=norm,
                            shading="nearest", rasterized=True)
-        extra = npx(m) - int(common.sum())
+        extra = npx(m) - n_common
         cov = "" if extra <= 0 else f"  (+{extra} px → {flux_own(m):.1f} own)"
         ax.set_title(f"{title}\n{flux(m):.1f} Gt/yr like-for-like{cov}", fontsize=9.5)
         ax.set_aspect("equal")
@@ -139,8 +141,8 @@ def main() -> int:
     fig.suptitle("PIG 250 m is2ctempo_sheltilt 2010–2024 — bridging-aware melt solvers on the "
                  f"production stack ({ds.attrs.get('velocity', '')})\n"
                  "fluxes on the COMMON pixel set; the Helmholtz variants additionally "
-                 "cover ~5.4 % more shelf (stencil gaps), reported as 'own'. "
-                 "DEM-noise 1σ on the flux ≈ 2.8 Gt/yr (half-stack split)", fontsize=11)
+                 f"cover up to {extra_pct:.1f} % more shelf (stencil gaps), reported as 'own'",
+                 fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_bridging_250m_is2ctempo_sheltilt.png")
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"wrote {out}")
