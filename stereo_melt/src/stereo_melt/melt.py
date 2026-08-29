@@ -31,7 +31,8 @@ The **Eulerian** form (Shean 2019 Eq. 10), implemented by
 
 fits :math:`\partial H_f/\partial t` by per-pixel regression of the
 stack against time and evaluates :math:`\nabla\!\cdot(H_f u)` on the
-time-mean field.
+time-mean field (or, with ``common_epoch=True``, on that mean referred to
+one epoch by :func:`~stereo_melt.kinematics.common_epoch_mean`).
 
 The **Lagrangian** form (Shean 2019 Eq. 7), implemented by
 :func:`lagrangian_melt_rate`:
@@ -72,6 +73,7 @@ from .freeboard import freeboard_to_thickness
 from .kinematics import (
     SECONDS_PER_YEAR,
     DivergenceEstimator,
+    common_epoch_mean,
     dh_dt,
     divergence,
     flux_divergence,
@@ -119,6 +121,8 @@ def eulerian_melt_rate(
     min_count: int = 3,
     robust_dh_dt: bool = False,
     vel_smooth_sigma_m: float | None = None,
+    common_epoch: bool = False,
+    epoch_rate_sigma_px: float = 2.0,
 ) -> xr.Dataset:
     r"""Return the basal melt-rate field from a repeat-DEM stack (Eulerian).
 
@@ -151,6 +155,15 @@ def eulerian_melt_rate(
     estimator : DivergenceEstimator, optional
         Alternative flux-divergence estimator. Defaults to central
         finite differences.
+    common_epoch : bool, optional
+        Refer the mean thickness entering the flux divergence to one
+        epoch with :func:`~stereo_melt.kinematics.common_epoch_mean`,
+        instead of using the per-pixel time-mean. The time-mean is
+        evaluated at whatever epochs each pixel's strips supply, so on a
+        changing surface it carries a strip-shaped sampling artifact that
+        the divergence differentiates.
+    epoch_rate_sigma_px : float, optional
+        Smoothing scale of the rate field used for that correction.
     min_count : int
         Minimum finite samples per pixel required by the dh/dt
         regression; pixels with fewer valid samples are NaN.
@@ -159,6 +172,9 @@ def eulerian_melt_rate(
     -------
     xarray.Dataset
         See :func:`lagrangian_melt_rate` for the matching variable set.
+        With ``common_epoch=True``, ``H_f_mean`` is the common-epoch mean
+        rather than the time-mean; the choice is stamped in the
+        ``common_epoch`` attr.
     """
     vx = _smooth_velocity_da(vx, vel_smooth_sigma_m)
     vy = _smooth_velocity_da(vy, vel_smooth_sigma_m)
@@ -168,7 +184,11 @@ def eulerian_melt_rate(
     reg = dh_dt(H_f_stack, min_count=min_count, robust=robust_dh_dt)
     dHdt = reg["slope"] * SECONDS_PER_YEAR
 
-    H_f_mean = H_f_stack.mean("time", skipna=True)
+    if common_epoch:
+        H_f_mean = common_epoch_mean(H_f_stack, reg["slope"],
+                                     sigma_px=epoch_rate_sigma_px)
+    else:
+        H_f_mean = H_f_stack.mean("time", skipna=True)
 
     if "time" in vx.dims:
         vx = vx.mean("time", skipna=True)
@@ -198,6 +218,8 @@ def eulerian_melt_rate(
             "rho_w": rho_w,
             "rho_i": rho_i,
             "vel_smooth_sigma_m": float(vel_smooth_sigma_m or 0.0),
+            "common_epoch": int(bool(common_epoch)),
+            "epoch_rate_sigma_px": float(epoch_rate_sigma_px),
         },
     )
 

@@ -90,7 +90,34 @@ correction:
   noise model for the coherent part.
 - **`spectra.py`** (2026-08-24) — `radial_psd`: masked, apodized, Welch-normalized
   radially averaged PSD for comparing melt products across grids (the
-  Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py`.
+  Zinck-style wavenumber figure); used by `pig/plot_melt_spectra.py` and by
+  `pig/plot_noise_floor.py`, the half-stack DEM/strip noise floor of the
+  PIG product (instrument `pig/run_noise_floor.py`; method and the
+  `PSD_noise = PSD[m_A − m_B]/4` derivation in its docstring).
+- **`kinematics.py::common_epoch_mean`** (2026-08-25) — stack mean referred to
+  one epoch, `H̄ − S_σ[Ḣ]·(t̄ − t₀)` (Shean-style temporal consistency for the
+  thickness entering ∇·(H̄u)); opt-in `common_epoch=` on `eulerian_melt_rate` /
+  `restored_budget_melt_rate`, gate `tests/gate_common_epoch_mean.py`.
+  **A measured negative result on PIG, default OFF**: the ragged-sampling
+  artifact is real in thickness (~29 m rms, corr +0.13) but does not reach the
+  melt field (corr −0.066 → −0.069), while the correction's rate-error × lever
+  arm adds variance — half-stack noise floor noise 66.5 → 107.2 m/yr,
+  λ(SNR=1) 2.52 → 11.18 km. **Those half-stack figures were measured with the
+  PROTOTYPE instrument and are pending re-measurement** (follow-up commit):
+  they predate two fixes on this same branch — `common_epoch_mean` now
+  references the MEAN sample epoch rather than the median, and
+  `pig/plot_noise_floor.py::crossing` now treats SNR ≤ 0 bins as below unity
+  instead of dropping them, which can only move a crossing toward LONGER λ.
+  Re-measuring first requires re-solving the FULL product with
+  `common_epoch=True` so matching full-product variables exist
+  (`pig/run_melt_bridging.py` writes only the default path today); comparing
+  common-epoch halves against the default-path full product is the
+  mismatched instrument that produced those prototype numbers, and
+  `pig/plot_noise_floor.py` now refuses it from the files' provenance attrs.
+  The default-OFF decision rests on the qualitative conclusion, not on the
+  specific figures: strips are tens of km wide, so the sampling artifact lives
+  at strip scale (long λ) and does not reach the 1–3 km band that limits
+  resolution.
 - **`melt.py`** — the production solvers: `eulerian_melt_rate` (Shean Eq. 10)
   and `lagrangian_melt_rate` (path solver; Δt floor 1.5 yr). Units: velocity
   m/yr, melt m ice-eq/yr, sign negative = melt. `freeboard.py`,

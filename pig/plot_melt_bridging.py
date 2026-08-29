@@ -6,6 +6,12 @@ on the LADDIE symlog scale with a range wide enough for the trunk
 (``--vmax``, default 300 m/yr — the 250 m Eulerian spans p1 −295 / p99 +186)
 and Δ-vs-Eulerian maps, at high dpi.
 
+Shelf fluxes (panel titles and the printed table) are LIKE-FOR-LIKE: summed
+over the pixels finite in EVERY field. Fields that cover more of the shelf
+(the Helmholtz variants fill stencil gaps the finite-difference divergence
+drops) also report their own-domain flux and extra pixel count, so a
+coverage gain is never read as a solver difference.
+
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
@@ -75,8 +81,32 @@ def main() -> int:
     x = ref.x.values[c0:c1] / 1e3
     y = ref.y.values[r0:r1] / 1e3
 
+    # Flux MUST be compared on a common pixel set: the Helmholtz estimator
+    # fills stencil gaps the finite-difference divergence drops, so an
+    # own-mask flux mixes a coverage gain (+5.4 % of the shelf at PIG) into
+    # what reads as a method difference. `flux` = like-for-like; `flux_own`
+    # = the field's own domain, reported separately with its pixel count.
+    common = np.ones(ref.shape, bool)
+    for _k, _v in fields.items():
+        common &= np.isfinite(_v.values)
+
     def flux(m):
+        return float(-np.nansum(np.where(common, m.values, np.nan))
+                     * 250 * 250 * RHO_I / 1e12)
+
+    def flux_own(m):
         return float(-np.nansum(m.values) * 250 * 250 * RHO_I / 1e12)
+
+    def npx(m):
+        return int(np.isfinite(m.values).sum())
+
+    n_common = int(common.sum())
+    extra_pct = 100.0 * (max(npx(_v) for _v in fields.values()) - n_common) / n_common
+    print(f"  common mask {n_common} px; "
+          f"like-for-like vs own-domain fluxes (Gt/yr):", flush=True)
+    for _k, _v in fields.items():
+        print(f"    {_k:24s} {flux(_v):6.1f}  |  own {flux_own(_v):6.1f} "
+              f"({npx(_v)} px)", flush=True)
 
     cmap, norm = melt_cmap(), melt_norm(vmax=args.vmax)
     n = len(PANELS)
@@ -91,7 +121,9 @@ def main() -> int:
         ax = axs[0, j]
         im = ax.pcolormesh(x, y, crop(m.values), cmap=cmap, norm=norm,
                            shading="nearest", rasterized=True)
-        ax.set_title(f"{title}\n{flux(m):.1f} Gt/yr", fontsize=10)
+        extra = npx(m) - n_common
+        cov = "" if extra <= 0 else f"  (+{extra} px → {flux_own(m):.1f} own)"
+        ax.set_title(f"{title}\n{flux(m):.1f} Gt/yr like-for-like{cov}", fontsize=9.5)
         ax.set_aspect("equal")
         ax.set_xticks([])
         ax.set_yticks([])
@@ -113,7 +145,10 @@ def main() -> int:
     fig.colorbar(imd, ax=axs[1].tolist(), shrink=0.9, pad=0.008,
                  label=f"Δ vs Eulerian (m a⁻¹, ±{args.dvmax:g})")
     fig.suptitle("PIG 250 m is2ctempo_sheltilt 2010–2024 — bridging-aware melt solvers on the "
-                 f"production stack ({ds.attrs.get('velocity', '')})", fontsize=13)
+                 f"production stack ({ds.attrs.get('velocity', '')})\n"
+                 "fluxes on the COMMON pixel set; the Helmholtz variants additionally "
+                 f"cover up to {extra_pct:.1f} % more shelf (stencil gaps), reported as 'own'",
+                 fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_bridging_250m_is2ctempo_sheltilt.png")
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"wrote {out}")
