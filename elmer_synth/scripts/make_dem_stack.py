@@ -109,9 +109,9 @@ def main() -> None:
                          "corr_tilt_slope_m_per_m / corr_tilt_azimuth_rad. The "
                          "field is zero-mean over the full crop, so its mean over "
                          "the strip's kept footprint is an extra per-strip offset; "
-                         "it is recorded as corr_offset_m and deliberately NOT "
-                         "removed (it moves the twin's post-correction offset "
-                         "spread toward the real stack's)")
+                         "it is recorded as corr_offset_m (not removed) so the "
+                         "sidecar's offset truth is complete — the tilt fit "
+                         "absorbs it like the drawn bias")
     ap.add_argument("--corrupt-bias-m", type=float, default=3.0,
                     help="offset sigma of the deliberately corrupted strips "
                          "(their tilt is 8x the drawn slope); scale it with "

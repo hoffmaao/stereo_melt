@@ -77,7 +77,16 @@ Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
   (`--corr-beta 2.0 --corr-aniso 3.0 --corr-lmax-km 9`), calibrated against
   the measured real-PIG per-strip residuals (rms ~2.9 m, block excess 4/6 at
   2/4 km — the white model was ~5x too small and structurally wrong; see
-  `pig/diagnose_stack_error_structure.py`). Tag `multixy_pigreal`. On it the
+  `pig/diagnose_stack_error_structure.py`). Tag `multixy_pigreal`; its
+  actual recipe (recorded in the sidecar's `error_model`) is
+  `make_dem_stack.py --pert multixy_bmb --t0 95 --tag multixy_pigreal
+  --tilt-dm-km 0.05 0.3 --corr-rms-m 1.2 5.7` with the corr flags above and
+  every other range at the script default (seed 0). The `multixy_*` tiers
+  use the PIG-rung x0.1 tilt (`--tilt-dm-km 0.05 0.3`, 10x below the script
+  default), so regenerating from the corr flags alone gives a different
+  tier and breaks the seed-matched comparison with `multixy_pig`. The
+  on-disk sidecar predates the `corr_tilt_*` / `corr_offset_m` fields;
+  regenerate before any scorer relies on them. On it the
   production MONO_LAM=1e-3 is catastrophic (nrmse 3.95) while lam 0.032-0.32
   beats the Eulerian on every metric and restored budget keeps the best
   pattern corr (0.43) — regularisation must track the real noise level
