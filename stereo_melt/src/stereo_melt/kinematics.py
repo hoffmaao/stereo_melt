@@ -764,9 +764,15 @@ def common_epoch_mean(
     take the smoothed rate of their finite neighbours; where no neighbour
     lies within the smoother's support the plain mean is kept, so the
     result is finite wherever the plain mean is and the correction never
-    reduces coverage. This is the time-consistency of an interpolated DEM
-    product (Shean 2019 builds epoch mosaics for the same reason), at the
-    linear order the steady-melt budget already assumes.
+    reduces coverage. Caveat: that support is scipy's Gaussian truncation
+    radius, 4 ``sigma_px`` from the nearest slope-defined pixel, so a
+    contiguous block of sub-``min_count`` pixels wider than about
+    ``8 * sigma_px`` receives the correction only on its rim while its
+    interior keeps the plain mean — a step of :math:`\dot H\,(\bar t -
+    t_0)` in the result that a divergence stencil will differentiate. This
+    is the time-consistency of an interpolated DEM product (Shean 2019
+    builds epoch mosaics for the same reason), at the linear order the
+    steady-melt budget already assumes.
 
     Parameters
     ----------

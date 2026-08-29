@@ -98,9 +98,17 @@ correction:
   **A measured negative result on PIG, default OFF**: the ragged-sampling
   artifact is real in thickness (~29 m rms, corr +0.13) but does not reach the
   melt field (corr −0.066 → −0.069), while the correction's rate-error × lever
-  arm adds variance — half-stack noise floor λ(SNR=1) 2.52 → 11.18 km. Strips
-  are tens of km wide, so the artifact lives at long λ, not in the 1–3 km band
-  that limits resolution.
+  arm adds variance — half-stack noise floor noise 66.5 → 107.2 m/yr,
+  λ(SNR=1) 2.52 → 11.18 km. **Those half-stack figures were measured with the
+  PROTOTYPE instrument and are pending re-measurement** (follow-up commit):
+  they predate two fixes on this same branch — `common_epoch_mean` now
+  references the MEAN sample epoch rather than the median, and
+  `pig/plot_noise_floor.py::crossing` now treats SNR ≤ 0 bins as below unity
+  instead of dropping them, which can only move a crossing toward LONGER λ.
+  The default-OFF decision rests on the qualitative conclusion, not on the
+  specific figures: strips are tens of km wide, so the sampling artifact lives
+  at strip scale (long λ) and does not reach the 1–3 km band that limits
+  resolution.
 - **`melt.py`** — the production solvers: `eulerian_melt_rate` (Shean Eq. 10)
   and `lagrangian_melt_rate` (path solver; Δt floor 1.5 yr). Units: velocity
   m/yr, melt m ice-eq/yr, sign negative = melt. `freeboard.py`,
