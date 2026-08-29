@@ -72,6 +72,18 @@ Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
   matrix takes it via `fig_orientation_solver_matrix.py --across
   trans_gauss_bmb:steady_bmb:e2a_channel_orientation_bmb`. Findings consolidated in
   `../literature/bridging_approximation_assessment.md`.
+  **Correlated-error (PIG-real) tier (08-29):** `make_dem_stack.py
+  --corr-rms-m 1.2 5.7` adds a banded anisotropic power-law per-strip error
+  (`--corr-beta 2.0 --corr-aniso 3.0 --corr-lmax-km 9`), calibrated against
+  the measured real-PIG per-strip residuals (rms ~2.9 m, block excess 4/6 at
+  2/4 km — the white model was ~5x too small and structurally wrong; see
+  `pig/diagnose_stack_error_structure.py`). Tag `multixy_pigreal`. On it the
+  production MONO_LAM=1e-3 is catastrophic (nrmse 3.95) while lam 0.032-0.32
+  beats the Eulerian on every metric and restored budget keeps the best
+  pattern corr (0.43) — regularisation must track the real noise level
+  (lam ∝ σ²); white-tier absolute scores are retired. Post-correction strip
+  OFFSETS stay ~0 on the twin (crop-local fit absorbs means; the real,
+  control-anchored fit leaves ±1.8 m) — known infidelity.
   **Observation-error ladder (08-22):** `run_error_ladder.sh <pert> <t0>
   <base_tag> <s>` scales every injected error range by `s` (same seed ⇒ one
   realization scaled; `make_dem_stack.py --corrupt-bias-m` scales the
