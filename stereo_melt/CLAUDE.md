@@ -105,6 +105,12 @@ correction:
   references the MEAN sample epoch rather than the median, and
   `pig/plot_noise_floor.py::crossing` now treats SNR ≤ 0 bins as below unity
   instead of dropping them, which can only move a crossing toward LONGER λ.
+  Re-measuring first requires re-solving the FULL product with
+  `common_epoch=True` so matching full-product variables exist
+  (`pig/run_melt_bridging.py` writes only the default path today); comparing
+  common-epoch halves against the default-path full product is the
+  mismatched instrument that produced those prototype numbers, and
+  `pig/plot_noise_floor.py` now refuses it from the files' provenance attrs.
   The default-OFF decision rests on the qualitative conclusion, not on the
   specific figures: strips are tens of km wide, so the sampling artifact lives
   at strip scale (long λ) and does not reach the 1–3 km band that limits

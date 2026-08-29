@@ -82,6 +82,10 @@ def available_pairs(full, half, full_var_suffix=""):
     """
     pairs = []
     for label, fk, ak, bk, colour in PAIRS:
+        missing = [v for v in (ak, bk) if v not in half]
+        if missing:
+            print(f"  skipping {label!r}: halves have no {', '.join(missing)}", flush=True)
+            continue
         fk = fk + full_var_suffix
         if fk not in full:
             if full_var_suffix:
@@ -90,14 +94,57 @@ def available_pairs(full, half, full_var_suffix=""):
                     f"{full_var_suffix!r}; available: {', '.join(sorted(full.data_vars))}")
             print(f"  skipping {label!r}: full product has no {fk!r}", flush=True)
             continue
-        missing = [v for v in (ak, bk) if v not in half]
-        if missing:
-            print(f"  skipping {label!r}: halves have no {', '.join(missing)}", flush=True)
-            continue
         pairs.append((label, fk, ak, bk, colour))
     if not pairs:
         raise SystemExit("no product/half-stack pair is complete; nothing to plot")
     return pairs
+
+
+def provenance(ds, var):
+    """``(common_epoch, velocity)`` recorded for ``var``.
+
+    Variable attrs take precedence over dataset attrs. ``common_epoch``
+    absent means the default path (0); ``velocity`` absent is ``None``.
+    """
+    ce = ds[var].attrs.get("common_epoch", ds.attrs.get("common_epoch", 0))
+    vel = ds[var].attrs.get("velocity", ds.attrs.get("velocity"))
+    return int(ce), (None if vel is None else str(vel))
+
+
+def check_provenance(full, half, pairs):
+    """Refuse to compare halves and a full product solved with different instruments.
+
+    ``run_noise_floor`` stamps ``common_epoch`` and ``velocity`` on the halves
+    and the bridging driver stamps ``velocity`` on the full product, so the
+    files themselves say which solver settings produced them. Comparing
+    common-epoch halves against the default-path full product is the
+    mismatched instrument that produced the recorded prototype numbers, so a
+    disagreement is an error regardless of which flags the caller passed.
+    Returns the agreed ``(common_epoch, velocity)`` for labelling the output.
+    """
+    problems, agreed = [], set()
+    for label, fk, ak, bk, _ in pairs:
+        fce, fvel = provenance(full, fk)
+        for hk in (ak, bk):
+            hce, hvel = provenance(half, hk)
+            if hce != fce:
+                problems.append(f"{label}: halves {hk} common_epoch={hce} "
+                                f"vs full {fk} common_epoch={fce}")
+            if hvel is None or fvel is None:
+                print(f"  WARNING {label}: velocity provenance missing "
+                      f"(halves {hvel!r}, full {fvel!r}); cannot verify", flush=True)
+            elif hvel != fvel:
+                problems.append(f"{label}: halves {hk} velocity={hvel!r} "
+                                f"vs full {fk} velocity={fvel!r}")
+            agreed.add((fce, fvel))
+    if problems:
+        raise SystemExit(
+            "instrument mismatch between halves and full product — the noise floor "
+            "is only meaningful when both come from the same solver settings:\n  "
+            + "\n  ".join(problems)
+            + "\n  re-solve the full product with the halves' settings (or pick a "
+              "--half-suffix / --full-var-suffix pair that match)")
+    return sorted(agreed)
 
 
 def stratify(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, label_prefix=""):
@@ -140,6 +187,9 @@ def main() -> int:
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
+    prov = check_provenance(full, half, pairs)
+    prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
+    print(f"  provenance (halves == full): {prov_label}", flush=True)
     tag = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
 
     # common mask: every field finite (halves lose thin-coverage pixels)
@@ -228,7 +278,8 @@ def main() -> int:
 
     fig.suptitle("PIG melt products: how much of the short-wavelength power is real?\n"
                  "noise floor from independent half-stacks (alternating epochs, disjoint "
-                 "strips); shaded = the 3H bridging band (1.3–3.0 km)", fontsize=12)
+                 "strips); shaded = the 3H bridging band (1.3–3.0 km)\n"
+                 f"halves and full product solved alike: {prov_label}", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     out = args.out or (config.FIGURES_DIR /
                        f"melt_noise_floor_250m_is2ctempo_sheltilt{tag}.png")
