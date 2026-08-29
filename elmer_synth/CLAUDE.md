@@ -84,9 +84,16 @@ Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
   every other range at the script default (seed 0). The `multixy_*` tiers
   use the PIG-rung x0.1 tilt (`--tilt-dm-km 0.05 0.3`, 10x below the script
   default), so regenerating from the corr flags alone gives a different
-  tier and breaks the seed-matched comparison with `multixy_pig`. The
-  on-disk sidecar predates the `corr_tilt_*` / `corr_offset_m` fields;
-  regenerate before any scorer relies on them. On it the
+  tier. The CURRENT on-disk `multixy_pig` / `multixy_pigreal` tiers are
+  footprint-matched but NOT realization-matched: they were generated with
+  the corr draws taken from the shared per-strip stream, so only 1/127
+  strips share tilt/bias/noise draws (measured on the sidecars). From this
+  commit on the corr component draws from its own child stream
+  (`default_rng([seed, 1])`), so tiers regenerated with the same seed are
+  one realization with the corr term toggled; the on-disk sidecar also
+  predates the `corr_tilt_*` / `corr_offset_m` fields. Regenerate both
+  tiers before any seed-matched comparison or tilt scorer relies on them.
+  On it the
   production MONO_LAM=1e-3 is catastrophic (nrmse 3.95) while lam 0.032-0.32
   beats the Eulerian on every metric and restored budget keeps the best
   pattern corr (0.43) — regularisation must track the real noise level

@@ -129,6 +129,23 @@ def per_epoch_stats(stack: xr.DataArray, block_kms=(2.0, 4.0), min_px=500):
     return rows
 
 
+REAL_STACK = "pig_stack_250m_is2ctempo_sheltilt"
+REAL_LABEL = "REAL PIG 250 m is2ctempo_sheltilt (tilt-corrected)"
+
+
+def load_real_pig_stack() -> xr.DataArray:
+    """The production tilt-corrected PIG stack, floating-masked to the min extent.
+
+    Shared by the diagnostic and the comparison figure so the fingerprint
+    recorded by one is measured on exactly the stack drawn by the other.
+    """
+    from pig.run_melt import apply_min_extent, load_floating_mask, load_stack
+    st = load_stack(REAL_STACK)
+    fl = apply_min_extent(load_floating_mask(st), "_250m_is2ctempo_sheltilt",
+                          str(config.START_TIME), str(config.END_TIME))
+    return st.where(fl)
+
+
 def stack_fingerprint(stack: xr.DataArray, nc=None) -> dict:
     """Identity of the stack the rows were measured on.
 
@@ -201,12 +218,8 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.nc is None:
-        from pig.run_melt import apply_min_extent, load_floating_mask, load_stack
-        st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
-        fl = apply_min_extent(load_floating_mask(st), "_250m_is2ctempo_sheltilt",
-                              str(config.START_TIME), str(config.END_TIME))
-        st = st.where(fl)
-        label = args.label or "REAL PIG 250 m is2ctempo_sheltilt (tilt-corrected)"
+        st = load_real_pig_stack()
+        label = args.label or REAL_LABEL
     else:
         ds = xr.open_dataset(args.nc)
         var = [v for v in ds.data_vars if ds[v].dims[-2:] == ("y", "x")

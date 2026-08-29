@@ -6,7 +6,9 @@ truth surface at a REAL basin's acquisition epochs, imprint each epoch's REAL
 strip NaN footprint (from the beardmore_shelf full-record stack, transplanted
 through a fixed 24x12 km crop), inject the per-strip error model (plane tilts
 0.5-3 dm/km at random azimuth, per-strip bias, 0.3-0.9 m white noise, a few
-deliberately corrupted strips), and write a ``save_stack``-compatible NetCDF
+deliberately corrupted strips and, with ``--corr-rms-m``, a banded spatially
+correlated per-strip error drawn from its own random stream so enabling it
+leaves the base draws unchanged), and write a ``save_stack``-compatible NetCDF
 so ``fit_tilt_stack`` -> screening -> the production melt solvers run
 UNMODIFIED. A sidecar JSON records every injected error term so the DEM
 chain's tilt recovery can be scored against truth.
@@ -121,6 +123,7 @@ def main() -> None:
                     help="also write the error-free sampled stack")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
+    rng_corr = np.random.default_rng([args.seed, 1])
 
     truth, meta = load_run(args.pert, None)
     tx, ty = truth.x.values, truth.y.values
@@ -180,12 +183,12 @@ def main() -> None:
             # above corr_lmax_km stay with the offset/tilt terms. Amplitude
             # log-uniform across strips, matching the real per-strip
             # detrended-rms spread.
-            corr_rms = float(np.exp(rng.uniform(np.log(args.corr_rms_m[0]),
-                                                np.log(args.corr_rms_m[1]))))
+            corr_rms = float(np.exp(rng_corr.uniform(np.log(args.corr_rms_m[0]),
+                                                     np.log(args.corr_rms_m[1]))))
             ny_, nx_ = zs.shape
             ky = np.fft.fftfreq(ny_, d=dx_m)[:, None]
             kx = np.fft.fftfreq(nx_, d=dx_m)[None, :]
-            az_c = rng.uniform(0, np.pi)
+            az_c = rng_corr.uniform(0, np.pi)
             k_al = np.cos(az_c) * kx + np.sin(az_c) * ky
             k_ac = -np.sin(az_c) * kx + np.cos(az_c) * ky
             keff = np.sqrt((k_al * args.corr_aniso) ** 2 + k_ac ** 2)
@@ -194,7 +197,7 @@ def main() -> None:
             kmin = 1.0 / (args.corr_lmax_km * 1e3)
             filt *= 1.0 / (1.0 + (kmin / np.maximum(keff, 1e-12)) ** 4)
             f = np.real(np.fft.ifft2(np.fft.fft2(
-                rng.normal(size=(ny_, nx_))) * filt))
+                rng_corr.normal(size=(ny_, nx_))) * filt))
             f -= f.mean()
             g = corr_rms * (f / max(f.std(), 1e-12))
             corr_tilt, corr_azim = plane_fit(g, mask, x2d, y2d)

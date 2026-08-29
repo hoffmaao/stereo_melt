@@ -10,9 +10,9 @@ scaling:
    only accepted if its recorded solver settings match), the Eulerian melt
    is solved
    from each, and pairwise differences give the noise at n/2 and n/4 over
-   the SAME pixels: sigma(n/2) = rms(A - B)/2? no - Var[A-B] = 2 sigma^2 at
-   that count, so sigma_{n/2} = rms(A-B)/sqrt(2) and sigma_{n/4} =
-   rms(Qi-Qj)/sqrt(2). Everything else (region, velocity, SMB, window) is
+   the SAME pixels: Var[A-B] = 2 sigma^2 at that count, so sigma_{n/2} =
+   rms(A-B)/sqrt(2) and sigma_{n/4} = rms(Qi-Qj)/sqrt(2). Everything else
+   (region, velocity, SMB, window) is
    held fixed, so the slope between the two rungs is the count scaling
    alone. White per-epoch errors: sigma ~ n^{-1/2}.
 

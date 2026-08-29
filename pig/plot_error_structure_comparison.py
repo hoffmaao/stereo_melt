@@ -40,7 +40,7 @@ import xarray as xr  # noqa: E402
 
 from pig import config  # noqa: E402
 from pig.diagnose_stack_error_structure import (  # noqa: E402
-    check_fingerprint, epoch_residual, pixel_trend)
+    check_fingerprint, epoch_residual, load_real_pig_stack, pixel_trend)
 
 J_REAL = config.PROCESSED_DIR / "error_structure_real.json"
 J_TWIN = config.PROCESSED_DIR / "error_structure_twin.json"
@@ -131,11 +131,7 @@ def main() -> int:
         ax.grid(True, axis="y", alpha=0.3)
 
     # example residual maps
-    from pig.run_melt import apply_min_extent, load_floating_mask, load_stack
-    st_r = load_stack("pig_stack_250m_is2ctempo_sheltilt")
-    fl = apply_min_extent(load_floating_mask(st_r), "_250m_is2ctempo_sheltilt",
-                          str(config.START_TIME), str(config.END_TIME))
-    st_r = st_r.where(fl)
+    st_r = load_real_pig_stack()
     ds_t = xr.open_dataset(args.twin_nc)
     var = [v for v in ds_t.data_vars if ds_t[v].dims[-2:] == ("y", "x")
            and "time" in ds_t[v].dims][0]
