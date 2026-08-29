@@ -80,6 +80,9 @@ def main() -> int:
     ap.add_argument("--n-bins", type=int, default=8)
     ap.add_argument("--lift-umax-myr", type=float, default=1500.0)
     ap.add_argument("--skip-rb", action="store_true")
+    ap.add_argument("--quarters", action="store_true",
+                    help="also solve four interleaved quarter-stacks (Eulerian "
+                         "only) for the error-vs-count ladder")
     ap.add_argument("--common-epoch", action="store_true",
                     help="refer the mean thickness feeding the divergence to one epoch")
     ap.add_argument("--epoch-rate-sigma-px", type=float, default=2.0)
@@ -135,6 +138,14 @@ def main() -> int:
         run("rb_A", sa, "rb")
         print("[4/4] restored local+Helm half B...", flush=True)
         run("rb_B", sb, "rb")
+
+    if args.quarters:
+        # interleave stride-4 so each quarter spans the window with ~n/4
+        # epochs per pixel and no strip shared between quarters
+        for q in range(4):
+            idx = np.sort(order[q::4])
+            print(f"[quarter {q}] {len(idx)} epochs...", flush=True)
+            run(f"eulerian_Q{q}", stack.isel(time=idx), "eulerian")
 
     ds_out = xr.Dataset(out)
     ds_out.attrs.update(velocity=vel_source, n_epochs_a=sa.sizes["time"],
