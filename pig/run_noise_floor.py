@@ -32,6 +32,12 @@ Solvers measured: the Eulerian baseline and the shipped restore-then-budget
 (local, trunk-guarded, Helmholtz) — the question is whether the bridging
 correction lifts signal or noise in the lambda <~ 3H band.
 
+``--quarters`` additionally deals the epochs into four interleaved
+quarter-stacks (stride 4, disjoint strips, full span) and solves each with
+the Eulerian solver only (``eulerian_Q0..Q3`` in the same file), giving the
+n/4 rung of the error-vs-DEM-count ladder that ``pig.plot_error_vs_count``
+fits against the halves; it reads ``--out-suffix _q`` by default.
+
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python

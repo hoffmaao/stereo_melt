@@ -93,11 +93,11 @@ Newtonian E1b — if it is ever revisited, re-fit it on Elmer Newtonian twins
   one realization with the corr term toggled; the on-disk sidecar also
   predates the `corr_tilt_*` / `corr_offset_m` fields. Regenerate both
   tiers before any seed-matched comparison or tilt scorer relies on them.
-  On it the
-  production MONO_LAM=1e-3 is catastrophic (nrmse 3.95) while lam 0.032-0.32
-  beats the Eulerian on every metric and restored budget keeps the best
-  pattern corr (0.43) — regularisation must track the real noise level
-  (lam ∝ σ²); white-tier absolute scores are retired. Post-correction strip
+  On `multixy_pigreal` the production MONO_LAM=1e-3 is catastrophic (nrmse
+  3.95) while lam 0.032-0.32 beats the Eulerian on every metric and restored
+  budget keeps the best pattern corr (0.43) — regularisation must track the
+  real noise level (lam ∝ σ²); white-tier absolute scores are retired.
+  Post-correction strip
   OFFSETS stay ~0 on the twin (crop-local fit absorbs means; the real,
   control-anchored fit leaves ±1.8 m) — known infidelity.
   **Observation-error ladder (08-22):** `run_error_ladder.sh <pert> <t0>
