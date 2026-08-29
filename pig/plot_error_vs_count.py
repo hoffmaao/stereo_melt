@@ -13,12 +13,12 @@ scaling:
    held fixed, so the slope between the two rungs is the count scaling
    alone. White per-epoch errors: sigma ~ n^{-1/2}.
 
-2. SPATIAL BINNING (shown as a caution). Binning the per-pixel half-
-   difference by that pixel's DEM count LOOKS like the same measurement but
-   is confounded: count correlates with location (the well-tasked trunk has
-   both more strips and intrinsically larger errors), so the whole-shelf
-   "slope" comes out positive. It is drawn in grey to document why it
-   cannot be used.
+2. SPATIAL BINNING (deliberately NOT computed or drawn). Binning the
+   per-pixel half-difference by that pixel's DEM count LOOKS like the same
+   measurement but is confounded: count correlates with location (the
+   well-tasked trunk has both more strips and intrinsically larger errors),
+   so the whole-shelf "slope" comes out positive. The figure omits it; only
+   the subset ladder over identical pixels is a clean count scaling.
 
 Run::
 
