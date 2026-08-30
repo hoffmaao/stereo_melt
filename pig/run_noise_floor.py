@@ -32,6 +32,12 @@ Solvers measured: the Eulerian baseline and the shipped restore-then-budget
 (local, trunk-guarded, Helmholtz) — the question is whether the bridging
 correction lifts signal or noise in the lambda <~ 3H band.
 
+``--quarters`` additionally deals the epochs into four interleaved
+quarter-stacks (stride 4, disjoint strips, full span) and solves each with
+the Eulerian solver only (``eulerian_Q0..Q3`` in the same file), giving the
+n/4 rung of the error-vs-DEM-count ladder that ``pig.plot_error_vs_count``
+fits against the halves; it reads ``--out-suffix _q`` by default.
+
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
@@ -80,6 +86,9 @@ def main() -> int:
     ap.add_argument("--n-bins", type=int, default=8)
     ap.add_argument("--lift-umax-myr", type=float, default=1500.0)
     ap.add_argument("--skip-rb", action="store_true")
+    ap.add_argument("--quarters", action="store_true",
+                    help="also solve four interleaved quarter-stacks (Eulerian "
+                         "only) for the error-vs-count ladder")
     ap.add_argument("--common-epoch", action="store_true",
                     help="refer the mean thickness feeding the divergence to one epoch")
     ap.add_argument("--epoch-rate-sigma-px", type=float, default=2.0)
@@ -135,6 +144,14 @@ def main() -> int:
         run("rb_A", sa, "rb")
         print("[4/4] restored local+Helm half B...", flush=True)
         run("rb_B", sb, "rb")
+
+    if args.quarters:
+        # interleave stride-4 so each quarter spans the window with ~n/4
+        # epochs per pixel and no strip shared between quarters
+        for q in range(4):
+            idx = np.sort(order[q::4])
+            print(f"[quarter {q}] {len(idx)} epochs...", flush=True)
+            run(f"eulerian_Q{q}", stack.isel(time=idx), "eulerian")
 
     ds_out = xr.Dataset(out)
     ds_out.attrs.update(velocity=vel_source, n_epochs_a=sa.sizes["time"],

@@ -111,7 +111,10 @@ def provenance(ds, var):
     return int(ce), (None if vel is None else str(vel))
 
 
-def check_provenance(full, half, pairs):
+def check_provenance(full, half, pairs, *, full_name="full product",
+                     purpose="the noise floor",
+                     hint="re-solve the full product with the halves' settings (or "
+                          "pick a --half-suffix / --full-var-suffix pair that match)"):
     """Refuse to compare halves and a full product solved with different instruments.
 
     ``run_noise_floor`` stamps ``common_epoch`` and ``velocity`` on the halves
@@ -121,6 +124,10 @@ def check_provenance(full, half, pairs):
     mismatched instrument that produced the recorded prototype numbers, so a
     disagreement is an error regardless of which flags the caller passed.
     Returns the agreed ``(common_epoch, velocity)`` for labelling the output.
+
+    ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
+    comparisons of ``run_noise_floor`` products against a reference (e.g. the
+    quarters of the count ladder) can share the check.
     """
     problems, agreed = [], set()
     for label, fk, ak, bk, _ in pairs:
@@ -129,21 +136,20 @@ def check_provenance(full, half, pairs):
             hce, hvel = provenance(half, hk)
             if hce != fce:
                 problems.append(f"{label}: halves {hk} common_epoch={hce} "
-                                f"vs full {fk} common_epoch={fce}")
+                                f"vs {full_name} {fk} common_epoch={fce}")
             if hvel is None or fvel is None:
                 print(f"  WARNING {label}: velocity provenance missing "
-                      f"(halves {hvel!r}, full {fvel!r}); cannot verify", flush=True)
+                      f"(halves {hvel!r}, {full_name} {fvel!r}); cannot verify",
+                      flush=True)
             elif hvel != fvel:
                 problems.append(f"{label}: halves {hk} velocity={hvel!r} "
-                                f"vs full {fk} velocity={fvel!r}")
+                                f"vs {full_name} {fk} velocity={fvel!r}")
             agreed.add((fce, fvel))
     if problems:
         raise SystemExit(
-            "instrument mismatch between halves and full product — the noise floor "
+            f"instrument mismatch between halves and {full_name} — {purpose} "
             "is only meaningful when both come from the same solver settings:\n  "
-            + "\n  ".join(problems)
-            + "\n  re-solve the full product with the halves' settings (or pick a "
-              "--half-suffix / --full-var-suffix pair that match)")
+            + "\n  ".join(problems) + "\n  " + hint)
     return sorted(agreed)
 
 
