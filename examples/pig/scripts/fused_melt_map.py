@@ -62,8 +62,8 @@ RHO = dict(rho_i=918.0, rho_w=1027.0)
 ITERS = int(os.environ.get("PIG_FUSED_ITERS", "4000"))
 TAG = os.environ.get("PIG_FUSED_TAG", "").strip()
 TAG = (f"_{TAG}" if TAG and not TAG.startswith("_") else TAG)
-OUT_FIG = f"/wd2/projects/stereo_melt/examples/pig/figures/pig_fused_melt_map{TAG}.png"
-OUT_NC = f"/wd2/projects/stereo_melt/examples/pig/results/pig_fused_melt_map{TAG}.nc"
+OUT_FIG = str(config.FIGURES_DIR / f"pig_fused_melt_map{TAG}.png")
+OUT_NC = str(config.RESULTS_DIR / f"pig_fused_melt_map{TAG}.nc")
 
 
 PANELS = ["Eulerian", "budget lininv eul", "variational", "fused"]
@@ -127,7 +127,32 @@ def render_map(fields, xk, yk, out_fig, subtitle):
     print(f"wrote {out_fig}", flush=True)
 
 
+def _preflight() -> str | None:
+    """Resolve the required inputs before the multi-hour solver fan.
+
+    Returns the eta-field path, or None when the scalar fallback is opted into.
+    """
+    missing = [str(p) for p in (config.PROCESSED_DIR, config.BEDMACHINE_NC)
+               if not os.path.exists(p)]
+    if missing:
+        raise SystemExit("[preflight] required input(s) not found:\n"
+                         + "\n".join(f"      {m}" for m in missing))
+
+    eta_npz = os.environ.get("PIG_ETA_NPZ") or os.path.join(
+        BASIN, "processed", "pig_eta_field_250m_dual_embayment.npz")
+    if eta_npz in ("0", "none"):
+        print("[eta] PIG_ETA_NPZ opt-out -- scalar eta_bar fallback", flush=True)
+        return None
+    if not os.path.exists(eta_npz):
+        raise SystemExit(
+            f"[eta] production eta field not found: {eta_npz}\n"
+            f"      point PIG_ETA_NPZ at the field, or set PIG_ETA_NPZ=0 to\n"
+            f"      accept the scalar eta_bar fallback (a different product).")
+    return eta_npz
+
+
 def main() -> int:
+    eta_npz = _preflight()
     print(f"[load] stack {STACK_PREFIX} ...", flush=True)
     stack = R.load_stack(stack_prefix=STACK_PREFIX)
     floating = R.load_floating_mask(stack)
@@ -176,18 +201,9 @@ def main() -> int:
     # 2.47e14 Pa s (A/B in the project record; the v1 script is gone).
     # PIG_ETA_NPZ overrides the field file.
     eta_da = None
-    ETA_NPZ = os.environ.get("PIG_ETA_NPZ") or os.path.join(
-        BASIN, "processed", "pig_eta_field_250m_dual_embayment.npz")
-    if ETA_NPZ in ("0", "none"):
-        print("[eta] PIG_ETA_NPZ opt-out -- scalar eta_bar fallback", flush=True)
-    elif not os.path.exists(ETA_NPZ):
-        raise SystemExit(
-            f"[eta] production eta field not found: {ETA_NPZ}\n"
-            f"      point PIG_ETA_NPZ at the field, or set PIG_ETA_NPZ=0 to\n"
-            f"      accept the scalar eta_bar fallback (a different product).")
-    else:
-        ed = np.load(ETA_NPZ)
-        print(f"[eta] source {os.path.basename(ETA_NPZ)}", flush=True)
+    if eta_npz is not None:
+        ed = np.load(eta_npz)
+        print(f"[eta] source {os.path.basename(eta_npz)}", flush=True)
         eta_da = xr.DataArray(
             ed["eta_pas"], dims=("y", "x"),
             coords={"y": stack.y.values, "x": stack.x.values})
