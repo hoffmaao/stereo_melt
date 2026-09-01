@@ -25,7 +25,8 @@ eps = A*M_e^(n-1)*M, the Newtonian-equivalent viscosity is
 eta_bar = 1/(2*A*M_e^(n-1)) — no velocity differentiation needed.
 
 Run:
-    elmer_synth/scripts/icepack_python.sh pig/scripts/infer_eta_icepack2_pig.py \
+    examples/elmer_synth/scripts/icepack_python.sh \
+        examples/pig/scripts/infer_eta_icepack2_pig.py \
         [--lc 1250] [--max-iters 50] [--gamma 1.0] [--sigma_u 20]
 """
 import argparse
@@ -55,12 +56,12 @@ TDDA = "/wd2/projects/mismip_time-dependent-da"
 sys.path.insert(0, TDDA)
 from prior import L_REG, regularization_form  # noqa: E402
 
-REPO = "/wd2/projects/stereo_melt"
-NPZ = f"{REPO}/pig/processed/pig_eta_inv_inputs.npz"
-MSH = f"{REPO}/pig/processed/pig_shelf_dual.msh"
-OUT = f"{REPO}/pig/processed/pig_eta_field_250m_dual.npz"
-FIG = f"{REPO}/pig/figures/pig_eta_inversion_dual_qc.png"
-T0_JSON = f"{REPO}/pig/processed/pig_eta_prior_T0.json"
+BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NPZ = f"{BASIN}/processed/pig_eta_inv_inputs.npz"
+MSH = f"{BASIN}/processed/pig_shelf_dual.msh"
+OUT = f"{BASIN}/processed/pig_eta_field_250m_dual.npz"
+FIG = f"{BASIN}/figures/pig_eta_inversion_dual_qc.png"
+T0_JSON = f"{BASIN}/processed/pig_eta_prior_T0.json"
 T0_FALLBACK = 258.0       # the pre-2026-07-30 hardcoded value, no provenance
 M_E_MIN = 1.0e-3          # MPa; membrane-stress floor for the eta map
 
@@ -73,7 +74,7 @@ def prior_temperature(override=None):
     thermal prior, so every spatial structure in the recovered fluidity is
     paid for by the velocity data rather than inherited from a model. Its
     value is the window- and area-mean ERA5 2 m temperature over the inverted
-    domain, written by ``pig/scripts/era5_t2m_prior.py``.
+    domain, written by ``examples/pig/scripts/era5_t2m_prior.py``.
     """
     if override is not None:
         return float(override), "--T0 override"

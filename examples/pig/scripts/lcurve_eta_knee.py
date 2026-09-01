@@ -19,7 +19,7 @@ Procedure, unchanged from the reference:
 
 Run:
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY pig/scripts/lcurve_eta_knee.py [--glob '...*_lcurve_g*_summary.json']
+    $PY examples/pig/scripts/lcurve_eta_knee.py [--glob '...*_lcurve_g*_summary.json']
 """
 import argparse
 import glob
@@ -33,8 +33,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO = "/wd2/projects/stereo_melt"
-DEFAULT_GLOB = f"{REPO}/pig/processed/pig_eta_field_250m_dual_lcurve_g*_summary.json"
+BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_GLOB = f"{BASIN}/processed/pig_eta_field_250m_dual_lcurve_g*_summary.json"
 BLUE, ORANGE = "#2a78d6", "#eb6834"
 INK, INK2 = "#0b0b0b", "#52514e"
 
@@ -50,7 +50,7 @@ def menger(p1, p2, p3):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default=DEFAULT_GLOB)
-    ap.add_argument("--out", default=f"{REPO}/pig/figures/pig_eta_lcurve.png")
+    ap.add_argument("--out", default=f"{BASIN}/figures/pig_eta_lcurve.png")
     args = ap.parse_args()
 
     rows = []

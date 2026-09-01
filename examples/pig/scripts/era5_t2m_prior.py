@@ -24,7 +24,7 @@ absorbed by a near-constant shift in theta, which the Whittle-Matern mass
 term penalises but the velocity data can correct.
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY pig/scripts/era5_t2m_prior.py [--overwrite]
+    $PY examples/pig/scripts/era5_t2m_prior.py [--overwrite]
 """
 import argparse
 import json
@@ -35,17 +35,19 @@ _env_proj = os.path.join(sys.prefix, "share", "proj")
 if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 
-REPO = "/wd2/projects/stereo_melt"
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "stereo_melt", "src"))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "examples"))
+sys.path.insert(0, os.path.join(REPO, "src"))
 
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 from pyproj import Transformer  # noqa: E402
 
-NPZ = f"{REPO}/pig/processed/pig_eta_inv_inputs.npz"
-CACHE_DIR = f"{REPO}/pig/data/climate"
-OUT_JSON = f"{REPO}/pig/processed/pig_eta_prior_T0.json"
+NPZ = f"{BASIN}/processed/pig_eta_inv_inputs.npz"
+CACHE_DIR = f"{BASIN}/data/climate"
+OUT_JSON = f"{BASIN}/processed/pig_eta_prior_T0.json"
 PAD_DEG = 0.5
 
 

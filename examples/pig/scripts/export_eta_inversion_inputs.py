@@ -27,7 +27,7 @@ it to u_obs — is the worse failure mode for the dual inversion. The shipped
 production eta field was built with this rule.
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY pig/scripts/export_eta_inversion_inputs.py [--t0 2021-01-01 --t1 2024-01-01]
+    $PY examples/pig/scripts/export_eta_inversion_inputs.py [--t0 2021-01-01 --t1 2024-01-01]
 """
 import argparse
 import os
@@ -38,9 +38,11 @@ if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 os.environ.setdefault("PIG_VELOCITY", "fused")
 
-REPO = "/wd2/projects/stereo_melt"
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "stereo_melt", "src"))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "examples"))
+sys.path.insert(0, os.path.join(REPO, "src"))
 
 import numpy as np  # noqa: E402
 from scipy import ndimage  # noqa: E402
@@ -58,7 +60,7 @@ from stereo_melt.shelf_extent import min_shelf_extent  # noqa: E402
 STACK_PREFIX = "pig_stack_250m_is2ctempo"
 RHO_I, RHO_W = 918.0, 1027.0
 H_MIN = 50.0
-OUT = os.path.join(REPO, "pig", "processed", "pig_eta_inv_inputs.npz")
+OUT = os.path.join(BASIN, "processed", "pig_eta_inv_inputs.npz")
 BM_CODES = (0, 1, 2, 3)          # ocean, rock, grounded, floating
 
 

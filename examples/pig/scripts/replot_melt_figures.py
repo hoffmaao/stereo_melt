@@ -16,8 +16,8 @@ Both call the SAME renderers the producing scripts call, so a figure re-rendered
 here is byte-comparable with one written by a fresh run.
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY pig/scripts/replot_melt_figures.py               # every product found
-    $PY pig/scripts/replot_melt_figures.py --only fused  # just the fused maps
+    $PY examples/pig/scripts/replot_melt_figures.py               # every product found
+    $PY examples/pig/scripts/replot_melt_figures.py --only fused  # just the fused maps
 """
 import argparse
 import glob
@@ -28,18 +28,18 @@ _env_proj = os.path.join(sys.prefix, "share", "proj")
 if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 
-REPO = "/wd2/projects/stereo_melt"
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "stereo_melt", "src"))
-sys.path.insert(0, os.path.join(REPO, "pig", "scripts"))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.join(REPO, "examples"))
+sys.path.insert(0, os.path.join(REPO, "src"))
 
 import xarray as xr  # noqa: E402
 
-import fused_melt_map as F  # noqa: E402
 from pig import config  # noqa: E402
 from pig.run_melt import plot_melt_comparison  # noqa: E402
+from pig.scripts import fused_melt_map as F  # noqa: E402
 
-RESULTS = os.path.join(REPO, "pig", "results")
+RESULTS = str(config.RESULTS_DIR)
 FIGS = str(config.FIGURES_DIR)
 
 
@@ -93,12 +93,24 @@ def main() -> int:
                     help="re-render just one family (default: both)")
     args = ap.parse_args()
 
+    patterns = []
     if args.only != "fused":
-        for p in sorted(glob.glob(f"{RESULTS}/pig_melt_*.nc")):
-            replot_production(p)
+        patterns.append("pig_melt_*.nc")
     if args.only != "production":
-        for p in sorted(glob.glob(f"{RESULTS}/pig_fused_melt_map*.nc")):
-            replot_fused(p)
+        patterns.append("pig_fused_melt_map*.nc")
+
+    rendered = 0
+    for pattern in patterns:
+        for p in sorted(glob.glob(f"{RESULTS}/{pattern}")):
+            if pattern.startswith("pig_melt_"):
+                replot_production(p)
+            else:
+                replot_fused(p)
+            rendered += 1
+
+    if not rendered:
+        print(f"no products matched {patterns} under {RESULTS}", file=sys.stderr)
+        return 1
     return 0
 
 

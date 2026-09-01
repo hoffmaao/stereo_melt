@@ -36,9 +36,11 @@ _env_proj = os.path.join(sys.prefix, "share", "proj")
 if os.path.isfile(os.path.join(_env_proj, "proj.db")):
     os.environ["PROJ_DATA"] = os.environ["PROJ_LIB"] = _env_proj
 
-REPO = "/wd2/projects/stereo_melt"
-sys.path.insert(0, REPO)
-sys.path.insert(0, os.path.join(REPO, "stereo_melt", "src"))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
+BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "examples"))
+sys.path.insert(0, os.path.join(REPO, "src"))
 
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
@@ -79,7 +81,7 @@ def render_map(fields, xk, yk, out_fig, subtitle):
     """Draw the 4-panel figure from `fields` (name -> 2-D DataArray).
 
     Split out of :func:`main` so the figure can be re-rendered from the saved
-    NetCDF (see ``pig/scripts/replot_melt_figures.py``) without re-running the
+    NetCDF (see ``examples/pig/scripts/replot_melt_figures.py``) without re-running the
     solvers -- a colormap change should not cost an hour of torch fitting.
 
     All four panels share ONE LADDIE symmetric-log scale. The old figure had to
@@ -175,8 +177,15 @@ def main() -> int:
     # PIG_ETA_NPZ overrides the field file.
     eta_da = None
     ETA_NPZ = os.environ.get("PIG_ETA_NPZ") or os.path.join(
-        REPO, "pig", "processed", "pig_eta_field_250m_dual_embayment.npz")
-    if os.path.exists(ETA_NPZ):
+        BASIN, "processed", "pig_eta_field_250m_dual_embayment.npz")
+    if ETA_NPZ in ("0", "none"):
+        print("[eta] PIG_ETA_NPZ opt-out -- scalar eta_bar fallback", flush=True)
+    elif not os.path.exists(ETA_NPZ):
+        raise SystemExit(
+            f"[eta] production eta field not found: {ETA_NPZ}\n"
+            f"      point PIG_ETA_NPZ at the field, or set PIG_ETA_NPZ=0 to\n"
+            f"      accept the scalar eta_bar fallback (a different product).")
+    else:
         ed = np.load(ETA_NPZ)
         print(f"[eta] source {os.path.basename(ETA_NPZ)}", flush=True)
         eta_da = xr.DataArray(
