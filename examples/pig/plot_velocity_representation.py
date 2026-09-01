@@ -17,7 +17,7 @@ Flux numbers quoted from pig/logs/diag_path_meanvel.log (identical GL-2km
 clip gate): tv 88.6 Gt/yr vs mean-vel 125.2 Gt/yr on the tv gate (+41%).
 
 Run:
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m pig.plot_velocity_representation
 """

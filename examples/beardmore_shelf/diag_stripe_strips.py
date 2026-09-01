@@ -34,7 +34,7 @@ per-pair diagnostics to ``processed/diag_stripe_pairs_<tag>.nc``.
 
 Run (disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m beardmore_shelf.diag_stripe_strips --res 125 \
         > beardmore_shelf/logs/diag_stripe_strips_125m.log 2>&1 &

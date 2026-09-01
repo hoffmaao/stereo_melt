@@ -10,7 +10,7 @@ median+MAD+cell counts, per-cell epoch/pair-count improvement in bands.
 
 Run (after the nocorr chain's tilt + path solves):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     BEARDMORE_SHELF_SOURCES=nocorr \
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m beardmore_shelf.compare_nocorr \

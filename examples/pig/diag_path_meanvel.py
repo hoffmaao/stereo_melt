@@ -18,7 +18,7 @@ time-variation drives the A/B gap (fix: time-varying velocity in the inverse).
 If it stays at the baseline -> the gap is in the inverse's internals.
 
 Run:
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m pig.diag_path_meanvel > pig/logs/diag_path_meanvel.log 2>&1 &
 """

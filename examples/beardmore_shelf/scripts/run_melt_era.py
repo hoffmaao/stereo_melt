@@ -19,7 +19,7 @@ flux CLIP/raw/robust, RED/LEFT/REF band med+MAD.
 
 Examples (after FULLREC_CHAIN_DONE):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     $PY -u -m beardmore_shelf.scripts.run_melt_era \
         --start 2019-01-01 --end 2024-01-10 --label is2era
     $PY -u -m beardmore_shelf.scripts.run_melt_era \

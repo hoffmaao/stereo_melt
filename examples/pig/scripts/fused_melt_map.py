@@ -38,7 +38,6 @@ if os.path.isfile(os.path.join(_env_proj, "proj.db")):
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
-BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "examples"))
 sys.path.insert(0, os.path.join(REPO, "src"))
 
@@ -138,8 +137,8 @@ def _preflight() -> str | None:
         raise SystemExit("[preflight] required input(s) not found:\n"
                          + "\n".join(f"      {m}" for m in missing))
 
-    eta_npz = os.environ.get("PIG_ETA_NPZ") or os.path.join(
-        BASIN, "processed", "pig_eta_field_250m_dual_embayment.npz")
+    eta_npz = os.environ.get("PIG_ETA_NPZ") or str(
+        config.PROCESSED_DIR / "pig_eta_field_250m_dual_embayment.npz")
     if eta_npz in ("0", "none"):
         print("[eta] PIG_ETA_NPZ opt-out -- scalar eta_bar fallback", flush=True)
         return None

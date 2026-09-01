@@ -29,7 +29,7 @@ file (``pig_lininv_budget_…``) and figure.
 
 Run (long job — keep it disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m pig.compare_budget_inverse > pig/logs/compare_budget_inverse.log 2>&1 &
 

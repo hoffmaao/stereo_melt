@@ -48,7 +48,7 @@ prior and every band degraded).
 
 Run (disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m beardmore_shelf.ingest_nocorr \
         > beardmore_shelf/logs/ingest_nocorr.log 2>&1 &

@@ -25,7 +25,7 @@ per-pair diagnostics to ``processed/diag_stripe_pairs_<tag>.nc``.
 
 Run:
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m venable.diag_stripe_strips --res 125 \
         2>&1 | tee venable/logs/diag_stripe_strips_125m.log

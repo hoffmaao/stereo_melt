@@ -36,7 +36,7 @@ Default is report-only. ``--apply`` moves QUARANTINE strips to
 
 Run (report, then apply once happy):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
         -m beardmore_shelf.scripts.qc_glas_align --glas-sample
     ... review table/figure ...

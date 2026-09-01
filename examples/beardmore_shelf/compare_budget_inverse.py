@@ -31,7 +31,7 @@ takes its static path (bit-identical to constant time-varying input).
 
 Run (disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m beardmore_shelf.compare_budget_inverse \
         > beardmore_shelf/logs/compare_budget_inverse_125m.log 2>&1 &

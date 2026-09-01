@@ -21,7 +21,7 @@ Caveats specific to Beardmore_Shelf:
 
 Run (disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m beardmore_shelf.run_melt_path \
         > beardmore_shelf/logs/run_melt_path.log 2>&1 &

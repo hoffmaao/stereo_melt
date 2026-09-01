@@ -23,7 +23,7 @@ Caveats specific to Venable:
 
 Run (125 m curated stack, disconnect-safe):
 
-    cd /wd2/projects/stereo_melt
+    cd /wd2/projects/stereo_melt/examples
     nohup /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u \
         -m venable.run_melt_path --res 125 \
         > venable/logs/run_melt_path_125m.log 2>&1 &

@@ -40,7 +40,6 @@ os.environ.setdefault("PIG_VELOCITY", "fused")
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
-BASIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "examples"))
 sys.path.insert(0, os.path.join(REPO, "src"))
 
@@ -60,7 +59,7 @@ from stereo_melt.shelf_extent import min_shelf_extent  # noqa: E402
 STACK_PREFIX = "pig_stack_250m_is2ctempo"
 RHO_I, RHO_W = 918.0, 1027.0
 H_MIN = 50.0
-OUT = os.path.join(BASIN, "processed", "pig_eta_inv_inputs.npz")
+OUT = str(config.PROCESSED_DIR / "pig_eta_inv_inputs.npz")
 BM_CODES = (0, 1, 2, 3)          # ocean, rock, grounded, floating
 
 
