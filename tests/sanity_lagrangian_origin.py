@@ -21,7 +21,7 @@ coverage (the whole point of the scheme), while path@stride2 checkers;
 (C) drop-stuck fires.
 
 Run::
-    cd stereo_melt && /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_lagrangian_origin.py
+    /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_lagrangian_origin.py
 """
 import numpy as np
 import pandas as pd

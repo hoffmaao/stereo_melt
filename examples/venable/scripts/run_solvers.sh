@@ -14,8 +14,8 @@
 # Outputs: arrays in venable/processed/*.nc, maps/figures in venable/figures/.
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash venable/scripts/run_solvers.sh \
-#     > venable/logs/run_solvers.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/venable/scripts/run_solvers.sh \
+#     > examples/venable/logs/run_solvers.log 2>&1 < /dev/null &
 #
 # Tunables (env): VENABLE_VELOCITY (advection field, default "measures").
 

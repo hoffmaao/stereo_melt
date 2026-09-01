@@ -3,7 +3,7 @@
 # finishes, so the Stage-2 datum CSVs are built from the freshly-recached
 # CryoTEMPO control. Armed 2026-06-18 per user "auto-launch tonight".
 # Run detached so it survives logout:
-#   setsid bash pig/autolaunch_fromraw.sh < /dev/null >> pig/logs/autolaunch_fromraw.log 2>&1 &
+#   setsid bash examples/pig/autolaunch_fromraw.sh < /dev/null >> examples/pig/logs/autolaunch_fromraw.log 2>&1 &
 set -u
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 cd /wd2/projects/stereo_melt/examples || exit 1

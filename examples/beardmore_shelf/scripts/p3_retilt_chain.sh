@@ -6,8 +6,8 @@
 # P4 find_bad_epochs re-screen (PIG framework: confirm convergence post-tilt).
 #
 # Launch (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/p3_retilt_chain.sh \
-#     > beardmore_shelf/logs/p3_retilt_chain.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/p3_retilt_chain.sh \
+#     > examples/beardmore_shelf/logs/p3_retilt_chain.log 2>&1 < /dev/null &
 #
 # Sentinels (beardmore_shelf/logs/): P3_TILT_DONE, P3_CHAIN_DONE,
 #   P3_TILT_FAILED / P3_MELT_FAILED / P3_RESCREEN_FAILED on error.

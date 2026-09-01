@@ -7,8 +7,8 @@
 # sparse on slow-flow grounded ice and starved pc_align of control.
 #
 # Usage:
-#   nohup bash nansen/scripts/recache_pc_align_failures.sh \
-#     > nansen/logs/recache_pc_align.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/scripts/recache_pc_align_failures.sh \
+#     > examples/nansen/logs/recache_pc_align.log 2>&1 < /dev/null &
 #
 # Inputs:  nansen/scripts/pc_align_failed_strips.txt  (one dem-id per line)
 # Output:  nansen/data/ASP/icesat2_data/

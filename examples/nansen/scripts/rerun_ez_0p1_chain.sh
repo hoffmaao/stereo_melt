@@ -4,8 +4,8 @@
 # bias diagnosed on 2026-05-05 (project_nansen_dhdt_bias.md).
 #
 # Usage:
-#   nohup bash nansen/scripts/rerun_ez_0p1_chain.sh \
-#     > nansen/logs/chain_ez_0p1.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/scripts/rerun_ez_0p1_chain.sh \
+#     > examples/nansen/logs/chain_ez_0p1.log 2>&1 < /dev/null &
 set -u
 trap '' HUP TERM
 

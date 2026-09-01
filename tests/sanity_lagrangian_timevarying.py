@@ -6,7 +6,7 @@ static path. This pins the time-varying code (introduced 2026-06-15 to feed
 multi-year ITS_LIVE mosaics into PIG's Lagrangian melt) so a refactor can't
 silently diverge the two paths. Run::
 
-    cd stereo_melt && PYTHONPATH=. STEREO_MELT_BACKEND=numpy \
+    STEREO_MELT_BACKEND=numpy \
         python -u tests/sanity_lagrangian_timevarying.py
 """
 from __future__ import annotations

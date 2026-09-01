@@ -12,8 +12,8 @@
 # and the linear inverse (run_stationary) are RETIRED as melt products; the
 # old combined run_melt bundles an out-of-date Lagrangian config
 # (seed_stride=2, mean aggregator) plus the retired linear-inverse call, so it
-# is NOT in this chain. Use `python -m beardmore_shelf.run_melt` by hand only
-# for an Eulerian cross-check.
+# is NOT in this chain. Use `cd examples && python -m beardmore_shelf.run_melt`
+# by hand only for an Eulerian cross-check.
 #
 # Stages (each logs separately; aborts on first non-zero exit):
 #   1 tilt_fit       -> processed/beardmore_shelf_stack_tilt_corrected_*.nc (curated)
@@ -22,8 +22,8 @@
 # Melt-rate sign (Shean): negative = melt, positive = accretion.
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/run_solvers.sh \
-#     > beardmore_shelf/logs/run_solvers.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/run_solvers.sh \
+#     > examples/beardmore_shelf/logs/run_solvers.log 2>&1 < /dev/null &
 #
 # Tunables (env): BEARDMORE_SHELF_VELOCITY (advection field, default "measures").
 # Velocity is the static MEaSUREs phase map -- flag the mean-velocity

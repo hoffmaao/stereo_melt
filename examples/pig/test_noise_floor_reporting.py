@@ -27,7 +27,7 @@ T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY pig/test_noise_floor_reporting.py
+    $PY examples/pig/test_noise_floor_reporting.py
 """
 from __future__ import annotations
 

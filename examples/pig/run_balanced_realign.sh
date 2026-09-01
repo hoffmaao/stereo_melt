@@ -18,7 +18,7 @@
 # Launch AFTER pig.cache_cryotempo (unc<3, pid 5560) finishes — reads the fresh
 # data/ASP/cryotempo_data with the recovered strips folded in.
 #
-# Usage:  setsid bash pig/run_balanced_realign.sh [PARALLEL] &   # default 8
+# Usage:  setsid bash examples/pig/run_balanced_realign.sh [PARALLEL] &   # default 8
 set -u
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 cd /wd2/projects/stereo_melt/examples || exit 1

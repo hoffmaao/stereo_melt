@@ -13,8 +13,8 @@
 # Each stage logs separately. Chain aborts on first non-zero exit.
 #
 # Usage:
-#   nohup bash nansen/scripts/rebuild_chain.sh \
-#     > nansen/logs/rebuild_chain.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/scripts/rebuild_chain.sh \
+#     > examples/nansen/logs/rebuild_chain.log 2>&1 < /dev/null &
 
 set -u
 # SSH-disconnect immunity.

@@ -19,8 +19,8 @@
 # Melt-rate sign (Shean): negative = melt, positive = accretion.
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/restack_solve.sh \
-#     > beardmore_shelf/logs/restack_solve.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/restack_solve.sh \
+#     > examples/beardmore_shelf/logs/restack_solve.log 2>&1 < /dev/null &
 #
 # Tunables (env): BEARDMORE_SHELF_VELOCITY (advection field, default "measures").
 

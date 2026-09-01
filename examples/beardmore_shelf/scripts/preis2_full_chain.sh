@@ -26,8 +26,8 @@
 #   4 align_strips     -> data/ASP_ctempoatm/asp_aligned/
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/preis2_full_chain.sh \
-#     > beardmore_shelf/logs/preis2_full_chain.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/preis2_full_chain.sh \
+#     > examples/beardmore_shelf/logs/preis2_full_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

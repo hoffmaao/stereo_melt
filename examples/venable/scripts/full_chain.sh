@@ -4,7 +4,7 @@
 # find_bad_epochs output into config.BAD_STRIPS, then run run_solvers.sh).
 #
 # Prerequisites (run once, before this chain):
-#   python -m venable.cache_climate          # ERA5 MSL pressure (post-coreg IBE)
+#   cd examples && python -m venable.cache_climate          # ERA5 MSL pressure (post-coreg IBE)
 #   python scripts/compute_aoi.py venable     # finalize the optimal v15 AOI
 #                                             # (strip-aware; run after a seed fetch)
 #
@@ -17,8 +17,8 @@
 #   6 find_bad_epochs  -> stdout: BAD_STRIPS candidates (review before solvers)
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash venable/scripts/full_chain.sh \
-#     > venable/logs/full_chain.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/venable/scripts/full_chain.sh \
+#     > examples/venable/logs/full_chain.log 2>&1 < /dev/null &
 #
 # Tunables (env): VENABLE_ALIGN_PARALLEL (align workers, default 8).
 

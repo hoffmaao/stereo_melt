@@ -19,7 +19,7 @@ Metrics (all smoothed spatial correlations vs the known truth, 2 km):
   base    : stationary inverse's spatial corr  (the "recoverable-band" floor)
 
 Run::
-    cd stereo_melt && /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/gate_c_timevarying_recovery.py
+    /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/gate_c_timevarying_recovery.py
 """
 import numpy as np
 import xarray as xr

@@ -10,8 +10,8 @@
 #   3 find_bad_epochs --res 125 -> stdout: BAD_STRIPS candidates
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash venable/scripts/full_chain_125m.sh \
-#     > venable/logs/full_chain_125m.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/venable/scripts/full_chain_125m.sh \
+#     > examples/venable/logs/full_chain_125m.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

@@ -15,8 +15,8 @@
 # Each stage logs separately. Chain aborts on first non-zero exit.
 #
 # Usage:
-#   nohup bash mcmurdo/scripts/full_chain.sh \
-#     > mcmurdo/logs/full_chain.log 2>&1 < /dev/null &
+#   nohup bash examples/mcmurdo/scripts/full_chain.sh \
+#     > examples/mcmurdo/logs/full_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

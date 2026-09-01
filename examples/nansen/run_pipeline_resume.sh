@@ -6,7 +6,7 @@
 # or build_stack — those are unchanged since the original Apr 26 run.
 #
 # Usage:
-#   nohup bash nansen/run_pipeline_resume.sh > nansen/logs/pipeline.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/run_pipeline_resume.sh > examples/nansen/logs/pipeline.log 2>&1 < /dev/null &
 #
 # Stages (each writes its own log under nansen/logs/):
 #   1. nansen.tilt_fit

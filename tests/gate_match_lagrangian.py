@@ -32,7 +32,7 @@ PASS iff at every rung:
 
 Run::
 
-    cd stereo_melt && python -u tests/gate_match_lagrangian.py
+    python -u tests/gate_match_lagrangian.py
 """
 from __future__ import annotations
 

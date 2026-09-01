@@ -23,8 +23,8 @@
 #   6 run_melt_path    -> processed/beardmore_shelf_melt_path_125m_is2ctempo_*.nc [A/B leg]
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/is2ctempo_chain.sh \
-#     > beardmore_shelf/logs/is2ctempo_chain.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/is2ctempo_chain.sh \
+#     > examples/beardmore_shelf/logs/is2ctempo_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

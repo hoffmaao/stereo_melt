@@ -106,8 +106,8 @@ def _rewrite_config(text: str, args, upper: str) -> str:
 NOTES_MD = """# NOTES.md — {name}/ (local decision record, untracked)
 
 The **{title}** application of the `stereo_melt` library, scaffolded by
-`scripts/new_basin.py`. Canonical stage sequence: [`../PIPELINE.md`](../PIPELINE.md)
-— run `$PY -m {name}.<stage>`; keep this file **deltas-only** (identity,
+`scripts/new_basin.py`. Canonical stage sequence: [`PIPELINE.md`](../../PIPELINE.md)
+— run `cd examples && $PY -m {name}.<stage>`; keep this file **deltas-only** (identity,
 decision record, genuinely local caveats — no generic command blocks).
 
 ## Decision record (fill in as decided)

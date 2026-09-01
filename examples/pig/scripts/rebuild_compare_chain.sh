@@ -13,8 +13,8 @@
 # is fine; only the tilt-corrected derivative was stale.
 #
 # Usage:
-#   nohup bash pig/scripts/rebuild_compare_chain.sh \
-#     > pig/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
+#   nohup bash examples/pig/scripts/rebuild_compare_chain.sh \
+#     > examples/pig/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

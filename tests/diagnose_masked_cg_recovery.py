@@ -26,7 +26,7 @@ The interpretation key:
 
 Run::
 
-    cd stereo_melt && PYTHONPATH=. python -u tests/diagnose_masked_cg_recovery.py
+    python -u tests/diagnose_masked_cg_recovery.py
 """
 from __future__ import annotations
 

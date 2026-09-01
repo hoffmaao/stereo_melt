@@ -10,8 +10,8 @@
 #                              figures/five_methods_comparison.png  (same 6-panel set)
 #
 # Usage:
-#   nohup bash beardmore/scripts/rerun_ez_0p1_chain.sh \
-#     > beardmore/logs/chain_ez_0p1.log 2>&1 < /dev/null &
+#   nohup bash examples/beardmore/scripts/rerun_ez_0p1_chain.sh \
+#     > examples/beardmore/logs/chain_ez_0p1.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

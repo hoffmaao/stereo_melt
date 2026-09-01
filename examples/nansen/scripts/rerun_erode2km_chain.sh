@@ -5,8 +5,8 @@
 # the LSQ anchor set. Same Ez=0.1 prior as previous rerun.
 #
 # Usage:
-#   nohup bash nansen/scripts/rerun_erode2km_chain.sh \
-#     > nansen/logs/chain_erode2km.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/scripts/rerun_erode2km_chain.sh \
+#     > examples/nansen/logs/chain_erode2km.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

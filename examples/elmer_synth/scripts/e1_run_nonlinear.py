@@ -13,7 +13,7 @@ from main import solve  # noqa: E402
 from params import H, L, nt, t_f, t_r  # noqa: E402
 
 OUT = "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1_nonlinear_result.npz"
-os.makedirs(os.path.dirname(OUT), exist_ok=True)
+os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 
 m0 = 5.0 / 3.154e7  # 5 m/yr peak basal melt, in m/s
 stdev = 10.0 * H / 3.0  # paper's anomaly width (~1.67 km)

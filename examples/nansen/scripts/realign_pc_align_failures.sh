@@ -4,8 +4,8 @@
 # rebuilt with the Shean filter (median 143k photons/strip, min 17k).
 #
 # Usage:
-#   nohup bash nansen/scripts/realign_pc_align_failures.sh \
-#     > nansen/logs/realign_pc_align.log 2>&1 < /dev/null &
+#   nohup bash examples/nansen/scripts/realign_pc_align_failures.sh \
+#     > examples/nansen/logs/realign_pc_align.log 2>&1 < /dev/null &
 #
 # Inputs:  nansen/scripts/pc_align_failed_strips.txt  (one dem-id per line)
 # Output:  nansen/data/ASP/asp_aligned/<dem_id>-trans_reference-DEM.tif

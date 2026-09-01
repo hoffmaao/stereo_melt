@@ -14,8 +14,8 @@
 # is fine; only the tilt-corrected derivative was stale.
 #
 # Usage:
-#   nohup bash beardmore/scripts/rebuild_compare_chain.sh \
-#     > beardmore/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
+#   nohup bash examples/beardmore/scripts/rebuild_compare_chain.sh \
+#     > examples/beardmore/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

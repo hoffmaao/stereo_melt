@@ -12,8 +12,8 @@
 # Run dotson_crosson.align_strips and dotson_crosson.build_stack first.
 #
 # Usage:
-#   nohup bash dotson_crosson/scripts/rebuild_compare_chain.sh \
-#     > dotson_crosson/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
+#   nohup bash examples/dotson_crosson/scripts/rebuild_compare_chain.sh \
+#     > examples/dotson_crosson/logs/rebuild_compare_chain.log 2>&1 < /dev/null &
 
 set -u
 trap '' HUP TERM

@@ -10,7 +10,7 @@
 # Each gets its own firedrake/PyOP2 cache dir: the JIT disk cache races when
 # several processes compile the same kernels at once.
 #
-# Usage:  pig/scripts/run_eta_lcurve_sweep.sh [MAX_ITERS] [GAMMA ...]
+# Usage:  examples/pig/scripts/run_eta_lcurve_sweep.sh [MAX_ITERS] [GAMMA ...]
 set -u
 REPO=/wd2/projects/stereo_melt/examples
 cd "$REPO" || exit 1

@@ -4,7 +4,7 @@
 # find_bad_epochs output into config.BAD_STRIPS, then run run_solvers.sh).
 #
 # Prerequisites (run once, before this chain):
-#   python -m beardmore_shelf.cache_climate          # ERA5 MSL pressure (post-coreg IBE)
+#   cd examples && python -m beardmore_shelf.cache_climate          # ERA5 MSL pressure (post-coreg IBE)
 #   python scripts/compute_aoi.py beardmore_shelf     # finalize the optimal v15 AOI
 #                                             # (strip-aware; run after a seed fetch)
 #
@@ -17,8 +17,8 @@
 #   6 find_bad_epochs  -> stdout: BAD_STRIPS candidates (review before solvers)
 #
 # Usage (disconnect-safe):
-#   nohup setsid bash beardmore_shelf/scripts/full_chain.sh \
-#     > beardmore_shelf/logs/full_chain.log 2>&1 < /dev/null &
+#   nohup setsid bash examples/beardmore_shelf/scripts/full_chain.sh \
+#     > examples/beardmore_shelf/logs/full_chain.log 2>&1 < /dev/null &
 #
 # Tunables (env): BEARDMORE_SHELF_ALIGN_PARALLEL (align workers, default 8).
 

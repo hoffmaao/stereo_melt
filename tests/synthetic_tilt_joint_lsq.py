@@ -16,7 +16,7 @@ run all four operational solvers and report mean melt-rate recovery.
 
 Run::
 
-    cd stereo_melt && PYTHONPATH=. python -u tests/synthetic_tilt_joint_lsq.py
+    python -u tests/synthetic_tilt_joint_lsq.py
 """
 from __future__ import annotations
 

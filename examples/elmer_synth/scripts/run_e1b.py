@@ -16,7 +16,7 @@ from params import H, L, m0, nt, stdev, t_f, t_r, u0, xc, yr  # noqa: E402
 OUT = os.environ.get(
     "E1B_OUT",
     "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1b_throughflow_result.npz")
-os.makedirs(os.path.dirname(OUT), exist_ok=True)
+os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 
 alpha = u0 * t_r / H
 print(f"E1b start: L={L/1e3:.0f} km, H={H:.0f} m, u0={u0*yr:.0f} m/yr "

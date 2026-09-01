@@ -23,7 +23,7 @@ Outputs:
 
 Run::
 
-    cd stereo_melt && PYTHONPATH=. python -u tests/synthetic_realistic_recovery.py
+    python -u tests/synthetic_realistic_recovery.py
 """
 from __future__ import annotations
 

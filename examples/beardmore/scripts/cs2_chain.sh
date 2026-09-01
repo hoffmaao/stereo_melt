@@ -7,7 +7,7 @@
 # Each stage's log is separate. The chain aborts if a stage fails.
 #
 # Usage:
-#   ./beardmore/scripts/cs2_chain.sh <waiting_pid>
+#   ./examples/beardmore/scripts/cs2_chain.sh <waiting_pid>
 #
 # <waiting_pid> is the dry-run prefetch PID we wait on before starting
 # stage 2. Pass 0 to skip waiting (e.g., if dry-run already finished).

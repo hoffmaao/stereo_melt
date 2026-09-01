@@ -4,8 +4,8 @@
 # rebuilt with the Shean filter (median 159k photons/strip, min 101).
 #
 # Usage:
-#   nohup bash pig/scripts/realign_pc_align_failures.sh \
-#     > pig/logs/realign_pc_align.log 2>&1 < /dev/null &
+#   nohup bash examples/pig/scripts/realign_pc_align_failures.sh \
+#     > examples/pig/logs/realign_pc_align.log 2>&1 < /dev/null &
 #
 # Inputs:  pig/scripts/pc_align_failed_strips.txt  (one dem-id per line)
 # Output:  /wd2/projects/stereo_melt/data/REMA/strips/ASP/asp_aligned/

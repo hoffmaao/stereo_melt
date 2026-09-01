@@ -10,7 +10,7 @@
 # can be re-launched safely if something interrupts.
 #
 # Usage:
-#   ./beardmore/scripts/pre_is2_chain.sh [parallel]
+#   ./examples/beardmore/scripts/pre_is2_chain.sh [parallel]
 #
 #   parallel = number of pc_align workers in stage C (default 8)
 

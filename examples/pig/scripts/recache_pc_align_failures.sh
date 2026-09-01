@@ -7,8 +7,8 @@
 # sparse on slow-flow grounded ice and starved pc_align of control.
 #
 # Usage:
-#   nohup bash pig/scripts/recache_pc_align_failures.sh \
-#     > pig/logs/recache_pc_align.log 2>&1 < /dev/null &
+#   nohup bash examples/pig/scripts/recache_pc_align_failures.sh \
+#     > examples/pig/logs/recache_pc_align.log 2>&1 < /dev/null &
 #
 # Inputs:  pig/scripts/pc_align_failed_strips.txt  (one dem-id per line)
 # Output:  /wd2/projects/stereo_melt/data/REMA/strips/ASP/icesat2_data/

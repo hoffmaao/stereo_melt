@@ -5,7 +5,7 @@ that a sub-H channel (which the forward damps) is recovered exactly by the
 Stubblefield inverse but UNDER-recovered by the hydrostatic m=-h/2.
 
 Run::
-    cd stereo_melt && /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_stubblefield_inverse.py
+    /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_stubblefield_inverse.py
 """
 import numpy as np
 

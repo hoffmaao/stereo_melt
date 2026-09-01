@@ -10,7 +10,7 @@ order of increasing difficulty:
   E. Gate C-lite — survive 30% coverage gaps + noise (smoke test, not a gate)
 
 Run::
-    cd stereo_melt && /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_timevarying_basis.py
+    /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python -u tests/sanity_timevarying_basis.py
 """
 import numpy as np
 

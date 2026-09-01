@@ -9,6 +9,11 @@ CATS2008.zip
 
 # ---------------------------------------------------------------------------
 # Pipeline outputs
+#
+# strips/*_strips.csv, tests/figures/ and tests/*.png below carried trailing
+# `# ...` comments, which git treats as part of the pattern rather than as a
+# comment — all three matched nothing. The comments now sit on their own lines,
+# deliberately activating the rules.
 # ---------------------------------------------------------------------------
 results/
 processed/
@@ -23,9 +28,6 @@ ASP_aligned/
 tests/figures/
 # gate/sanity plots written next to the scripts
 tests/*.png
-beardmore/plots/
-beardmore/processed/
-beardmore/results/
 
 # ---------------------------------------------------------------------------
 # Literature / papers / proposals — local-only reference material

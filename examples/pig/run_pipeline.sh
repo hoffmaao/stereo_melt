@@ -2,7 +2,7 @@
 # PIG end-to-end pipeline chain. Disconnect-safe: launch with nohup.
 #
 # Usage:
-#   nohup bash pig/run_pipeline.sh > pig/logs/pipeline.log 2>&1 < /dev/null &
+#   nohup bash examples/pig/run_pipeline.sh > examples/pig/logs/pipeline.log 2>&1 < /dev/null &
 #
 # Stages (each writes its own log under pig/logs/):
 #   1. wait for pig.fetch_strips (PID 25239) to finish
