@@ -38,9 +38,13 @@ def main() -> None:
                     ax.fill(xs, ys, color=color, alpha=0.5, edgecolor=color, linewidth=2)
             ax.plot([], [], color=color, linewidth=3, label=f"AOI: {label}")
 
-    strips = sorted(glob(
-        f"{_REPO}/examples/pig/data/ASP/asp_aligned/*-trans_reference-DEM.tif"
-    ))
+    aligned_dir = f"{_REPO}/examples/pig/data/ASP/asp_aligned"
+    strips = sorted(glob(f"{aligned_dir}/*-trans_reference-DEM.tif"))
+    if not strips:
+        raise SystemExit(
+            f"no aligned strips under {aligned_dir}\n"
+            f"      this plot answers 'do the migrated strips sit at PIG?', so an\n"
+            f"      empty glob would draw a blank map, not a negative result.")
     for p in strips:
         with rasterio.open(p) as src:
             b = src.bounds

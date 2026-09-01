@@ -366,7 +366,8 @@ def load_shelf_geom(path, feature_name=None):
 
 def resolve_inputs(args):
     """Map CLI args to (shelf_geom, name, out_shp, figures_dir)."""
-    figures_dir = Path(args.figures_dir) if args.figures_dir else (ROOT / "figures")
+    figures_dir = (Path(args.figures_dir) if args.figures_dir
+                   else Path(__file__).resolve().parent.parent / "figures")
 
     if args.basin:
         if str(EXAMPLES) not in sys.path:

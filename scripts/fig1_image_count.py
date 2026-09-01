@@ -23,7 +23,7 @@ BEDMACHINE_NC = Path("/wd2/projects/stereo_melt/data/bedmachine/BedMachineAntarc
 
 ROOT = Path("/wd2/projects/stereo_melt")
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
-OUT_DIR = ROOT / "figures"
+OUT_DIR = Path(__file__).resolve().parent.parent / "figures"
 
 BASINS = [
     {

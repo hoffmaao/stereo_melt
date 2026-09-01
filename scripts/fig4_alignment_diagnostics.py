@@ -197,6 +197,12 @@ def main() -> None:
             f"mean p50: pre={d['in_p50'].mean():.3f} m  post={d['out_p50'].mean():.3f} m"
         )
 
+    if not any(data[b["name"]]["x_off"].size for b in BASINS):
+        raise SystemExit(
+            "no aligned strips harvested from any population:\n"
+            + "\n".join(f"      {d}" for b in BASINS for d in b["dirs"])
+            + "\n      refusing to write an empty diagnostic figure.")
+
     fig = plt.figure(figsize=(16, 10))
     gs = fig.add_gridspec(2, 3, height_ratios=(1, 1.05), hspace=0.32, wspace=0.28)
     ax_yx = fig.add_subplot(gs[0, 0])

@@ -41,8 +41,8 @@ import warnings
 import numpy as np
 import xarray as xr
 
-# Pin the library AND the basin package to this checkout before the pig
-# scripts insert their hard-coded /wd2 paths.
+# Resolve the library and the basin package from this file's own tree,
+# ahead of the imports below.
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "examples"))
