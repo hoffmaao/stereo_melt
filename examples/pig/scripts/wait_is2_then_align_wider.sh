@@ -16,7 +16,7 @@
 set -u
 IS2_PID="${1:?need IS2 cache PID as arg 1}"
 
-REPO=/wd2/projects/stereo_melt
+REPO=/wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOG_DIR="$REPO/pig/logs"
 CHAIN_LOG="$LOG_DIR/align_is2era_wider_chain.log"

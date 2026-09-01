@@ -23,7 +23,7 @@ S4  NO MODES == OLD PATH. ``strip_modes=None`` is bit-identical to the
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_strip_noise_model.py
+    $PY tests/gate_strip_noise_model.py
 """
 from __future__ import annotations
 

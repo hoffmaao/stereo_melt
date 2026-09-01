@@ -12,7 +12,7 @@
 # that aliases the along-flow melt gradient into a per-epoch tilt -> front
 # accretion vanishes, integrated flux moves toward Shean's 82-93 Gt/yr.
 set -euo pipefail
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 
 export STEREO_MELT_BACKEND=numpy

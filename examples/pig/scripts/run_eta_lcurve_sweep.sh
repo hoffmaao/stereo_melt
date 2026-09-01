@@ -12,7 +12,7 @@
 #
 # Usage:  pig/scripts/run_eta_lcurve_sweep.sh [MAX_ITERS] [GAMMA ...]
 set -u
-REPO=/wd2/projects/stereo_melt
+REPO=/wd2/projects/stereo_melt/examples
 cd "$REPO" || exit 1
 
 MAX_ITERS="${1:-150}"; shift || true

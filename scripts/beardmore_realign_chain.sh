@@ -14,7 +14,7 @@
 # while the 2 tilt_fits use ~7 effective cores combined.
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-ROOT=/wd2/projects/stereo_melt
+ROOT=/wd2/projects/stereo_melt/examples
 LOGS=$ROOT/beardmore/logs
 mkdir -p "$LOGS"
 

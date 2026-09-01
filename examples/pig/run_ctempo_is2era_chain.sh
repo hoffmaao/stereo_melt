@@ -21,7 +21,7 @@
 # A/B partners already on disk: pig_melt_250m_*.nc (baseline) and
 # pig_melt_250m_ctempo_*.nc (hybrid: IS2-era is2cs2 + pre-IS2 ctempo).
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 CACHE_PID=30269
 CACHE_LOG=pig/logs/cache_cryotempo_is2era.log

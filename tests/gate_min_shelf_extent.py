@@ -14,7 +14,7 @@ exists):
   7. PIG-bbox extent is a proper nonempty subset of the grid;
   8. nesting: min extent over 2010-2024 is a subset of 2021-2024's.
 
-Run:  $PY stereo_melt/tests/gate_min_shelf_extent.py
+Run:  $PY tests/gate_min_shelf_extent.py
 """
 import pathlib
 import sys

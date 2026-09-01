@@ -25,7 +25,7 @@
 # tagged is2ctempo -> pig_melt_250m_is2ctempo_*.nc. A/B partners:
 # pig_melt_250m_*.nc (baseline), _ctempo_* (hybrid), _ctempouniform_* (no-IS2).
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 CHAIN_LOG=pig/logs/is2ctempo_chain.log
 export PROJ_DATA=/home/hoffmaao/miniconda3/envs/stereo_melt/share/proj

@@ -12,7 +12,7 @@
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_bridging_inverse.py
+    $PY tests/gate_bridging_inverse.py
 """
 import sys
 

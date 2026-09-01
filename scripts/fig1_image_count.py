@@ -22,22 +22,23 @@ from stereo_melt.coregister.tilt import build_static_area_polygon_mask
 BEDMACHINE_NC = Path("/wd2/projects/stereo_melt/data/bedmachine/BedMachineAntarctica-v3.nc")
 
 ROOT = Path("/wd2/projects/stereo_melt")
+EXAMPLES = ROOT / "examples"
 OUT_DIR = ROOT / "figures"
 
 BASINS = [
     {
         "name": "Beardmore",
-        "stack": ROOT / "beardmore/processed/beardmore_stack_tilt_corrected_2019-01-01_2023-03-01.nc",
+        "stack": EXAMPLES / "beardmore/processed/beardmore_stack_tilt_corrected_2019-01-01_2023-03-01.nc",
         "aoi": ROOT / "data/shapefiles/beardmore.shp",
     },
     {
         "name": "Nansen",
-        "stack": ROOT / "nansen/processed/nansen_stack_tilt_corrected_2019-01-01_2023-03-01.nc",
+        "stack": EXAMPLES / "nansen/processed/nansen_stack_tilt_corrected_2019-01-01_2023-03-01.nc",
         "aoi": ROOT / "data/shapefiles/nansen.shp",
     },
     {
         "name": "PIG",
-        "stack": ROOT / "pig/processed/pig_stack_tilt_corrected_2019-01-01_2024-01-10.nc",
+        "stack": EXAMPLES / "pig/processed/pig_stack_tilt_corrected_2019-01-01_2024-01-10.nc",
         "aoi": ROOT / "data/shapefiles/pig.shp",
     },
 ]

@@ -43,7 +43,7 @@ fi
 echo "[$(stamp)] tilt_fit clean (OK_LOG=$OK_LOG OK_NC=$OK_NC); launching run_melt -> $RUN_LOG" >> "$WATCH_LOG"
 
 # 3) Launch run_melt, same proven config as the prior 250 m wider run (numpy/CPU backend).
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PROJ_DATA=/home/hoffmaao/miniconda3/envs/stereo_melt/share/proj \
 PROJ_LIB=/home/hoffmaao/miniconda3/envs/stereo_melt/share/proj \
 STEREO_MELT_BACKEND=numpy OMP_NUM_THREADS=14 \

@@ -27,7 +27,7 @@ about the inverse's conditioning, not the operator's fidelity):
      in the surface must leave the recovered melt (nearly) unchanged, while the
      kernel-band wave-packet channel and the prior-supplied level survive.
 
-Run: ``$PY stereo_melt/tests/gate_budget_anchored_variational.py``
+Run: ``$PY tests/gate_budget_anchored_variational.py``
 """
 from __future__ import annotations
 

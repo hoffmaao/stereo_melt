@@ -11,7 +11,7 @@
 # parallelism). nohup'd so it survives session close. Re-align does NOT fire
 # if the cache died partway (no summary) or cached nothing.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 CACHE_PID=22154
 CACHE_LOG=pig/logs/cryotempo_cache_preIS2.log

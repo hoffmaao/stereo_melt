@@ -16,7 +16,7 @@
 # Disconnect-safe: launched under nohup/setsid; each stage tees to its own log
 # and aborts the chain on failure.
 set -u
-cd /wd2/projects/stereo_melt || exit 2
+cd /wd2/projects/stereo_melt/examples || exit 2
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGDIR=pig/logs
 STAMP=2026_06_25

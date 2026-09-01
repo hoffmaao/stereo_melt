@@ -43,9 +43,9 @@ import xarray as xr
 
 # Pin the library AND the basin package to this checkout before the pig
 # scripts insert their hard-coded /wd2 paths.
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "stereo_melt" / "src"))
-sys.path.insert(0, str(ROOT))
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "examples"))
 import stereo_melt  # noqa: E402,F401
 import pig  # noqa: E402,F401
 from pig import config  # noqa: E402

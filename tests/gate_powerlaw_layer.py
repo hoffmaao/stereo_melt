@@ -23,7 +23,7 @@ G5  LinearPerturbation(n=3) reduces to LinearPerturbation(n=1) when the
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_powerlaw_layer.py
+    $PY tests/gate_powerlaw_layer.py
 """
 from __future__ import annotations
 

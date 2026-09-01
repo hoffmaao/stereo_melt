@@ -15,7 +15,7 @@ is2ctempo stack is rebuilt with the new ``dem_id`` coord. Covers:
 
 Run:
   /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
-      stereo_melt/scripts/sanity_strip_dropping.py
+      scripts/library/sanity_strip_dropping.py
 """
 from __future__ import annotations
 

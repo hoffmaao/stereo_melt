@@ -1,6 +1,6 @@
 #!/bin/bash
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 echo "=== pilot 2a: 3 earliest cached strips $(date '+%F %T')"
 $PY -u -m beardmore_shelf.align_strips --control glas --asp-suffix _glas \

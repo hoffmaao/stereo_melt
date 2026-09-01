@@ -29,7 +29,7 @@ L5  FLUX_RESTORED PER BIN. With ``flux_restored=True`` (monolithic v2) the
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_budget_bridging_local.py
+    $PY tests/gate_budget_bridging_local.py
 """
 from __future__ import annotations
 

@@ -6,7 +6,7 @@
 #   setsid bash pig/autolaunch_fromraw.sh < /dev/null >> pig/logs/autolaunch_fromraw.log 2>&1 &
 set -u
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-cd /wd2/projects/stereo_melt || exit 1
+cd /wd2/projects/stereo_melt/examples || exit 1
 CACHE_PID=29022
 CACHE_LOG=pig/logs/cache_cryotempo_budget.log
 

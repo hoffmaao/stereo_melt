@@ -23,8 +23,8 @@ and end-to-end sanity checks (`sanity_eulerian_melt.py`,
 `sanity_lagrangian_melt.py`).
 
 The library carries **no study configuration** — shelf, window, grid, and
-data paths live in each basin driver package at the workspace root (see
-[`../PIPELINE.md`](../PIPELINE.md)).
+data paths live in each basin driver package under `examples/` (see
+[`PIPELINE.md`](./PIPELINE.md)).
 
 ## Data
 

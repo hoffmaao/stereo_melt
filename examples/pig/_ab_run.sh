@@ -10,7 +10,7 @@
 set -uo pipefail
 TAG="${1:?usage: _ab_run.sh <tag> [wait]}"
 WAIT="${2:-no}"
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 TILT="/wd2/projects/stereo_melt/examples/pig/processed/pig_stack_250m_${TAG}_tilt_corrected_2010-01-01_2024-01-10.nc"
 

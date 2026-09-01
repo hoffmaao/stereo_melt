@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
+EXAMPLES = WORKSPACE / "examples"
 
 # (template basin, file) → stamped file. Order matters only for the report.
 TEMPLATE_FILES: list[tuple[str, str]] = [
@@ -155,8 +156,8 @@ def main() -> None:
                     help="AOI shapefile name under data/shapefiles/ "
                          "(default: <name>_stack_extent.shp)")
     ap.add_argument("--tide-model", default="CATS2008")
-    ap.add_argument("--dest", default=str(WORKSPACE / "examples"),
-                    help="Workspace root to stamp into (default: repo root)")
+    ap.add_argument("--dest", default=str(EXAMPLES),
+                    help="Driver root to stamp into (default: <repo>/examples)")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite an existing basin dir")
     args = ap.parse_args()
@@ -182,7 +183,7 @@ def main() -> None:
 
     stamped, missing = [], []
     for template, rel in TEMPLATE_FILES:
-        src = WORKSPACE / template / rel
+        src = EXAMPLES / template / rel
         if not src.exists():
             missing.append(f"{template}/{rel}")
             continue
@@ -208,22 +209,21 @@ def main() -> None:
             print(f"   {m}")
 
     # Import smoke test — catches renamed-attribute mismatches immediately.
-    if str(dest_root) == str(WORKSPACE):
-        import importlib
-        sys.path.insert(0, str(dest_root))
-        failures = []
-        for rel in ["config"] + [Path(r).stem for r in stamped if r != "config.py"
-                                 and "/" not in r]:
-            try:
-                importlib.import_module(f"{name}.{rel}")
-            except Exception as exc:
-                failures.append((rel, str(exc)))
-        if failures:
-            print("\n⚠  import failures to fix before first run:")
-            for rel, err in failures:
-                print(f"   {name}.{rel}: {err}")
-        else:
-            print("✅ all stamped modules import cleanly")
+    import importlib
+    sys.path.insert(0, str(dest_root))
+    failures = []
+    for rel in ["config"] + [Path(r).stem for r in stamped if r != "config.py"
+                             and "/" not in r]:
+        try:
+            importlib.import_module(f"{name}.{rel}")
+        except Exception as exc:
+            failures.append((rel, str(exc)))
+    if failures:
+        print("\n⚠  import failures to fix before first run:")
+        for rel, err in failures:
+            print(f"   {name}.{rel}: {err}")
+    else:
+        print("✅ all stamped modules import cleanly")
 
     print(f"\nNext: see {basin_dir}/NOTES.md for the checklist "
           f"(AOI file, MDT latitude rule, velocity source).")

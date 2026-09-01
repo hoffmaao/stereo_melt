@@ -6,7 +6,7 @@
 # lands), wider-AOI tilt_fit runs on CPU. 1 TB system RAM is plenty.
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGDIR=/wd2/projects/stereo_melt/examples/nansen/logs
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 unset CUDA_VISIBLE_DEVICES
 export STEREO_MELT_BACKEND=numpy
 # Cap BLAS threads so parallel basin runs don't oversubscribe 32 cores.

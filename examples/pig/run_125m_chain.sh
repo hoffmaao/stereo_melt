@@ -18,7 +18,7 @@
 # build_stack already running at launch (PID 15107), and re-runs build itself
 # if that output never lands. Stages 2-3 abort the chain on failure.
 set -u
-cd /wd2/projects/stereo_melt || exit 2
+cd /wd2/projects/stereo_melt/examples || exit 2
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGDIR=pig/logs
 STAMP=2026_06_29

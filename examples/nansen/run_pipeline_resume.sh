@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 export PYTHONUNBUFFERED=1

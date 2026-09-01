@@ -27,6 +27,7 @@ import numpy as np
 import xarray as xr
 
 ROOT = Path("/wd2/projects/stereo_melt")
+EXAMPLES = ROOT / "examples"
 BASINS = ["beardmore", "nansen", "pig", "dotson_crosson", "mcmurdo"]
 
 
@@ -141,7 +142,7 @@ def main():
     else:
         files = []
         for b in BASINS:
-            d = ROOT / b / "processed"
+            d = EXAMPLES / b / "processed"
             if d.is_dir():
                 files += d.glob("*_stack_*.nc")
     files = [f for f in sorted(set(files)) if not f.name.endswith(".recompress.tmp")]

@@ -13,7 +13,7 @@
 # pig_melt_250m_ctempo_*), so the cs2atmlvis baseline artifacts from the
 # 06-02→06-07 run stay untouched for the A/B.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 ALIGN_PID=3933
 ALIGN_LOG=pig/logs/align_ctempoatmlvis_preIS2.log

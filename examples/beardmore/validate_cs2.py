@@ -95,8 +95,8 @@ def main() -> None:
         retracker_quality_min=args.retracker_quality_min,
     )
 
-    results_dir = config.MAIN_DIR / "beardmore" / "results"
-    figures_dir = config.MAIN_DIR / "beardmore" / "figures"
+    results_dir = config.RESULTS_DIR
+    figures_dir = config.FIGURES_DIR
     results_dir.mkdir(parents=True, exist_ok=True)
     figures_dir.mkdir(parents=True, exist_ok=True)
 

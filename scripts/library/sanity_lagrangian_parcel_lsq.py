@@ -19,7 +19,7 @@ Cases:
 
 Run:
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
-        stereo_melt/scripts/sanity_lagrangian_parcel_lsq.py
+        scripts/library/sanity_lagrangian_parcel_lsq.py
 """
 from __future__ import annotations
 

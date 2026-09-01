@@ -7,7 +7,7 @@
 # production path solver, and A/B vs the P3 baseline in BOTH frames
 # (path-integrated Lagrangian + Eulerian).
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGS=beardmore_shelf/logs
 GATE_LOG=$LOGS/glas_chain_stageB.log

@@ -15,7 +15,7 @@ Methods (left to right in the figure):
 Closed-form per-(t, k) Tikhonov variants (FFT/DCT) are intentionally
 excluded: their full-coverage assumption is dramatically violated on
 Beardmore's gappy mixed CS2+IS2 stack and they over-smooth most of the
-real signal — see ``stereo_melt/tests/diagnose_linear_inverse_coverage.py``.
+real signal — see ``tests/diagnose_linear_inverse_coverage.py``.
 Per-pixel-OLS (methods 3, 4) and the coverage-mask CG (method 5) handle
 the gappy input correctly.
 

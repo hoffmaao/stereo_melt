@@ -186,7 +186,7 @@ def linear_inverse_dhdt_lagrangian_melt_rate(
     The closed-form per-wavenumber Tikhonov inverse fed the entire
     ``h_anom`` stack to an FFT/DCT and treated NaN-filled cells as
     legitimate "anomaly = 0" observations — see
-    ``stereo_melt/tests/diagnose_linear_inverse_coverage.py`` for the
+    ``tests/diagnose_linear_inverse_coverage.py`` for the
     failure mode. Real REMA stacks have 23-47% per-pixel coverage on
     Beardmore/Nansen/PIG, so the closed form's full-coverage assumption
     is dramatically violated and the recovered ``m`` is dominated by

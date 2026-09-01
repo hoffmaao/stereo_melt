@@ -18,7 +18,7 @@
 # band already has ZERO <3-epoch cells at baseline).
 set -uo pipefail
 
-ROOT=/wd2/projects/stereo_melt
+ROOT=/wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 ALIGN_LOG="$ROOT/beardmore_shelf/logs/align_strips_preis2full.log"
 CTEMPO_DIR="$ROOT/beardmore_shelf/data/ASP_ctempoatm/asp_aligned"

@@ -12,15 +12,17 @@ CATS2008.zip
 # ---------------------------------------------------------------------------
 results/
 processed/
-strips/*_strips.csv       # regenerable from pdt.search
+# regenerable from pdt.search
+strips/*_strips.csv
 plots/
 correction_plots/
 velocity_plots/
 *_aligned/
 ASP_aligned/
-tests/figures/            # demo / sanity-check outputs; regenerable
-stereo_melt/tests/figures/
-stereo_melt/tests/*.png   # gate/sanity plots written next to the scripts
+# demo / sanity-check outputs; regenerable
+tests/figures/
+# gate/sanity plots written next to the scripts
+tests/*.png
 beardmore/plots/
 beardmore/processed/
 beardmore/results/
@@ -167,9 +169,6 @@ env/
 *.pem
 *.key
 credentials.json
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Vendored reference repos (clones for reading only, not part of this package)

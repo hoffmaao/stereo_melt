@@ -13,7 +13,7 @@
 #   P3_TILT_FAILED / P3_MELT_FAILED / P3_RESCREEN_FAILED on error.
 # Pre-P3 baseline preserved as *.prep3bak alongside the originals.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 L=beardmore_shelf/logs
 # IS2-era production window = config defaults; do NOT set BEARDMORE_SHELF_SOURCES/START.

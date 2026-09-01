@@ -17,7 +17,7 @@ effective viscosity vary per geometry bin. This gate proves the seam:
   4. PLUMBING. ``variational_melt_inverse(eta_field=...)`` without ``n_bins``
      raises (the monolithic operator has no geometry to vary).
 
-Run: ``$PY stereo_melt/tests/gate_eta_field_operator.py``
+Run: ``$PY tests/gate_eta_field_operator.py``
 """
 from __future__ import annotations
 

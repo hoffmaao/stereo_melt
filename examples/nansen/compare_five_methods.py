@@ -16,7 +16,7 @@ Closed-form per-(t, k) Tikhonov variants (FFT/DCT) are intentionally
 excluded: their full-coverage assumption is dramatically violated on
 real REMA stacks (23-47% per-pixel coverage on Beardmore/Nansen/PIG)
 and they over-smooth most of the real signal — see
-``stereo_melt/tests/diagnose_linear_inverse_coverage.py``. Per-pixel-OLS
+``tests/diagnose_linear_inverse_coverage.py``. Per-pixel-OLS
 (methods 3, 4) and the coverage-mask CG (method 5) handle the gappy
 input correctly.
 

@@ -5,7 +5,7 @@
 # was approved (sentinel beardmore_shelf/data/ASP_glas/PILOT_APPROVED),
 # else stop after caching.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 FETCH_PID=${1:?usage: glas_chain_stageB.sh <fetch-python-pid>}
 SENTINEL=beardmore_shelf/data/ASP_glas/PILOT_APPROVED

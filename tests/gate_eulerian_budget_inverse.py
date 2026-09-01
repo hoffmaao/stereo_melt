@@ -17,7 +17,7 @@ inverse against the production path solver). This gates the EULERIAN twin:
 Run:
 
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
-        stereo_melt/tests/gate_eulerian_budget_inverse.py
+        tests/gate_eulerian_budget_inverse.py
 """
 from __future__ import annotations
 

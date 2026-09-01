@@ -30,7 +30,7 @@ Rungs:
 Run:
 
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
-        stereo_melt/tests/gate_tilt_smoothness.py
+        tests/gate_tilt_smoothness.py
 """
 from __future__ import annotations
 

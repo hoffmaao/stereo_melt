@@ -32,7 +32,7 @@ G5  the flux divergence belongs OUTSIDE the operator. On a synthetic built
     inside the operator does not.
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_budget_bridging_identity.py
+    $PY tests/gate_budget_bridging_identity.py
 """
 from __future__ import annotations
 

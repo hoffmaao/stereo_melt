@@ -18,7 +18,7 @@ acceleration pattern), punches random gaps + adds noise, and asserts that
 Run::
 
     /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python \
-        stereo_melt/tests/sanity_velocity_fusion.py
+        tests/sanity_velocity_fusion.py
 """
 
 import numpy as np

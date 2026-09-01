@@ -10,7 +10,7 @@ set -u
 trap '' HUP TERM
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-ROOT=/wd2/projects/stereo_melt
+ROOT=/wd2/projects/stereo_melt/examples
 LOGDIR="$ROOT/nansen/logs"
 mkdir -p "$LOGDIR"
 

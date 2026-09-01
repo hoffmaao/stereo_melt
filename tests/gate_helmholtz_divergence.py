@@ -20,7 +20,7 @@ H4  MASK. NaN cells in H come back NaN; interior values more than 3 fill
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_helmholtz_divergence.py
+    $PY tests/gate_helmholtz_divergence.py
 """
 from __future__ import annotations
 

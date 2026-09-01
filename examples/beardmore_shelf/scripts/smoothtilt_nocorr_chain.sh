@@ -5,7 +5,7 @@
 # compare vs the P3 baseline. Backs up the failed static-domain artifacts
 # first. Sentinels: SMOOTHTILT_NOCORR_DONE / SMOOTHTILT_NOCORR_FAILED_*.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOG=beardmore_shelf/logs
 P=beardmore_shelf/processed

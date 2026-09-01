@@ -817,7 +817,7 @@ def main(
     # plan_match_linear_inverse.md): the rebuilt linear-inverse framework that
     # matches the path solver by construction (same Shean pair band + two-level
     # median, per-pixel H_f·div(u)/SMB/firn correction, hydrostatic estimate +
-    # kernel channel correction). Gate: stereo_melt/tests/gate_match_lagrangian.py.
+    # kernel channel correction). Gate: tests/gate_match_lagrangian.py.
     # Opt-in (PIG_LININV_BUDGET=1); the path solver stays the headline product.
     lininv_budget = None
     if os.environ.get("PIG_LININV_BUDGET", "0").strip() == "1":

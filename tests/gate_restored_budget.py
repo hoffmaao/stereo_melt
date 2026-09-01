@@ -23,7 +23,7 @@ across-flow gain 0.51/corr 0.94 (Eulerian 0.07).
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_restored_budget.py
+    $PY tests/gate_restored_budget.py
 """
 from __future__ import annotations
 

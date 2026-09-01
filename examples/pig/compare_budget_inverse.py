@@ -5,7 +5,7 @@ The linear-inverse framework was rebuilt (2026-07-02,
 :func:`stereo_melt.melt.lagrangian_melt_rate` by construction: same Shean
 pair banding and two-level median, per-pixel budget correction
 (``H_f·∇·u``, ``ȧ``, ``u·∇d``), hydrostatic/non-hydrostatic split. The
-synthetic gate (``stereo_melt/tests/gate_match_lagrangian.py``) passes; this
+synthetic gate (``tests/gate_match_lagrangian.py``) passes; this
 script is the real-data leg.
 
 Loads the SAME inputs as ``pig.run_melt`` (250 m is2ctempo tilt-corrected

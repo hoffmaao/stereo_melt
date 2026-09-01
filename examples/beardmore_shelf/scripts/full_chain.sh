@@ -26,7 +26,7 @@ set -u
 trap '' HUP TERM
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-ROOT=/wd2/projects/stereo_melt
+ROOT=/wd2/projects/stereo_melt/examples
 LOGDIR="$ROOT/beardmore_shelf/logs"
 ASP_ROOT="$ROOT/beardmore_shelf/data/ASP"
 PARALLEL="${BEARDMORE_SHELF_ALIGN_PARALLEL:-8}"

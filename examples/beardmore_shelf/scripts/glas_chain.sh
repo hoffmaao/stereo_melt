@@ -8,7 +8,7 @@
 #     --control glas --asp-suffix _glas --start 2009-01-01 --end 2010-10-12 \
 #     --parallel 12 > beardmore_shelf/logs/align_glas_full.log 2>&1 &
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 FETCH_PID=${1:-17226}
 

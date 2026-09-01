@@ -13,7 +13,7 @@
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGDIR=/wd2/projects/stereo_melt/examples/beardmore/logs
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 
 # CPU-only (no GPU needed for ASP).
 unset CUDA_VISIBLE_DEVICES

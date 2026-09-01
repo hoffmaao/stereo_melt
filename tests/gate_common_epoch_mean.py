@@ -28,7 +28,7 @@ C5  SOLVER PLUMBING. ``eulerian_melt_rate`` and ``restored_budget_melt_rate``
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY stereo_melt/tests/gate_common_epoch_mean.py
+    $PY tests/gate_common_epoch_mean.py
 """
 from __future__ import annotations
 

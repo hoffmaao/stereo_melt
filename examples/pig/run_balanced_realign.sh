@@ -21,7 +21,7 @@
 # Usage:  setsid bash pig/run_balanced_realign.sh [PARALLEL] &   # default 8
 set -u
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-cd /wd2/projects/stereo_melt || exit 1
+cd /wd2/projects/stereo_melt/examples || exit 1
 LOGDIR=pig/logs
 P=${1:-8}   # parallel ASP workers
 

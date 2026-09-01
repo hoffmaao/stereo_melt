@@ -12,7 +12,7 @@
 #
 # Disconnect-safe: launched via setsid (PPID=1), python -u, per-run logs.
 set -u
-cd /wd2/projects/stereo_melt || exit 1
+cd /wd2/projects/stereo_melt/examples || exit 1
 export PROJ_DATA=/home/hoffmaao/miniconda3/envs/stereo_melt/share/proj
 export PIG_VELOCITY=fused
 export MELT_OUT_SUFFIX=_fusedvel

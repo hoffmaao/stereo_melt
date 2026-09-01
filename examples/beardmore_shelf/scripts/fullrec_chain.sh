@@ -8,7 +8,7 @@
 # Waits internally for the gap align+ingest chain sentinel.
 # Sentinels: FULLREC_CHAIN_DONE / FULLREC_CHAIN_FAILED_<stage>.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOGS=beardmore_shelf/logs
 GATE_LOG=$LOGS/gap_align_ingest_chain.log

@@ -7,7 +7,7 @@
 # manufactured-front-accretion artifact on the trans-only product.
 # Sentinels: SMOOTHTILT_BASE_DONE / SMOOTHTILT_BASE_FAILED_*.
 set -u
-cd /wd2/projects/stereo_melt
+cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
 LOG=beardmore_shelf/logs
 P=beardmore_shelf/processed
