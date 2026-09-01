@@ -5,7 +5,7 @@
 # Until GPU memory is fixed (or a no-adjoint-cache LinearOperator wrapper
 # lands), wider-AOI tilt_fit runs on CPU. 1 TB system RAM is plenty.
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-LOGDIR=/wd2/projects/stereo_melt/nansen/logs
+LOGDIR=/wd2/projects/stereo_melt/examples/nansen/logs
 cd /wd2/projects/stereo_melt
 unset CUDA_VISIBLE_DEVICES
 export STEREO_MELT_BACKEND=numpy

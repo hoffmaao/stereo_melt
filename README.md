@@ -5,7 +5,7 @@ Monorepo for DEM-based basal melt-rate work in Antarctica (Shean et al.
 basin-agnostic library plus one thin driver directory per ice-shelf
 application. The canonical stage sequence lives in
 [`PIPELINE.md`](./PIPELINE.md); per-shelf decisions live in each driver's
-`CLAUDE.md`.
+the local decision record (untracked).
 
 ## Layout
 

@@ -12,7 +12,7 @@
 # (load was 1.68 at launch). Tune down if contention shows up.
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-LOGDIR=/wd2/projects/stereo_melt/beardmore/logs
+LOGDIR=/wd2/projects/stereo_melt/examples/beardmore/logs
 cd /wd2/projects/stereo_melt
 
 # CPU-only (no GPU needed for ASP).

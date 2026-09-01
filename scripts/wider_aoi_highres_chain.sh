@@ -16,11 +16,11 @@
 SCRIPT_DIR=/wd2/projects/stereo_melt/scripts
 
 bash "$SCRIPT_DIR/nansen_tilt_run_cpu.sh" \
-    > /wd2/projects/stereo_melt/nansen/logs/wider_aoi_chain_cpu.log 2>&1 &
+    > /wd2/projects/stereo_melt/examples/nansen/logs/wider_aoi_chain_cpu.log 2>&1 &
 NANSEN_PID=$!
 
 bash "$SCRIPT_DIR/beardmore_tilt_run_cpu.sh" \
-    > /wd2/projects/stereo_melt/beardmore/logs/wider_aoi_chain_cpu.log 2>&1 &
+    > /wd2/projects/stereo_melt/examples/beardmore/logs/wider_aoi_chain_cpu.log 2>&1 &
 BEARDMORE_PID=$!
 
 echo "Nansen chain PID=$NANSEN_PID"

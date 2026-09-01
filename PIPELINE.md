@@ -2,7 +2,7 @@
 
 This document is the **canonical staged sequence** from raw REMA strips to a
 basal melt-rate map, following Shean et al. 2019 (TC, PIG). It is the single
-shared reference for every ice-shelf application: basin `CLAUDE.md` files
+shared reference for every ice-shelf application: basin decision records (local, untracked)
 carry only per-shelf deltas (AOI, window rationale, control eras, local
 caveats) and point here for the sequence itself.
 
@@ -32,7 +32,7 @@ grep -rE 'from (beardmore|beardmore_shelf|dotson_crosson|mcmurdo|nansen|pig|vena
 Each stage names the library entry point it calls. Basin scripts are thin
 wrappers (~40–60 lines: docstring + config paths) over shared, parameterized
 `run_*_main` drivers. Run stages as modules from the workspace root:
-`$PY -m <basin>.<stage>` with `PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python`.
+`cd examples && $PY -m <basin>.<stage>` with `PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python`.
 
 | # | Stage | Basin module | Library entry | What it does |
 |---|---|---|---|---|
@@ -104,7 +104,7 @@ python scripts/new_basin.py --name <basin> --shelf-title <Title> \
     --start YYYY-MM-DD --end YYYY-MM-DD [--aoi <shp>] [--tide-model CATS2008]
 ```
 
-This stamps `<basin>/` — config + every stage wrapper + a CLAUDE.md — from
+This stamps `<basin>/` — config + every stage wrapper + a local decision record — from
 the canonical templates, resets `BAD_STRIPS`/`BAD_EPOCHS`, rewrites the
 window/AOI lines, and import-tests the result. **Caveat:** the acquisition
 stages (fetch/caches/align) are thin wrappers over shared library drivers,
@@ -121,7 +121,7 @@ freshest basin before trusting. Then:
    feature tracking works), control eras the window touches.
 3. Run stages 0→6 (control caches as the eras require), populate
    `BAD_STRIPS` from the QC output, re-run `tilt_fit`, run solvers (7a/7b).
-4. Write the basin `CLAUDE.md` as **deltas only** — identity, decision
+4. Write the basin decision record as **deltas only** — identity, decision
    record, local caveats; this file stays the sequence reference.
 
 The library functions don't need to change for a new basin. If one needs new
