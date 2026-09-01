@@ -12,7 +12,7 @@
 # and the linear inverse (run_stationary) are RETIRED as melt products; the
 # old combined run_melt bundles an out-of-date Lagrangian config
 # (seed_stride=2, mean aggregator) plus the retired linear-inverse call, so it
-# is NOT in this chain. Use `cd examples && python -m beardmore_shelf.run_melt`
+# is NOT in this chain. Use `(cd examples && python -m beardmore_shelf.run_melt)`
 # by hand only for an Eulerian cross-check.
 #
 # Stages (each logs separately; aborts on first non-zero exit):

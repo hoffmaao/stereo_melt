@@ -4,7 +4,7 @@
 # find_bad_epochs output into config.BAD_STRIPS, then run run_solvers.sh).
 #
 # Prerequisites (run once, before this chain):
-#   cd examples && python -m venable.cache_climate          # ERA5 MSL pressure (post-coreg IBE)
+#   (cd examples && python -m venable.cache_climate)   # ERA5 MSL pressure (post-coreg IBE)
 #   python scripts/compute_aoi.py venable     # finalize the optimal v15 AOI
 #                                             # (strip-aware; run after a seed fetch)
 #

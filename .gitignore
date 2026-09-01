@@ -30,6 +30,12 @@ tests/figures/
 tests/*.png
 
 # ---------------------------------------------------------------------------
+# Per-basin local decision records, stamped by scripts/new_basin.py.
+# Unanchored so it covers examples/<basin>/NOTES.md and any future location.
+# ---------------------------------------------------------------------------
+NOTES.md
+
+# ---------------------------------------------------------------------------
 # Literature / papers / proposals — local-only reference material
 # ---------------------------------------------------------------------------
 literature/

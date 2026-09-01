@@ -4,9 +4,9 @@
 #   per-strip control CSVs) → pilot align of 3 strips with GLAS control.
 # STOPS after the pilot — inspect pc_align convergence + residuals before
 # launching the full ~555-strip align:
-#   cd examples && nohup setsid python -u -m beardmore_shelf.align_strips \
+#   (cd examples && nohup setsid python -u -m beardmore_shelf.align_strips \
 #     --control glas --asp-suffix _glas --start 2009-01-01 --end 2010-10-12 \
-#     --parallel 12 > beardmore_shelf/logs/align_glas_full.log 2>&1 &
+#     --parallel 12 > beardmore_shelf/logs/align_glas_full.log 2>&1 &)
 set -u
 cd /wd2/projects/stereo_melt/examples
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
