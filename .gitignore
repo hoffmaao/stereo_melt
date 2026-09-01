@@ -42,7 +42,7 @@ literature/
 figures/
 */figures/
 # bundled figure exports: regenerable, and the PIG one is over GitHub's limit
-*/figures.zip
+**/figures.zip
 scripts/deletable_strips.txt
 scripts.tar.gz
 
@@ -179,4 +179,4 @@ vendor/
 # ---------------------------------------------------------------------------
 # elmer_synth synthetic-experiment run outputs (large; regenerable)
 # ---------------------------------------------------------------------------
-elmer_synth/runs/
+examples/elmer_synth/runs/
