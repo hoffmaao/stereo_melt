@@ -425,7 +425,8 @@ def main():
     p.add_argument("--measures", help=f"MEaSUREs phase-map .nc (default {MEASURES})")
     p.add_argument("--bedmachine", help=f"BedMachine .nc (default {BEDMACHINE})")
     p.add_argument("--strips-dir", help=f"REMA strips dir (default {STRIPS_DIR})")
-    p.add_argument("--figures-dir", help="output dir for the diagnostic png (default <root>/figures)")
+    p.add_argument("--figures-dir",
+                   help="output dir for the diagnostic png (default: figures/ in this checkout)")
     p.add_argument("--v-thresh", type=float, help=f"slow-ice speed threshold m/yr (default {V_THRESH})")
     p.add_argument("--buffer-km", type=float, help=f"search buffer km (default {BUFFER_KM})")
     p.add_argument("--target-base", type=float, help=f"scale() intercept (default {TARGET_BASE})")

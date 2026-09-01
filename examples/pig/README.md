@@ -11,9 +11,11 @@ velocity, budget linear-inverse diagnostics). The canonical stage sequence is
 in the local decision record (untracked); `config.py` is the single source of study
 context (window, AOI, grid, paths).
 
-Long stages run detached, e.g.:
+Long stages run detached, from `examples/` — the directory the basin
+packages are importable from:
 
 ```bash
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
+cd examples
 nohup $PY -u -m pig.align_strips >> pig/logs/align_strips.log 2>&1 &
 ```
