@@ -21,8 +21,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+sys.path.insert(0, f"{_REPO}/examples")
+sys.path.insert(0, f"{_REPO}/src")
 
 from stereo_melt import envsetup  # noqa: F401,E402
 
@@ -303,7 +304,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, ta
     each region's resolution limit against its OWN 3H.
     """
     import sys as _sys
-    _sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
+    _sys.path.insert(0, f"{_REPO}/examples")
     from pig.run_melt import load_stack  # noqa: E402
     from stereo_melt.freeboard import freeboard_to_thickness  # noqa: E402
 

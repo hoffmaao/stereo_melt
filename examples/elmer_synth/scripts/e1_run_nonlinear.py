@@ -12,7 +12,8 @@ import smb  # noqa: E402
 from main import solve  # noqa: E402
 from params import H, L, nt, t_f, t_r  # noqa: E402
 
-OUT = "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1_nonlinear_result.npz"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+OUT = f"{_REPO}/examples/elmer_synth/results/e1_nonlinear_result.npz"
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 
 m0 = 5.0 / 3.154e7  # 5 m/yr peak basal melt, in m/s

@@ -14,6 +14,7 @@ import rasterio
 from shapely.geometry import shape
 
 
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
 def main() -> None:
     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
 
@@ -38,7 +39,7 @@ def main() -> None:
             ax.plot([], [], color=color, linewidth=3, label=f"AOI: {label}")
 
     strips = sorted(glob(
-        "/wd2/projects/stereo_melt/examples/pig/data/ASP/asp_aligned/*-trans_reference-DEM.tif"
+        f"{_REPO}/examples/pig/data/ASP/asp_aligned/*-trans_reference-DEM.tif"
     ))
     for p in strips:
         with rasterio.open(p) as src:
@@ -64,7 +65,7 @@ def main() -> None:
     ax.axhline(0, color="gray", linewidth=0.5, alpha=0.3)
     ax.axvline(0, color="gray", linewidth=0.5, alpha=0.3)
 
-    out = Path("/wd2/projects/stereo_melt/examples/pig/figures/strips_on_continent.png")
+    out = Path(f"{_REPO}/examples/pig/figures/strips_on_continent.png")
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(out, dpi=130, bbox_inches="tight")

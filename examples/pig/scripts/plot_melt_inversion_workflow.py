@@ -24,7 +24,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
-OUT = "/wd2/projects/stereo_melt/examples/pig/figures/melt_inversion_workflow.png"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+OUT = f"{_REPO}/examples/pig/figures/melt_inversion_workflow.png"
 
 # dataviz-skill reference palette, categorical slots in fixed order.
 BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"

@@ -39,10 +39,11 @@ import xarray as xr
 from beardmore import config
 
 
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
 VARIANTS = {
-    "IS2":     "/wd2/projects/stereo_melt/examples/beardmore/processed/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
-    "CS2":     "/wd2/projects/stereo_melt/examples/beardmore/processed/cs2/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
-    "IS2+CS2": "/wd2/projects/stereo_melt/examples/beardmore/processed/is2cs2/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
+    "IS2":     f"{_REPO}/examples/beardmore/processed/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
+    "CS2":     f"{_REPO}/examples/beardmore/processed/cs2/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
+    "IS2+CS2": f"{_REPO}/examples/beardmore/processed/is2cs2/beardmore_tilt_params_2019-01-01_2023-03-01.nc",
 }
 
 COLORS = {"IS2": "tab:blue", "CS2": "tab:red", "IS2+CS2": "tab:green"}

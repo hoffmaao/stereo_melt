@@ -19,7 +19,7 @@ import sys
 import numpy as np
 import xarray as xr
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from stereo_melt.backend import asarray, to_numpy, xp  # noqa: E402
 from stereo_melt.dynamics import (  # noqa: E402
     bridging_inverse,

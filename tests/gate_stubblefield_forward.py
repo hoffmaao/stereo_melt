@@ -20,7 +20,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 # Import the library (pulls in pandas via xarray) BEFORE torch: torch loads a
 # newer libstdc++ that shadows the system one pandas' C-extensions link against.
 from stereo_melt.dynamics.stubblefield_forward import (  # noqa: E402

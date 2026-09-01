@@ -172,6 +172,7 @@ fig.suptitle(
     "(stationary +5 m/yr Gaussian blob; solid=strip masks, dashed=uniform random)",
     fontsize=11,
 )
-out = "/wd2/projects/stereo_melt/tests/diagnose_coverage_sweep.png"
+out = str(__import__("pathlib").Path(__file__).resolve().parent
+          / "diagnose_coverage_sweep.png")
 fig.savefig(out, dpi=130, bbox_inches="tight")
 print(f"\nsaved: {out}")

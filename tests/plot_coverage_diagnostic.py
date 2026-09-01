@@ -100,6 +100,7 @@ fig.suptitle(
     "(synthetic Gaussian +5 m/yr melt blob, 5 epochs, ~70% per-pixel coverage)",
     fontsize=12,
 )
-out = "/wd2/projects/stereo_melt/tests/diagnose_linear_inverse_coverage.png"
+out = str(__import__("pathlib").Path(__file__).resolve().parent
+          / "diagnose_linear_inverse_coverage.png")
 fig.savefig(out, dpi=130, bbox_inches="tight")
 print(f"saved: {out}")

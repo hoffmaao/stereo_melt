@@ -3,7 +3,8 @@ one card per stage with the real QC/production figure embedded (base64)."""
 import base64
 import os
 
-FIG = "/wd2/projects/stereo_melt/examples/pig/figures"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+FIG = f"{_REPO}/examples/pig/figures"
 OUT = os.path.join(FIG, "pig_pipeline_chart.html")
 
 

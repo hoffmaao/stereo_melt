@@ -16,8 +16,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
-R = "/wd2/projects/stereo_melt/examples/pig/results/"
-OUT = "/wd2/projects/stereo_melt/examples/pig/figures/melt_lagrangian_250m_native.png"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+R = f"{_REPO}/examples/pig/results/"
+OUT = f"{_REPO}/examples/pig/figures/melt_lagrangian_250m_native.png"
 V = "melt_rate_lagrangian"
 
 panels = [

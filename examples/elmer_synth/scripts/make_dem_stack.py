@@ -28,18 +28,19 @@ import pandas as pd
 import xarray as xr
 from scipy.ndimage import uniform_filter
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples/elmer_synth")
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples/elmer_synth/scripts")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+sys.path.insert(0, f"{_REPO}/examples/elmer_synth")
+sys.path.insert(0, f"{_REPO}/examples/elmer_synth/scripts")
+sys.path.insert(0, f"{_REPO}/src")
 from score_e2a import load_run  # noqa: E402
 from stereo_melt.stack import save_stack  # noqa: E402
 
-TEMPLATE = ("/wd2/projects/stereo_melt/examples/beardmore_shelf/processed/"
+TEMPLATE = (f"{_REPO}/examples/beardmore_shelf/processed/"
             "beardmore_shelf_stack_fullrec_2009-01-01_2024-01-10.nc")
-COUNTS = ("/wd2/projects/stereo_melt/examples/beardmore_shelf/processed/"
+COUNTS = (f"{_REPO}/examples/beardmore_shelf/processed/"
           "beardmore_shelf_epoch_count_125m_2012-11-18_2024-01-10.nc")
-OUT_DIR = Path("/wd2/projects/stereo_melt/examples/elmer_synth/data/processed")
-RES_DIR = Path("/wd2/projects/stereo_melt/examples/elmer_synth/results")
+OUT_DIR = Path(f"{_REPO}/examples/elmer_synth/data/processed")
+RES_DIR = Path(f"{_REPO}/examples/elmer_synth/results")
 CROP_NX, CROP_NY = 192, 96  # 24 x 12 km at the template's 125 m posting
 
 # per-epoch vertical prior by control class (mirrors build_per_epoch_ez;

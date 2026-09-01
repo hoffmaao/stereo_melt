@@ -14,9 +14,10 @@ import sys
 import numpy as np
 from scipy.signal import convolve
 
-RESULT = "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1_nonlinear_result.npz"
-OUT_PNG = "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1_score_vs_linear.png"
-OUT_JSON = "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1_score_vs_linear.json"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+RESULT = f"{_REPO}/examples/elmer_synth/results/e1_nonlinear_result.npz"
+OUT_PNG = f"{_REPO}/examples/elmer_synth/results/e1_score_vs_linear.png"
+OUT_JSON = f"{_REPO}/examples/elmer_synth/results/e1_score_vs_linear.json"
 LINMOD = "/wd2/projects/stereo_melt/vendor/linear-shelf-melt/linear-model"
 
 d = np.load(RESULT)

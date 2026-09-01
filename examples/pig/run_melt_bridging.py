@@ -35,8 +35,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+sys.path.insert(0, f"{_REPO}/examples")
+sys.path.insert(0, f"{_REPO}/src")
 
 from stereo_melt import envsetup  # noqa: F401,E402  (PROJ fix first)
 
@@ -63,7 +64,7 @@ from stereo_melt.kinematics import HelmholtzDivergence  # noqa: E402
 from stereo_melt.melt import eulerian_melt_rate  # noqa: E402
 
 RHO_I = 918.0  # stereo_melt.constants
-ETA_NPZ = Path("/wd2/projects/stereo_melt/examples/pig/processed/"
+ETA_NPZ = Path(f"{_REPO}/examples/pig/processed/"
                "pig_eta_field_250m_dual_20260730_t0era5.npz")
 ML2_LAM = 3.2e-2   # the ML-II pick on the survey-realistic rungs
 

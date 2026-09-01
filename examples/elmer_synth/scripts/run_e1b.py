@@ -7,7 +7,8 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples/elmer_synth/flowline")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+sys.path.insert(0, f"{_REPO}/examples/elmer_synth/flowline")
 
 import smb  # noqa: E402
 from main import solve  # noqa: E402
@@ -15,7 +16,7 @@ from params import H, L, m0, nt, stdev, t_f, t_r, u0, xc, yr  # noqa: E402
 
 OUT = os.environ.get(
     "E1B_OUT",
-    "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1b_throughflow_result.npz")
+    f"{_REPO}/examples/elmer_synth/results/e1b_throughflow_result.npz")
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 
 alpha = u0 * t_r / H

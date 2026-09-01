@@ -16,8 +16,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 
-BASE = "/wd2/projects/stereo_melt/examples/pig/results/"
-OUT = "/wd2/projects/stereo_melt/examples/pig/figures/melt_distributed_1km_is2ctempo.png"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+BASE = f"{_REPO}/examples/pig/results/"
+OUT = f"{_REPO}/examples/pig/figures/melt_distributed_1km_is2ctempo.png"
 F = 4  # 250 m -> 1 km
 
 def block_median(a, f=F):

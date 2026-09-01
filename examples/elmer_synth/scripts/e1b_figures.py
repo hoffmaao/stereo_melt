@@ -11,8 +11,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
-R = "/wd2/projects/stereo_melt/examples/elmer_synth/results/"
-FIG = "/wd2/projects/stereo_melt/examples/elmer_synth/figures/"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+R = f"{_REPO}/examples/elmer_synth/results/"
+FIG = f"{_REPO}/examples/elmer_synth/figures/"
 os.makedirs(FIG, exist_ok=True)
 
 # palette (dataviz reference, light surface)

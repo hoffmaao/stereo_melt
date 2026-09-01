@@ -24,8 +24,9 @@ from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 
 TAG = sys.argv[1] if len(sys.argv) > 1 else "is2ctempo"
 RES = "250m"
-RESULTS = Path("/wd2/projects/stereo_melt/examples/pig/results")
-FIGDIR = Path("/wd2/projects/stereo_melt/examples/pig/figures")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+RESULTS = Path(f"{_REPO}/examples/pig/results")
+FIGDIR = Path(f"{_REPO}/examples/pig/figures")
 CLIM = 20.0  # m ice/yr; channels saturate but shelf-wide gradient stays visible
 
 WINDOWS = [

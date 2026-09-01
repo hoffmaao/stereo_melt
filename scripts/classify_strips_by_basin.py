@@ -34,6 +34,7 @@ AOIS = [
 ]
 
 
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[1]
 def main():
     # 1. List on-disk strips and sizes.
     print("Inventorying shared strips dir...")
@@ -152,7 +153,7 @@ def main():
     print(f"  TOTAL freeable:                     {(main_size+sib_size)/1e9:7.1f} GB")
 
     # 8. Write deletable list for review.
-    out = Path("/wd2/projects/stereo_melt/scripts/deletable_strips.txt")
+    out = Path(f"{_REPO}/scripts/deletable_strips.txt")
     with out.open("w") as f:
         for did in sorted(deletable):
             f.write(f"{did}\n")

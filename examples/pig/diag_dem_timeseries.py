@@ -17,7 +17,8 @@ import pandas as pd
 from pig.run_melt import load_stack, load_floating_mask
 from stereo_melt.kinematics import dh_dt, SECONDS_PER_YEAR
 
-OUT = "/wd2/projects/stereo_melt/examples/pig/figures/diag_dem_timeseries.png"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+OUT = f"{_REPO}/examples/pig/figures/diag_dem_timeseries.png"
 
 print("loading stack...", flush=True)
 stack = load_stack(stack_prefix="pig_stack_250m_is2ctempo")

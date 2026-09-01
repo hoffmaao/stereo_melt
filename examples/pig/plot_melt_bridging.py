@@ -23,8 +23,8 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import matplotlib
 

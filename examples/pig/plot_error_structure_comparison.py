@@ -26,8 +26,9 @@ import json
 import os
 import sys
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+sys.path.insert(0, f"{_REPO}/examples")
+sys.path.insert(0, f"{_REPO}/src")
 
 from stereo_melt import envsetup  # noqa: F401,E402
 
@@ -44,7 +45,7 @@ from pig.diagnose_stack_error_structure import (  # noqa: E402
 
 J_REAL = config.PROCESSED_DIR / "error_structure_real.json"
 J_TWIN = config.PROCESSED_DIR / "error_structure_twin.json"
-TWIN_NC = ("/wd2/projects/stereo_melt/examples/elmer_synth/data/processed/"
+TWIN_NC = (f"{_REPO}/examples/elmer_synth/data/processed/"
            "e2a_stack_200m_multixy_pig_tilt_corrected.nc")
 OUT_PNG = config.FIGURES_DIR / "error_structure_real_vs_twin.png"
 METRICS = [("offset_m", "strip offset (m)", "symlog"),

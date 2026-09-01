@@ -27,9 +27,10 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples/elmer_synth")
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples/elmer_synth/scripts")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+sys.path.insert(0, f"{_REPO}/examples/elmer_synth")
+sys.path.insert(0, f"{_REPO}/examples/elmer_synth/scripts")
+sys.path.insert(0, f"{_REPO}/src")
 # Library first (pulls in pandas via xarray), then torch: torch loads a newer
 # libstdc++ that shadows the system one pandas' C-extensions link against.
 from stereo_melt.dynamics.stubblefield_forward import (  # noqa: E402

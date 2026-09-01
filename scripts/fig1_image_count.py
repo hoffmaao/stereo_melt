@@ -22,7 +22,7 @@ from stereo_melt.coregister.tilt import build_static_area_polygon_mask
 BEDMACHINE_NC = Path("/wd2/projects/stereo_melt/data/bedmachine/BedMachineAntarctica-v3.nc")
 
 ROOT = Path("/wd2/projects/stereo_melt")
-EXAMPLES = ROOT / "examples"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 OUT_DIR = ROOT / "figures"
 
 BASINS = [

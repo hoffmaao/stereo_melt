@@ -40,7 +40,7 @@ import rasterio
 from shapely.geometry import box, shape
 
 ROOT = Path("/wd2/projects/stereo_melt")
-EXAMPLES = ROOT / "examples"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 OUT = EXAMPLES / "beardmore" / "figures" / "fig4_alignment_diagnostics.png"
 
 AOI_SHP = ROOT / "data/shapefiles/beardmore_stack_extent.shp"

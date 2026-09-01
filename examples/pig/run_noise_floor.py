@@ -50,8 +50,9 @@ import os
 import sys
 import time
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+sys.path.insert(0, f"{_REPO}/examples")
+sys.path.insert(0, f"{_REPO}/src")
 
 os.environ.setdefault("PIG_VELOCITY", "fused")
 

@@ -19,8 +19,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-RESULTS = "/wd2/projects/stereo_melt/examples/pig/results"
-OUT = "/wd2/projects/stereo_melt/examples/pig/figures/melt_calving_windows_250m_is2ctempo.png"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+RESULTS = f"{_REPO}/examples/pig/results"
+OUT = f"{_REPO}/examples/pig/figures/melt_calving_windows_250m_is2ctempo.png"
 ACELL = 0.0625  # km^2 per 250 m cell
 
 WINDOWS = [

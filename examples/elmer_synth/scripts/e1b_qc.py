@@ -5,8 +5,9 @@ import sys
 
 import numpy as np
 
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
 PATH = sys.argv[1] if len(sys.argv) > 1 else (
-    "/wd2/projects/stereo_melt/examples/elmer_synth/results/e1b_throughflow_result.npz")
+    f"{_REPO}/examples/elmer_synth/results/e1b_throughflow_result.npz")
 d = np.load(PATH)
 h, s, x, t = d["h"], d["s"], d["x"], d["t"]
 u_top, u_bot = d["u_top"], d["u_bot"]

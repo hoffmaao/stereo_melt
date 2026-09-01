@@ -3,7 +3,8 @@ control at the final (steady) state: dH ramp/plateau, hydrostatic partition,
 advective smearing, and the pure-advection transit integral prediction."""
 import numpy as np
 
-R = "/wd2/projects/stereo_melt/examples/elmer_synth/results/"
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+R = f"{_REPO}/examples/elmer_synth/results/"
 dm = np.load(R + "e1b_throughflow_result.npz")
 dc = np.load(R + "e1b_throughflow_control_m0.npz")
 yr = 3.154e7

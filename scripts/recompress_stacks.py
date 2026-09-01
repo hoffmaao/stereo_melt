@@ -27,7 +27,7 @@ import numpy as np
 import xarray as xr
 
 ROOT = Path("/wd2/projects/stereo_melt")
-EXAMPLES = ROOT / "examples"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 BASINS = ["beardmore", "nansen", "pig", "dotson_crosson", "mcmurdo"]
 
 

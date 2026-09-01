@@ -23,8 +23,9 @@ import matplotlib.pyplot as plt
 
 from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
 
-RESULTS = Path("/wd2/projects/stereo_melt/examples/pig/results")
-FIG = Path("/wd2/projects/stereo_melt/examples/pig/figures")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
+RESULTS = Path(f"{_REPO}/examples/pig/results")
+FIG = Path(f"{_REPO}/examples/pig/figures")
 EUL, LAG = "melt_rate_eulerian", "melt_rate_lagrangian"
 
 
