@@ -12,12 +12,18 @@ CATS2008.zip
 #
 # strips/*_strips.csv, tests/figures/ and tests/*.png below carried trailing
 # `# ...` comments, which git treats as part of the pattern rather than as a
-# comment — all three matched nothing. The comments now sit on their own lines,
-# deliberately activating the rules.
+# comment, so none of the three matched anything. The comments now sit on their
+# own lines; that activated two of them — tests/figures/ (redundant with the
+# */figures/ rule further down) and tests/*.png, which is the one that changed
+# behaviour. strips/*_strips.csv is live but still matches nothing: the only
+# files in strips/ are beardmore_gz-2019-strips.csv and
+# rossevelt_island_-2019-strips.csv, which use a hyphen. Those two stay tracked
+# on purpose — small AOI inputs that keep a fresh clone self-contained — so the
+# rule is retained only for future underscore-named exports.
 # ---------------------------------------------------------------------------
 results/
 processed/
-# regenerable from pdt.search
+# regenerable from pdt.search; matches no current file (see above)
 strips/*_strips.csv
 plots/
 correction_plots/
