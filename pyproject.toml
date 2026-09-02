@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stereo_melt"
+version = "0.1.0"
+description = "Basal melt rate beneath Antarctic ice shelves from repeat stereo DEMs"
+readme = "README_library.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Andrew Hoffman" }]
+dependencies = [
+    # numba (via pdemtools) requires numpy<2.1; pipeline validated on 1.26.x.
+    # Do NOT let a stray `pip install pyshtools/astropy` bump this — it silently
+    # breaks the pdemtools import chain (numba _ensure_critical_deps). 2026-07-06.
+    "numpy>=1.26,<2.0",
+    "pandas",
+    "scipy",
+    "xarray",
+    "rioxarray",
+    "rasterio",
+    "geopandas",
+    "shapely",
+    "pyproj",
+    "matplotlib",
+    "pdemtools>=0.8",
+    "pyTMD",
+    "sliderule",
+    "cdsapi",
+    "h5py",
+    "netCDF4",
+    "boto3",
+    "contextily",
+    "pooch",
+    "requests",
+    "tqdm",
+    "pyyaml",
+    "torch",
+]
+
+[project.optional-dependencies]
+gpu = [
+    # GTX 1080 Ti + CUDA 11.2 driver on this host; use cupy-cuda11x.
+    "cupy-cuda11x",
+]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "ipykernel",
+    "jupyter",
+    "ruff",
+    "black",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]

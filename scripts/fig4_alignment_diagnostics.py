@@ -40,7 +40,8 @@ import rasterio
 from shapely.geometry import box, shape
 
 ROOT = Path("/wd2/projects/stereo_melt")
-OUT = ROOT / "beardmore" / "figures" / "fig4_alignment_diagnostics.png"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+OUT = EXAMPLES / "beardmore" / "figures" / "fig4_alignment_diagnostics.png"
 
 AOI_SHP = ROOT / "data/shapefiles/beardmore_stack_extent.shp"
 
@@ -195,6 +196,12 @@ def main() -> None:
             f"median (x,y,z)=({np.median(d['x_off']):+.2f}, {np.median(d['y_off']):+.2f}, {np.median(d['z_off']):+.2f}) m  "
             f"mean p50: pre={d['in_p50'].mean():.3f} m  post={d['out_p50'].mean():.3f} m"
         )
+
+    if not any(data[b["name"]]["x_off"].size for b in BASINS):
+        raise SystemExit(
+            "no aligned strips harvested from any population:\n"
+            + "\n".join(f"      {d}" for b in BASINS for d in b["dirs"])
+            + "\n      refusing to write an empty diagnostic figure.")
 
     fig = plt.figure(figsize=(16, 10))
     gs = fig.add_gridspec(2, 3, height_ratios=(1, 1.05), hspace=0.32, wspace=0.28)

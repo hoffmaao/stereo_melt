@@ -6,11 +6,11 @@
 # from their own file location, so they test the checked-out worktree.
 test:
   commands:
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_restored_budget.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_helmholtz_divergence.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_budget_bridging_local.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_strip_noise_model.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_powerlaw_layer.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_budget_bridging_identity.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python stereo_melt/tests/gate_common_epoch_mean.py
-    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python pig/test_noise_floor_reporting.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_restored_budget.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_helmholtz_divergence.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_budget_bridging_local.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_strip_noise_model.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_powerlaw_layer.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_budget_bridging_identity.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_common_epoch_mean.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python examples/pig/test_noise_floor_reporting.py

@@ -14,7 +14,7 @@ config:
 What it stamps (thin wrappers, ~40-70 lines each):
   __init__.py, config.py, fetch_strips.py, cache_climate.py,
   cache_icesat2.py, cache_cryotempo.py, cache_atm.py, cache_lvis.py,
-  cache_glas.py, align_strips.py, CLAUDE.md
+  cache_glas.py, align_strips.py, NOTES.md
 plus the phase-2 heavies copied verbatim-with-renames from the template
 basin (build_stack.py, tilt_fit.py, run_melt.py, run_pseudospectral.py,
 run_stationary.py, scripts/find_bad_epochs.py) — review those before
@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parent.parent
+EXAMPLES = WORKSPACE / "examples"
 
 # (template basin, file) → stamped file. Order matters only for the report.
 TEMPLATE_FILES: list[tuple[str, str]] = [
@@ -102,11 +103,11 @@ def _rewrite_config(text: str, args, upper: str) -> str:
     return text
 
 
-CLAUDE_MD = """# CLAUDE.md — {name}/
+NOTES_MD = """# NOTES.md — {name}/ (local decision record, untracked)
 
 The **{title}** application of the `stereo_melt` library, scaffolded by
-`scripts/new_basin.py`. Canonical stage sequence: [`../PIPELINE.md`](../PIPELINE.md)
-— run `$PY -m {name}.<stage>`; keep this file **deltas-only** (identity,
+`scripts/new_basin.py`. Canonical stage sequence: [`PIPELINE.md`](../../PIPELINE.md)
+— run `cd examples && $PY -m {name}.<stage>`; keep this file **deltas-only** (identity,
 decision record, genuinely local caveats — no generic command blocks).
 
 ## Decision record (fill in as decided)
@@ -155,8 +156,8 @@ def main() -> None:
                     help="AOI shapefile name under data/shapefiles/ "
                          "(default: <name>_stack_extent.shp)")
     ap.add_argument("--tide-model", default="CATS2008")
-    ap.add_argument("--dest", default=str(WORKSPACE),
-                    help="Workspace root to stamp into (default: repo root)")
+    ap.add_argument("--dest", default=str(EXAMPLES),
+                    help="Driver root to stamp into (default: <repo>/examples)")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite an existing basin dir")
     args = ap.parse_args()
@@ -182,7 +183,7 @@ def main() -> None:
 
     stamped, missing = [], []
     for template, rel in TEMPLATE_FILES:
-        src = WORKSPACE / template / rel
+        src = EXAMPLES / template / rel
         if not src.exists():
             missing.append(f"{template}/{rel}")
             continue
@@ -195,7 +196,7 @@ def main() -> None:
         out.write_text(text)
         stamped.append(rel)
 
-    (basin_dir / "CLAUDE.md").write_text(CLAUDE_MD.format(
+    (basin_dir / "NOTES.md").write_text(NOTES_MD.format(
         name=name, title=title, aoi=args.aoi, start=args.start,
         end=args.end, tide_model=args.tide_model))
 
@@ -208,24 +209,23 @@ def main() -> None:
             print(f"   {m}")
 
     # Import smoke test — catches renamed-attribute mismatches immediately.
-    if str(dest_root) == str(WORKSPACE):
-        import importlib
-        sys.path.insert(0, str(dest_root))
-        failures = []
-        for rel in ["config"] + [Path(r).stem for r in stamped if r != "config.py"
-                                 and "/" not in r]:
-            try:
-                importlib.import_module(f"{name}.{rel}")
-            except Exception as exc:
-                failures.append((rel, str(exc)))
-        if failures:
-            print("\n⚠  import failures to fix before first run:")
-            for rel, err in failures:
-                print(f"   {name}.{rel}: {err}")
-        else:
-            print("✅ all stamped modules import cleanly")
+    import importlib
+    sys.path.insert(0, str(dest_root))
+    failures = []
+    for rel in ["config"] + [Path(r).stem for r in stamped if r != "config.py"
+                             and "/" not in r]:
+        try:
+            importlib.import_module(f"{name}.{rel}")
+        except Exception as exc:
+            failures.append((rel, str(exc)))
+    if failures:
+        print("\n⚠  import failures to fix before first run:")
+        for rel, err in failures:
+            print(f"   {name}.{rel}: {err}")
+    else:
+        print("✅ all stamped modules import cleanly")
 
-    print(f"\nNext: see {basin_dir}/CLAUDE.md for the checklist "
+    print(f"\nNext: see {basin_dir}/NOTES.md for the checklist "
           f"(AOI file, MDT latitude rule, velocity source).")
 
 

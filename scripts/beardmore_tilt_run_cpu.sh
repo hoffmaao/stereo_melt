@@ -7,8 +7,8 @@
 # stack on disk was built before they all landed. Plan to re-run align_strips
 # -> build_stack -> tilt_fit -> run_melt once fetch_strips completes.
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-LOGDIR=/wd2/projects/stereo_melt/beardmore/logs
-cd /wd2/projects/stereo_melt
+LOGDIR=/wd2/projects/stereo_melt/examples/beardmore/logs
+cd /wd2/projects/stereo_melt/examples
 unset CUDA_VISIBLE_DEVICES
 export STEREO_MELT_BACKEND=numpy
 export OMP_NUM_THREADS=14

@@ -15,7 +15,7 @@ Writes the rectangle as ``<out>`` (ESRI shapefile) and a diagnostic figure
 
 Provide the shelf one of three ways:
 
-    # 1. config-driven: read inputs from <basin>.config  (PYTHONPATH = repo root)
+    # 1. config-driven: read inputs from <basin>.config  (found under examples/)
     python scripts/compute_aoi.py venable
 
     # 2. a named feature inside a multi-feature shapefile
@@ -55,6 +55,7 @@ from rasterio.transform import Affine
 
 # --- workspace defaults (overridable on the CLI) ---------------------------
 ROOT = Path("/wd2/projects/stereo_melt")
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 BEDMACHINE = ROOT / "data/bedmachine/BedMachineAntarctica-v3.nc"
 MEASURES = ROOT / "data/NSIDC-0754/1996.01.01/antarctic_ice_vel_phase_map_v01.nc"
 STRIPS_DIR = ROOT / "data/REMA/strips"
@@ -365,15 +366,18 @@ def load_shelf_geom(path, feature_name=None):
 
 def resolve_inputs(args):
     """Map CLI args to (shelf_geom, name, out_shp, figures_dir)."""
-    figures_dir = Path(args.figures_dir) if args.figures_dir else (ROOT / "figures")
+    figures_dir = (Path(args.figures_dir) if args.figures_dir
+                   else Path(__file__).resolve().parent.parent / "figures")
 
     if args.basin:
+        if str(EXAMPLES) not in sys.path:
+            sys.path.insert(0, str(EXAMPLES))
         try:
             config = importlib.import_module(f"{args.basin}.config")
         except ImportError as e:
             raise SystemExit(
                 f"--basin {args.basin}: cannot import {args.basin}.config ({e}). "
-                f"Run from the repo root with PYTHONPATH including it.")
+                f"Basin driver packages live under {EXAMPLES}.")
         name = getattr(config, "SHELF", args.basin)
         shape_dir = Path(config.SHAPE_DIR)
         shelf_shp = getattr(config, "SHELF_INPUT_SHP", None)
@@ -421,7 +425,8 @@ def main():
     p.add_argument("--measures", help=f"MEaSUREs phase-map .nc (default {MEASURES})")
     p.add_argument("--bedmachine", help=f"BedMachine .nc (default {BEDMACHINE})")
     p.add_argument("--strips-dir", help=f"REMA strips dir (default {STRIPS_DIR})")
-    p.add_argument("--figures-dir", help="output dir for the diagnostic png (default <root>/figures)")
+    p.add_argument("--figures-dir",
+                   help="output dir for the diagnostic png (default: figures/ in this checkout)")
     p.add_argument("--v-thresh", type=float, help=f"slow-ice speed threshold m/yr (default {V_THRESH})")
     p.add_argument("--buffer-km", type=float, help=f"search buffer km (default {BUFFER_KM})")
     p.add_argument("--target-base", type=float, help=f"scale() intercept (default {TARGET_BASE})")

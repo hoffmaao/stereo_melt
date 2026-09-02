@@ -9,21 +9,37 @@ CATS2008.zip
 
 # ---------------------------------------------------------------------------
 # Pipeline outputs
+#
+# strips/*_strips.csv, tests/figures/ and tests/*.png below carried trailing
+# `# ...` comments, which git treats as part of the pattern rather than as a
+# comment, so none of the three matched anything. The comments now sit on their
+# own lines; that activated two of them — tests/figures/ (redundant with the
+# */figures/ rule further down) and tests/*.png, which is the one that changed
+# behaviour. strips/*_strips.csv is live but still matches nothing: the only
+# files in strips/ are beardmore_gz-2019-strips.csv and
+# rossevelt_island_-2019-strips.csv, which use a hyphen. Those two stay tracked
+# on purpose — small AOI inputs that keep a fresh clone self-contained — so the
+# rule is retained only for future underscore-named exports.
 # ---------------------------------------------------------------------------
 results/
 processed/
-strips/*_strips.csv       # regenerable from pdt.search
+# regenerable from pdt.search; matches no current file (see above)
+strips/*_strips.csv
 plots/
 correction_plots/
 velocity_plots/
 *_aligned/
 ASP_aligned/
-tests/figures/            # demo / sanity-check outputs; regenerable
-stereo_melt/tests/figures/
-stereo_melt/tests/*.png   # gate/sanity plots written next to the scripts
-beardmore/plots/
-beardmore/processed/
-beardmore/results/
+# demo / sanity-check outputs; regenerable
+tests/figures/
+# gate/sanity plots written next to the scripts
+tests/*.png
+
+# ---------------------------------------------------------------------------
+# Per-basin local decision records, stamped by scripts/new_basin.py.
+# Unanchored so it covers examples/<basin>/NOTES.md and any future location.
+# ---------------------------------------------------------------------------
+NOTES.md
 
 # ---------------------------------------------------------------------------
 # Literature / papers / proposals — local-only reference material
@@ -42,7 +58,7 @@ literature/
 figures/
 */figures/
 # bundled figure exports: regenerable, and the PIG one is over GitHub's limit
-*/figures.zip
+**/figures.zip
 scripts/deletable_strips.txt
 scripts.tar.gz
 
@@ -169,11 +185,6 @@ env/
 credentials.json
 
 # ---------------------------------------------------------------------------
-# Claude Code local settings (if any land in repo)
-# ---------------------------------------------------------------------------
-.claude/
-
-# ---------------------------------------------------------------------------
 # Vendored reference repos (clones for reading only, not part of this package)
 # ---------------------------------------------------------------------------
 vendor/
@@ -181,4 +192,4 @@ vendor/
 # ---------------------------------------------------------------------------
 # elmer_synth synthetic-experiment run outputs (large; regenerable)
 # ---------------------------------------------------------------------------
-elmer_synth/runs/
+examples/elmer_synth/runs/

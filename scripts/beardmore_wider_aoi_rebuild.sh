@@ -13,8 +13,8 @@
 # hold the wider-AOI tilt LSQ.
 
 PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-LOGDIR=/wd2/projects/stereo_melt/beardmore/logs
-cd /wd2/projects/stereo_melt
+LOGDIR=/wd2/projects/stereo_melt/examples/beardmore/logs
+cd /wd2/projects/stereo_melt/examples
 
 unset CUDA_VISIBLE_DEVICES
 export STEREO_MELT_BACKEND=numpy

@@ -29,7 +29,7 @@ if os.path.isfile(os.path.join(_env_proj, "proj.db")):
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from stereo_melt.io.altimetry import read_control_h5, write_control_h5
 

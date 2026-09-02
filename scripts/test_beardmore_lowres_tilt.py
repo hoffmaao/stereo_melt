@@ -25,7 +25,8 @@ from stereo_melt.coregister.tilt import (
 )
 
 ROOT = Path("/wd2/projects/stereo_melt")
-STACK_NC = ROOT / "beardmore/processed/beardmore_stack_2013-01-01_2023-03-01.nc"
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+STACK_NC = EXAMPLES / "beardmore/processed/beardmore_stack_2013-01-01_2023-03-01.nc"
 BEDMACHINE = ROOT / "data/bedmachine/BedMachineAntarctica-v3.nc"
 
 
