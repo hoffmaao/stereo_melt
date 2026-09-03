@@ -42,6 +42,12 @@ import pandas as pd
 __all__ = [
     "parse_per_strip_quality",
     "aggregate_basin_quality",
+    "load_combined_reference",
+    "load_control_glob",
+    "sample_dem_at_points",
+    "fit_residual_plane",
+    "strip_residual_plane",
+    "residual_planes_for_strips",
 ]
 
 
@@ -169,3 +175,161 @@ def aggregate_basin_quality(
     if not dfs:
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Per-strip residual PLANE against independent control (2026-09-02)
+# ---------------------------------------------------------------------------
+# The Euclidean ``end_errors`` residual above is unsigned and its heights sit
+# in the pre-transform frame, so it cannot give the sign or the plane of what
+# is left after alignment. The functions below sample the ALIGNED DEM at the
+# control points pc_align was fed (``reference_files/combined_reference_*.csv``;
+# the twin's ``<control_dir>/<dem_id>_<source>.csv``) and fit a robust plane to
+# the SIGNED residual ``DEM - control``. Against the processing twin (173
+# strips) that per-strip plane recovers the true residual tilt at corr 0.93 (x)
+# / 0.75 (y), regression slope ~0.95, and the across-strip variance -- the
+# coloured-noise prior the melt inverse needs -- to 1.08x / 1.6x, where every
+# estimator built on the DEM stack alone is 2x-167x low or diverges. The
+# offset is NOT recoverable this way: control lives on the static apron, where
+# pc_align pins it, while the shelf carries datum-stage residual the control
+# never sees (twin: 0.07x). See dynamics.budget_bridging.strip_prior_from_residual_planes.
+
+_XYH_COLUMNS = ("easting", "northing", "h_mean")
+
+
+def _read_xyh_csv(path: Path) -> np.ndarray | None:
+    """``(n, 3)`` easting/northing/height from a control CSV; header optional."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, comment="#")
+    except (OSError, pd.errors.EmptyDataError):
+        return None
+    if df.empty:
+        return None
+    if all(c in df.columns for c in _XYH_COLUMNS):
+        arr = df.loc[:, list(_XYH_COLUMNS)].to_numpy(float)
+    else:  # headerless: first three numeric columns
+        df = pd.read_csv(path, comment="#", header=None)
+        arr = df.select_dtypes("number").iloc[:, :3].to_numpy(float)
+    arr = arr[np.isfinite(arr).all(1)]
+    return arr if arr.size else None
+
+
+def load_combined_reference(reference_dir: "Path | str", dem_id: str) -> np.ndarray | None:
+    """The control cloud pc_align was fed for ``dem_id`` (production layout).
+
+    ``<asp_root>/reference_files/combined_reference_<dem_id>.csv`` -- the
+    frame the ``-trans_reference-DEM.tif`` was moved INTO, so sampling the
+    aligned DEM at these points gives a signed residual with median ~0 (PIG
+    2018-10-25 strip: median +0.000 m, MAD 0.370 m vs pc_align's own p50 0.380).
+    """
+    return _read_xyh_csv(Path(reference_dir) / f"combined_reference_{dem_id}.csv")
+
+
+def load_control_glob(control_dir: "Path | str", dem_id: str,
+                      pattern: str = "{dem_id}_*.csv") -> np.ndarray | None:
+    """Concatenate every ``<control_dir>/<dem_id>_<source>.csv`` (twin layout)."""
+    parts = [_read_xyh_csv(p) for p in sorted(Path(control_dir).glob(pattern.format(dem_id=dem_id)))]
+    parts = [p for p in parts if p is not None]
+    return np.concatenate(parts) if parts else None
+
+
+def sample_dem_at_points(dem_path: "Path | str", easting: np.ndarray,
+                         northing: np.ndarray) -> np.ndarray:
+    """Aligned-DEM height at each point (NaN where nodata / outside), windowed read."""
+    import rasterio
+
+    with rasterio.open(dem_path) as src:
+        z = np.array([v[0] for v in src.sample(zip(easting, northing))], float)
+        if src.nodata is not None:
+            z[z == src.nodata] = np.nan
+    return z
+
+
+def fit_residual_plane(easting: np.ndarray, northing: np.ndarray, resid: np.ndarray, *,
+                       robust: bool = True, max_iter: int = 6, c_tukey: float = 4.685,
+                       min_points: int = 30) -> dict:
+    r"""Robust plane ``c + ax (x - xc) + ay (y - yc)`` through a signed residual.
+
+    Tukey-biweight IRLS on the MAD scale (the tilt fit's own weighting). The
+    standard errors are the WLS ones, ``sd^2 (A^T W A)^{-1}``, with ``sd`` the
+    robust residual scale -- they carry the control's own noise and its
+    geometry (a strip with control only along one edge has a large ``se_ay``),
+    which is what lets the population prior subtract estimator variance.
+    Returns NaNs (and ``n``) when fewer than ``min_points`` are usable.
+    """
+    e = np.asarray(easting, float)
+    n = np.asarray(northing, float)
+    r = np.asarray(resid, float)
+    ok = np.isfinite(e) & np.isfinite(n) & np.isfinite(r)
+    out = dict(offset=np.nan, ax=np.nan, ay=np.nan, se_offset=np.nan, se_ax=np.nan,
+               se_ay=np.nan, sd=np.nan, n=int(ok.sum()), xc=np.nan, yc=np.nan)
+    if ok.sum() < min_points:
+        return out
+    e, n, r = e[ok], n[ok], r[ok]
+    xc, yc = float(e.mean()), float(n.mean())
+    A = np.column_stack([np.ones_like(e), e - xc, n - yc])
+    w = np.ones_like(r)
+    for _ in range(max_iter if robust else 1):
+        sw = np.sqrt(w)
+        coef, *_ = np.linalg.lstsq(A * sw[:, None], r * sw, rcond=None)
+        res = r - A @ coef
+        mad = float(np.median(np.abs(res - np.median(res)))) + 1e-12
+        if not robust:
+            break
+        u = res / (c_tukey * 1.4826 * mad)
+        w = np.where(np.abs(u) < 1.0, (1.0 - u ** 2) ** 2, 0.0)
+        if w.sum() < min_points:  # degenerate reweighting: fall back to LSQ
+            w = np.ones_like(r)
+            break
+    sd = 1.4826 * mad
+    try:
+        cov = sd ** 2 * np.linalg.inv((A * w[:, None]).T @ A)
+        se = np.sqrt(np.clip(np.diag(cov), 0.0, None))
+    except np.linalg.LinAlgError:
+        se = np.full(3, np.nan)
+    out.update(offset=float(coef[0]), ax=float(coef[1]), ay=float(coef[2]),
+               se_offset=float(se[0]), se_ax=float(se[1]), se_ay=float(se[2]),
+               sd=float(sd), xc=xc, yc=yc)
+    return out
+
+
+def strip_residual_plane(aligned_dem_path: "Path | str", control_xyh: np.ndarray, *,
+                         max_points: int | None = 6000, seed: int = 0, **kw) -> dict:
+    """Signed ``aligned DEM - control`` plane for one strip (see fit_residual_plane).
+
+    ``max_points``: random subsample of the control before sampling the DEM.
+    A plane has three parameters; 6000 points leave the standard errors
+    within a few percent of the full cloud while the per-point raster read
+    (the whole cost on a 2 m strip with ~30k control points) drops 5x.
+    ``None`` uses every point.
+    """
+    xyh = np.asarray(control_xyh, float)
+    if max_points is not None and len(xyh) > max_points:
+        idx = np.random.default_rng(seed).choice(len(xyh), max_points, replace=False)
+        xyh = xyh[np.sort(idx)]
+    z = sample_dem_at_points(aligned_dem_path, xyh[:, 0], xyh[:, 1])
+    return fit_residual_plane(xyh[:, 0], xyh[:, 1], z - xyh[:, 2], **kw)
+
+
+def residual_planes_for_strips(items, *, log_every: int = 0, **kw) -> pd.DataFrame:
+    """One row per strip from ``(dem_id, aligned_dem_path, control_xyh)`` items.
+
+    ``control_xyh`` may be ``None`` (row of NaNs, ``n=0``) so a missing control
+    file is visible in the table rather than silently dropped.
+    """
+    rows = []
+    for i, (dem_id, dem_path, xyh) in enumerate(items):
+        if xyh is None or len(xyh) == 0:
+            row = dict(offset=np.nan, ax=np.nan, ay=np.nan, se_offset=np.nan, se_ax=np.nan,
+                       se_ay=np.nan, sd=np.nan, n=0, xc=np.nan, yc=np.nan)
+        else:
+            row = strip_residual_plane(dem_path, xyh, **kw)
+        row["dem_id"] = dem_id
+        rows.append(row)
+        if log_every and (i + 1) % log_every == 0:
+            print(f"    residual planes: {i + 1} strips", flush=True)
+    cols = ["dem_id", "offset", "ax", "ay", "se_offset", "se_ax", "se_ay", "sd", "n", "xc", "yc"]
+    return pd.DataFrame(rows, columns=cols)
