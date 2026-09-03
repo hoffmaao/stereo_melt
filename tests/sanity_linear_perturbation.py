@@ -100,21 +100,33 @@ print("  PASS: inflow mutes narrow-channel surface topography.")
 # ---- Stationary forward at large t should match the steady state ----
 from stereo_melt.dynamics import forward
 
+# This comparison is only well-posed on the DC-FREE part of the melt field.
+# The Stubblefield kernel zeros k=0 by construction -- the membrane response
+# to a spatially uniform melt is degenerate, so no steady state exists there
+# and `steady_state` drops the mode. `forward`, being a forward model, does
+# evolve it: a uniform melt really does thin the shelf. The two therefore
+# disagree by exactly the DC content of m, which is not a bug in either.
+# A Gaussian on a finite tile carries a large mean, and the WIDE channel
+# carries ~10x the mean of the narrow one (0.346 vs 0.035 in these units),
+# so comparing the raw fields reads as a 7.5% "error" that is purely k=0.
+# Mean-removed, the two agree to 1.000000 for both widths.
+m_wide_ac = m_wide - m_wide.mean()
+
 # Long-wavelength relaxation time scale t_e = 2 tr (1 + 1/delta) ≈ 19 tr
 # for delta ≈ 0.11, so a wide-channel steady state needs many t_e.
 t_many = tr * 200.0
 h_forward = forward(
-    m_wide,
+    m_wide_ac,
     H=H,
     eta_bar=eta_bar,
     stationary=True,
     times=np.array([t_many]),
     return_basal=False,
 )
-h_ss = steady_state(m_wide, H=H, eta_bar=eta_bar)
+h_ss = steady_state(m_wide_ac, H=H, eta_bar=eta_bar)
 ratio = float(h_forward.isel(time=0).values[center]) / float(h_ss.values[center])
-print(f"\nforward(t = 200 tr) / steady_state at wide-channel center = {ratio:.4f} (want ~1.0)")
+print(f"\nforward(t = 200 tr) / steady_state at wide-channel center = {ratio:.6f} (want ~1.0)")
 assert abs(ratio - 1.0) < 0.02, f"forward at large t should match steady_state, got ratio={ratio}"
-print("  PASS: forward(t -> infty) agrees with steady_state.")
+print("  PASS: forward(t -> infty) agrees with steady_state (DC-free part).")
 
 print("\nAll linear-perturbation sanity checks passed.")
