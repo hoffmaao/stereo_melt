@@ -15,6 +15,7 @@ Latitude (-75°S) is north of the DTU22 -79°S coverage limit, so geoid +
 MDT corrections both apply (unlike Beardmore which is geoid-only).
 """
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -219,7 +220,44 @@ BAD_EPOCHS: tuple[str, ...] = ()
 # 6 dates that were artifacts of the stale is2cs2 alignment (now end_p50 ≤ 0.6 m
 # under ctempo) and 3 already filtered upstream by the count/source cut (Shean
 # tocut_lowcount analog), with ZERO genuinely-bad strips re-admitted.
+# --- Tilt-plane priors for fit_tilt_stack (2026-09-02, control-residual calibration).
+# Measured on the 513-strip canon stack from the signed residual of each ALIGNED
+# DEM against the control pc_align was fed (robust across-strip scale, estimator
+# variance removed): tau_x = 1.31e-6, tau_y = 3.02e-6 m/m. The library defaults
+# (Shean PIG: Ex 2e-6, Ey = Ex/3 = 6.67e-7) have the anisotropy BACKWARDS on real
+# strips -- residual tilt is ~2.3x larger across-track than along -- and Ey was
+# 4.5x too tight. Truth-free, from independent altimetry (no plane<->trend
+# degeneracy); see results/pig_strip_residual_planes_250m_is2ctempo_sheltilt.csv.
+# Override per run with PIG_TILT_EX / PIG_TILT_EY (the canon is reproduced with
+# PIG_TILT_EX=2e-6 PIG_TILT_EY=6.6667e-7).
+TILT_EX: float = float(os.environ.get("PIG_TILT_EX", "1.31e-6"))
+TILT_EY: float = float(os.environ.get("PIG_TILT_EY", "3.02e-6"))
+
 BAD_STRIPS: tuple[str, ...] = (
+    # --- 2026-09-02: control-residual plane QC (alignment_quality.residual_planes_for_strips):
+    # signed aligned-DEM minus pc_align-control, robust plane fit; residual scatter sd > 5 m
+    # = alignment did not converge over a substantial part of the footprint. pc_align's own
+    # end_p50 MISSES most of these (partially broken strips pass a median screen; p84 does not),
+    # and the tilt fit did not absorb them (tilt_dz ~0.05 m; IRLS kept 18-87 % of their
+    # pixels), so their 1-207 m errors sat in the corrected stack. See
+    # results/pig_control_residual_alignment_failures.csv; the canon 84.6/89.6/90.4/93.3
+    # was built WITH these 15 in (tag is2ctempo_sheltilt); the re-run tags are
+    # is2ctempo_sheltilt_qc (this drop only) and is2ctempo_sheltilt_qcey (+ TILT_EX/EY).
+    "SETSM_s2s041_WV01_20200321_10200100941A8000_10200100950A7300_2m_lsf_seg3",  # sd=175m offset=-111m n=3496 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20210126_10300100B141D400_10300100B405E700_2m_lsf_seg3",  # sd=115m offset=+207m n=1061 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV03_20151030_10400100135FB800_1040010012AF0200_2m_lsf_seg2",  # sd=78.9m offset=+61.8m n=1294 [ctempoatmlvis]
+    "SETSM_s2s041_WV01_20151005_1020010046B3BC00_1020010044DAF500_2m_lsf_seg2",  # sd=68.3m offset=+87m n=2579 [ctempoatmlvis]
+    "SETSM_s2s041_WV01_20181231_102001007FA19D00_102001007F7A2400_2m_lsf_seg2",  # sd=19.9m offset=+1.57m n=1810 [is2ctempoatmlvis]
+    "SETSM_s2s041_W2W2_20111222_103001000F578C00_1030010010AD2800_2m_lsf_seg7",  # sd=13.7m offset=-0.463m n=2745 [ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200326_10300100A3CCAE00_10300100A2364400_2m_lsf_seg5",  # sd=13.4m offset=+1.02m n=2104 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20191103_103001009A0BE100_103001009DA09500_2m_lsf_seg2",  # sd=10.5m offset=+3.48m n=841 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200326_10300100A3CCAE00_10300100A2364400_2m_lsf_seg3",  # sd=9.86m offset=+0.479m n=4711 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200326_10300100A3CCAE00_10300100A2364400_2m_lsf_seg16",  # sd=9.05m offset=+0.787m n=2725 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200326_10300100A3CCAE00_10300100A2364400_2m_lsf_seg18",  # sd=8.98m offset=+2.73m n=4748 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200315_10300100A4071C00_10300100A4AD0500_2m_lsf_seg4",  # sd=6.21m offset=-0.7m n=806 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20230126_10300100E13EAF00_10300100E157EA00_2m_seg3",  # sd=6.12m offset=-0.148m n=3572 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20191103_103001009A0BE100_103001009DA09500_2m_lsf_seg4",  # sd=6.04m offset=+0.193m n=851 [is2ctempoatmlvis]
+    "SETSM_s2s041_WV02_20200326_10300100A3CCAE00_10300100A2364400_2m_lsf_seg17",  # sd=5.98m offset=+1.95m n=5193 [is2ctempoatmlvis]
     "SETSM_s2s041_W1W1_20201103_102001009E050D00_10200100A0606400_2m_lsf_seg3",  # raw_dev=+582m
     "SETSM_s2s041_W1W2_20201215_10200100A3CB1100_10300100B1A01E00_2m_lsf_seg1",  # end_p50=94.2m
     "SETSM_s2s041_W2W2_20111231_1030010010118200_1030010010BA0D00_2m_lsf_seg1",  # raw_dev=-77m

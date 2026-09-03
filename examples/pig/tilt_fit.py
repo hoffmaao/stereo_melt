@@ -296,11 +296,15 @@ def main(
     except Exception as exc:
         print(f"  P3 offset-only gate skipped: {exc}")
     print("Fitting per-epoch residual tilts (Shean 2019 / Smith ndinterp.py-style)...")
+    print(f"  tilt-plane priors: Ex={config.TILT_EX:.3g} Ey={config.TILT_EY:.3g} m/m "
+          "(config.TILT_EX/EY; control-residual calibration 2026-09-02)")
     params, stack_corr = fit_tilt_stack(
         stack,
         control_mask=control,
         observation_mask=obs_domain,
         min_width=10000,
+        Ex=config.TILT_EX,
+        Ey=config.TILT_EY,
         Ez=Ez_per_epoch,
         offset_only_epochs=offset_only,
     )
