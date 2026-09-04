@@ -408,9 +408,13 @@ def empirical_variogram(
     from -- what ``min_pairs`` gates on and what :func:`fit_variogram` weights
     by -- for every relationship between ``n_subsample``, ``n_draws`` and the
     cloud size. Draws overlap (completely, once ``n_subsample`` reaches the
-    cloud size), so pairs formed more than once are carried once;
-    ``n_pairs_pooled`` reports the pre-deduplication total, and its ratio to
-    ``counts`` is how much the draws repeated themselves.
+    cloud size), so pairs formed more than once are carried once.
+    ``n_pairs_pooled`` is what ``n_draws`` passes pool before deduplication,
+    and its ratio to ``counts`` is how much the draws repeat themselves. On an
+    EXHAUSTIVE subsample only one pass is actually run -- repeats provably add
+    no distinct pair -- and that total is scaled by ``n_draws`` rather than
+    counted, so ``n_pairs_pooled`` and ``n_draws_used`` describe the pooling
+    the parameters ask for, not work performed.
 
     Returns
     -------

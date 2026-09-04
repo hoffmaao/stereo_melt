@@ -349,9 +349,11 @@ def main() -> int:
           and np.allclose(one["gamma"], ten["gamma"], rtol=0, atol=0)
           and len(one["lags"]) == len(ten["lags"]),
           f"counts equal {np.array_equal(one['counts'], ten['counts'])}")
-    # All n_draws passes still RUN; deduplication is what makes them harmless,
-    # so the pooled total grows with n_draws while `counts` does not.
-    check("every draw runs, but only distinct pairs are counted",
+    # An exhaustive subsample re-forms the identical pair set every pass, so
+    # ONE pass is run and the pooled total is scaled by n_draws arithmetically:
+    # the repeats provably add no distinct pair, so `counts` is unmoved while
+    # `n_pairs_pooled` still reports what n_draws passes would have pooled.
+    check("repeat draws over an exhaustive subsample add no distinct pair",
           ten["n_draws_used"] == 10
           and np.array_equal(ten["n_pairs_pooled"], 10 * one["n_pairs_pooled"])
           and np.array_equal(ten["counts"], one["counts"]),

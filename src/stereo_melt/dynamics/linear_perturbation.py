@@ -603,6 +603,16 @@ class LinearPerturbation:
         giving :math:`K_h(0,t) = -\frac{\delta}{\delta+1}e^{\lambda_0 t}` and
         :math:`K_s(0,t) = \frac{1}{\delta+1}e^{\lambda_0 t}`.
 
+        **Zero lag.** These right-limits are applied at :math:`t=0` too, which
+        is deliberate. The derivation above drops :math:`e^{\lambda_- t}` for
+        :math:`t>0` only; at exactly :math:`t=0` the true kernel is 0 at every
+        :math:`k>0` (:math:`e^0 - e^0`), so the DC bin is the lone
+        discontinuous entry in the ``K_h`` grid at zero lag. The fast mode's
+        boundary layer has width :math:`1/|\lambda_-| \to 0`, i.e. measure
+        zero in the time integral, so the right-limit is the value that makes
+        the trapezoid converge to :math:`I_h(0,t)`; substituting 0 there would
+        bias the DC response low. Do not "fix" the discontinuity.
+
         Cross-check: these are exactly :math:`\partial_t` of
         :meth:`kernel_time_integral_stationary`'s DC limits
         :math:`I_h(0,t) = -\frac{\delta}{\delta+1}\,\mathrm{expm1}(\lambda_0
@@ -1104,11 +1114,14 @@ def inverse_dhdt(
     transform : {"fft", "dct"}
         Spatial basis. FFT for periodic domains, DCT for reflective.
     recover_dc : bool
-        If True (default), splice the mass-balance DC mode back into
-        the recovered ``m``. The Stubblefield kernel zeros ``k=0`` by
-        construction (the membrane response to a uniform melt is
-        degenerate), so the spectral inverse loses any uniform offset
-        in ``m``. The mass-balance constraint (Shean convention,
+        If True (default), REPLACE the recovered ``k=0`` mode with the
+        mass-balance one. ``K`` is built from
+        :meth:`LinearPerturbation.kernel_time_integral_stationary`, whose DC
+        bin is finite and non-zero, so the inverse does constrain the uniform
+        offset in ``m`` -- this prefers the budget-exact level to the kernel's
+        own, and ``recover_dc=False`` keeps the kernel's. (The Tikhonov scale
+        is computed WITHOUT that bin either way, so the choice moves no other
+        wavenumber.) The mass-balance constraint (Shean convention,
         positive = accretion)
         :math:`\overline{\dot b} = R\,\overline{\partial h/\partial t}
         - \overline{\dot a}` (with :math:`R = \rho_w/(\rho_w-\rho_i)`)
@@ -1176,7 +1189,11 @@ def inverse_dhdt(
     fill = float(dh_vals[finite].mean())
     dh_filled = asarray(np.where(finite, dh_vals, fill))
 
-    k_rms = float(to_numpy(xp.sqrt((xp.abs(K) ** 2).mean())))
+    # k=0 contributes ZERO to the Tikhonov scale, for the reason spelled out in
+    # inverse_stationary: recover_dc replaces that level from the mass balance,
+    # so the bin the caller discards must not set the damping everywhere else.
+    dc_bin = (kx ** 2 + ky ** 2) <= 0
+    k_rms = float(to_numpy(xp.sqrt(xp.where(dc_bin, 0.0, xp.abs(K) ** 2).mean())))
     lam2 = (reg * k_rms) ** 2
 
     if transform == "fft":
@@ -1385,8 +1402,14 @@ def inverse_stationary(
             den = den + A_i * A_i
 
     # Per-wavenumber Tikhonov: scale reg by the RMS |A| to make `reg`
-    # dimensionless and dataset-independent.
-    a_rms = float(to_numpy(xp.sqrt(den.mean())))
+    # dimensionless and dataset-independent. The k=0 bin contributes ZERO to
+    # that scale: recover_dc overwrites the DC level afterwards from the mass
+    # balance, so the one bin whose value the caller discards must not set the
+    # damping for every other wavenumber. It is set aside, not renormalised
+    # away -- the denominator stays the full spectrum, so lam2 is what a
+    # DC-zeroing kernel would have produced.
+    dc_bin = (kx ** 2 + ky ** 2) <= 0
+    a_rms = float(to_numpy(xp.sqrt(xp.where(dc_bin, 0.0, den).mean())))
     lam2 = (reg * a_rms) ** 2
 
     m_hat_si = num / (den + lam2)
