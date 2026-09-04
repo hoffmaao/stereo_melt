@@ -191,6 +191,12 @@ def nd_binning(values, list_var, list_var_names, *, list_var_bins=None,
                statistics=("count", "median", "nmad"), min_count: int = 30):
     """N-dimensional robust binning of ``values`` against explanatory variables.
 
+    Bins are closed on the right of the LAST bin only, as ``np.histogram`` is:
+    a sample sitting exactly at a covariate's maximum belongs to the top bin,
+    not outside the binning. That matters because the default edges are
+    quantiles, whose top edge IS the data maximum, and because the covariate
+    this is built for -- per-pixel epoch count -- piles up at its ceiling.
+
     Returns a tidy ``DataFrame`` holding, for every 1-D marginal AND the full
     N-D cell, the bin edges per variable plus the requested statistics. The
     marginals are what you inspect to see whether a variable matters at all;
@@ -215,8 +221,17 @@ def nd_binning(values, list_var, list_var_names, *, list_var_bins=None,
         list_var_bins = [np.nanquantile(a[np.isfinite(a)], np.linspace(0, 1, nb + 1)) for a in arrs]
     list_var_bins = [np.unique(np.asarray(b, float)) for b in list_var_bins]
 
-    idx = [np.digitize(a, b) - 1 for a, b in zip(arrs, list_var_bins)]
     nb = [b.size - 1 for b in list_var_bins]
+    # np.digitize puts a value equal to the TOP edge in bin nb, one past the
+    # last. With the default quantile edges that top edge is the data maximum,
+    # so every sample at a covariate's ceiling -- a large share of a per-pixel
+    # epoch COUNT field -- would be dropped from the marginals AND the N-D
+    # cell. Fold that class into the last bin (np.histogram's closed-right
+    # convention); values genuinely above the top edge stay out.
+    idx = []
+    for a, b, nbk in zip(arrs, list_var_bins, nb):
+        i = np.digitize(a, b) - 1
+        idx.append(np.where(a == b[-1], nbk - 1, i))
     valid = np.isfinite(v)
     for k in range(nvar):
         valid &= (idx[k] >= 0) & (idx[k] < nb[k])
@@ -382,11 +397,18 @@ def empirical_variogram(
     lags in the same pass (a single subsample would under-sample the short
     lags, a pure random-pair draw would under-sample them badly).
 
+    ``counts`` is the pooled pair count each bin was estimated from, and is
+    what ``min_pairs`` gates on and what :func:`fit_variogram` weights by. When
+    ``n_subsample >= len(east)`` a single pass is made, because every further
+    pass would re-form the same pairs; with a genuine subsample the draws are
+    independent, so a pair can recur across draws and ``counts`` is a pooled
+    rather than a strictly distinct count.
+
     Returns
     -------
     dict
         ``lags`` (bin centres, metres), ``gamma``, ``counts``, ``bin_edges``,
-        ``variance`` (of the pooled sample), ``estimator``.
+        ``variance`` (of the pooled sample), ``estimator``, ``n_draws_used``.
     """
     if estimator not in ("matheron", "dowd"):
         raise ValueError(f'estimator must be "matheron" or "dowd", got {estimator!r}')
@@ -409,8 +431,13 @@ def empirical_variogram(
 
     rng = np.random.default_rng(seed)
     acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
-    for _ in range(max(1, n_draws)):
-        m = min(n_subsample, e.size)
+    m = min(n_subsample, e.size)
+    # One pass when the "subsample" IS the whole cloud: repeating it re-forms
+    # the identical pair set, which would multiply `counts` by n_draws without
+    # adding one distinct pair -- enough to let a bin holding 4 pairs clear
+    # min_pairs=30 and then be weighted as if it held 40.
+    n_pass = 1 if m >= e.size else max(1, n_draws)
+    for _ in range(n_pass):
         idx = rng.choice(e.size, m, replace=False) if m < e.size else np.arange(e.size)
         ee, nn, vv = e[idx], n[idx], v[idx]
         iu, ju = np.triu_indices(m, k=1)
@@ -438,7 +465,8 @@ def empirical_variogram(
             gamma[b] = 0.5 * (_MAD_TO_SIGMA * float(np.median(np.abs(dv)))) ** 2
     keep = np.isfinite(gamma)
     return dict(lags=lags[keep], gamma=gamma[keep], counts=counts[keep],
-                bin_edges=bin_edges, variance=float(np.var(v)), estimator=estimator)
+                bin_edges=bin_edges, variance=float(np.var(v)), estimator=estimator,
+                n_draws_used=int(n_pass))
 
 
 def variogram_model(h: np.ndarray, model: str, sill: float, rng_: float) -> np.ndarray:
@@ -586,8 +614,11 @@ def number_effective_samples(
         \operatorname{Var}(\bar z) = \frac{1}{N^2}\sum_i\sum_j C(h_{ij}),
         \qquad n_{\rm eff} = \sigma^2_{\rm tot}/\operatorname{Var}(\bar z).
 
-    Evaluated on random subsets of the domain's own geometry, so it needs no
-    shape idealisation, but reported for the FULL set of points passed in:
+    ``offdiag_draws`` holds one entry per pass; when ``n_subsample >= N`` there
+    is a single pass, since repeating an exhaustive draw cannot vary the
+    estimate. Evaluated on random subsets of the domain's own geometry, so it
+    needs no shape idealisation, but reported for the FULL set of points
+    passed in:
     the subsampling estimates the mean off-diagonal covariance only, and the
     diagonal is applied exactly. ``n_eff`` -> the point count for white noise,
     -> ~1 when the field is correlated across the whole area.
@@ -605,8 +636,11 @@ def number_effective_samples(
     # making n_eff come out as the SUBSAMPLE size -- correct for the subsample,
     # silently wrong for the area the caller asked about.
     offs = []
-    for _ in range(max(1, n_draws)):
-        m = min(n_subsample, N)
+    m = min(n_subsample, N)
+    # Same one-pass rule as empirical_variogram: with m == N every draw is the
+    # identical point set, so extra passes would leave mean_off untouched while
+    # filling offdiag_draws with copies that read as a Monte-Carlo spread.
+    for _ in range(1 if m >= N else max(1, n_draws)):
         idx = rng.choice(N, m, replace=False) if m < N else np.arange(N)
         ee, nn = e[idx], n[idx]
         d = np.hypot(ee[:, None] - ee[None, :], nn[:, None] - nn[None, :])

@@ -37,7 +37,7 @@ SECONDS_PER_YEAR = 86400.0 * 365.25
 tr_yr = tr_s / SECONDS_PER_YEAR
 print(f"H={H} m, eta_bar={eta_bar:.1e} Pa s, t_r={tr_yr:.1f} yr, delta={delta:.4f}")
 
-# Domain: 60 km wide, 250 m grid (matches sanity_linear_perturbation)
+# Domain: 60 km wide, 250 m grid (matches gate_linear_perturbation)
 L = 60_000.0
 res = 250.0
 x = np.arange(-L / 2, L / 2, res)

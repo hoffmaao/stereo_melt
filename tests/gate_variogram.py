@@ -26,6 +26,14 @@ H1-H4  heteroscedasticity, the step that must come BEFORE the variogram:
     recover a known sigma(count, rmse), show standardisation removes the
     heteroscedasticity, and show that only the standardised variogram has a
     meaningful (dimensionless, ~1) sill and an unbiased range.
+H5  binning keeps samples sitting exactly at a covariate's CEILING. Quantile
+    edges put the top edge at the data maximum, and a per-pixel epoch count
+    piles up there, so dropping them would estimate the top sigma bin without
+    the very pixels it describes.
+G6  `counts` is a pair count, not a replication count: when the subsample is
+    the whole cloud, extra draws re-form the identical pairs, so repeating
+    them must not inflate `counts` nor let a pair-starved bin clear
+    `min_pairs`.
 
 Run::
 
@@ -47,6 +55,7 @@ from stereo_melt.spatialstats import (  # noqa: E402
     fit_variogram,
     infer_heteroscedasticity_from_stable,
     interp_nd_binning,
+    nd_binning,
     nmad,
     number_effective_samples,
     variogram_model,
@@ -296,6 +305,67 @@ def main() -> int:
     check("the raw binned dispersion is still reachable as .unscaled.grid",
           abs(float(sig_fun.grid[2, 3]) / (scale * float(sig_fun.unscaled.grid[2, 3])) - 1) < 1e-9,
           f"scale {scale:.3f}")
+
+    print("H5  samples at a covariate ceiling are binned, not dropped")
+    # A per-pixel epoch COUNT field saturates: a large mass sits exactly at the
+    # maximum. With quantile edges the top edge IS that maximum.
+    rh5 = np.random.default_rng(31)
+    n_ceil, n_rest = 400, 600
+    cnt5 = np.concatenate([rh5.integers(4, 60, n_rest).astype(float),
+                           np.full(n_ceil, 60.0)])
+    val5 = np.concatenate([rh5.normal(0, 3.0, n_rest), rh5.normal(0, 0.5, n_ceil)])
+    df5 = nd_binning(val5, [cnt5], ["count"])
+    marg5 = df5[df5["nd"] == 1]
+    binned = int(marg5["count"].sum())
+    print(f"      {n_ceil} of {cnt5.size} samples sit at the ceiling "
+          f"{cnt5.max():.0f}; binned total {binned}")
+    check("no sample is dropped at the covariate maximum",
+          binned == cnt5.size, f"{binned} of {cnt5.size}")
+    top = marg5.sort_values("count_mid").iloc[-1]
+    check("the ceiling mass lands in the TOP bin",
+          int(top["count"]) >= n_ceil, f"top bin holds {int(top['count'])}")
+    # ...and the error model that bin feeds is the quiet one those pixels have,
+    # not the loud one the rest of the population has.
+    check("the top bin's nmad describes the pixels it is supposed to",
+          abs(float(top["nmad"]) / 0.5 - 1.0) < 0.25,
+          f"nmad {float(top['nmad']):.3f} vs true 0.5")
+
+    print("G6  counts are pairs, not repeated draws")
+    rg6 = np.random.default_rng(17)
+    m6b = 300
+    e6 = rg6.uniform(0, 25000, m6b)
+    n6 = rg6.uniform(0, 25000, m6b)
+    v6 = rg6.normal(0, 1.0, m6b)
+    edges6 = np.concatenate([[0.0], np.geomspace(20.0, 10000.0, 18)])
+    one = empirical_variogram(e6, n6, v6, bin_edges=edges6, n_draws=1, seed=1)
+    ten = empirical_variogram(e6, n6, v6, bin_edges=edges6, n_draws=10, seed=1)
+    print(f"      n_subsample(2000) >= N({m6b}): n_draws 1 -> {one['n_draws_used']} pass, "
+          f"n_draws 10 -> {ten['n_draws_used']} pass; bins {len(one['lags'])} vs {len(ten['lags'])}")
+    check("extra draws over an exhaustive subsample change nothing",
+          np.array_equal(one["counts"], ten["counts"])
+          and np.allclose(one["gamma"], ten["gamma"], rtol=0, atol=0)
+          and len(one["lags"]) == len(ten["lags"]),
+          f"counts equal {np.array_equal(one['counts'], ten['counts'])}")
+    check("only one pass is made when the subsample is the whole cloud",
+          one["n_draws_used"] == 1 and ten["n_draws_used"] == 1)
+    # every admitted bin must really hold min_pairs DISTINCT pairs
+    iu6, ju6 = np.triu_indices(m6b, k=1)
+    d6 = np.hypot(e6[iu6] - e6[ju6], n6[iu6] - n6[ju6])
+    true_counts = np.array([int(((d6 >= edges6[b]) & (d6 < edges6[b + 1])).sum())
+                            for b in range(edges6.size - 1)])
+    kept = np.searchsorted(0.5 * (edges6[:-1] + edges6[1:]), ten["lags"])
+    print(f"      admitted bins hold {true_counts[kept].min()}-{true_counts[kept].max()} "
+          f"distinct pairs (min_pairs 30)")
+    check("counts match the true distinct-pair count",
+          np.array_equal(ten["counts"], true_counts[kept]),
+          f"{ten['counts'][:4]} vs {true_counts[kept][:4]}")
+    check("no bin is admitted on fewer than min_pairs distinct pairs",
+          int(true_counts[kept].min()) >= 30, f"{int(true_counts[kept].min())}")
+    # and the subsampled path still pools its independent draws
+    sub = empirical_variogram(e6, n6, v6, bin_edges=edges6, n_subsample=120,
+                              n_draws=4, seed=1)
+    check("a genuine subsample still pools every draw", sub["n_draws_used"] == 4,
+          f"{sub['n_draws_used']}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

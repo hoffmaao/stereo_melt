@@ -525,7 +525,7 @@ def fit_tilt_stack(
         Three call sites, in two non-production files, do NOT pass
         ``min_width`` and so take the new default.
         ``scripts/test_gpu_tilt_fit.py`` is a GPU segfault/timing smoke
-        script that asserts nothing. ``tests/sanity_tilt_stack.py``
+        script that asserts nothing. ``tests/gate_tilt_stack.py``
         (both of its fits) takes the new default DELIBERATELY and DOES
         assert on slopes -- tightly, at ``atol`` 1e-9 mean-removed and
         1e-6 for the T=2 case, since slope recovery is the whole point

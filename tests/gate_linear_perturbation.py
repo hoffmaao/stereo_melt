@@ -1,4 +1,4 @@
-"""Sanity test for the Stubblefield 2023 linear perturbation forward model.
+"""Gate: the Stubblefield 2023 linear perturbation forward model.
 
 Reproduces the qualitative behavior of paper Figures 7-8:
 
@@ -8,6 +8,15 @@ Reproduces the qualitative behavior of paper Figures 7-8:
   and h != -delta*s (non-hydrostatic).
 - Adding across-channel inflow (alpha > 0): surface expression is
   damped and asymmetric.
+
+It also pins the k=0 (DC) behaviour of ``steady_state_kernel``, the
+unrelaxed-mode diagnostic and its asymptote, and the agreement between
+``forward(t -> infty)`` and ``steady_state`` including the DC mode.
+
+Run::
+
+    PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
+    $PY tests/gate_linear_perturbation.py
 """
 
 import sys
@@ -234,4 +243,4 @@ print(f"  domain-mean ratio (the k = 0 mode alone) = {mean_ratio:.6f}")
 assert abs(mean_ratio - 1.0) < 0.02, f"DC mode disagrees: mean ratio {mean_ratio}"
 print("  PASS: forward(t -> infty) agrees with steady_state, DC mode included.")
 
-print("\nAll linear-perturbation sanity checks passed.")
+print("\nGATE PASSED: all linear-perturbation checks.")
