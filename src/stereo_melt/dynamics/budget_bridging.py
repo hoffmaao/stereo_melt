@@ -166,9 +166,10 @@ def bridging_transfer_multiplier(
     :meth:`~stereo_melt.dynamics.linear_perturbation.LinearPerturbation.steady_state_kernel`
     now carries that limit itself, so the pin is a redundant defensive
     assertion: a finite DC bin that disagrees with 1 raises rather than being
-    silently overwritten. It stays non-optional because the kernel returns NaN
-    at DC when :math:`\gamma` leaves the uniform mode unrelaxed, while
-    :math:`T` there is still 1 (:math:`\lambda_0` cancels in the ratio).
+    silently overwritten. It stays non-optional because the kernel's DC value
+    is :math:`\pm\infty` at the single degenerate :math:`\lambda_0 = 0`,
+    where the ratio is undefined even though its limit is still 1
+    (:math:`\lambda_0` cancels).
 
     With ``alpha_scale=0`` the result is real, isotropic and depends on nothing
     but :math:`\lambda/H` and :math:`\rho_i/\rho_w` — no viscosity, no velocity.
@@ -356,12 +357,35 @@ def strip_mode_design(
 
 
 #: Coefficient in the truth-free rule ``lam = LAM_SIGMA2_COEF * sigma2_est``.
-#: The monolithic loss is  mean_w(resid^2) + lam*mean(|grad m|^2)  -- a weighted
-#: MEAN misfit -- so lam carries the same units as the noise variance and the
-#: natural scale is sigma^2 itself. The 2026-08-22 oracle study put
-#: ``lam = sigma2_est`` within 6 % of the oracle lam on the mixed-field rungs,
-#: and the 08-29 pigreal tier confirmed the scaling: raising the noise variance
-#: ~25x moved the optimal lam up by ~30-300x. Kept as a named constant so the
+#:
+#: **lam IS DIMENSIONLESS, and this rule is an EMPIRICAL calibration, not a
+#: dimensional identity.** An earlier version of this note claimed lam "carries
+#: the same units as the noise variance" so that "the natural scale is sigma^2
+#: itself". That was wrong. The loss is
+#: ``mean_w(resid^2) + lam*(mean(gx^2) + mean(gy^2))``; the residual is a
+#: thickness rate in m/yr, and gx/gy are differences of the melt field, also in
+#: m/yr. Both terms are (m/yr)^2, so lam is a pure number and cannot carry the
+#: units of a variance. What the 2026-08-22 oracle study actually established is
+#: that ``lam = sigma2_est`` landed within 6 % of the oracle lam on the
+#: mixed-field rungs AT THAT STUDY'S POSTING AND NOISE LEVEL -- a fit, not a
+#: derivation. The 08-29 pigreal tier is consistent with a scaling but not with
+#: THIS one: raising the noise variance ~25x moved the optimal lam by ~30-300x,
+#: which is not the linear relation the rule assumes.
+#:
+#: **lam is POSTING-SPECIFIC, and this matters in practice.** gx/gy are bare
+#: per-pixel differences with no dx or dy, so the regulariser penalises
+#: curvature PER PIXEL, not per metre. The same physical melt field differenced
+#: on a 500 m posting gives gx twice the 250 m value, so the regularisation term
+#: scales as res^2 while sigma2_est does not track it (its slope part
+#: rmse^2/S_tt is posting-independent; only the divergence part
+#: u^2 rmse^2/(2 n dx^2) carries 1/dx^2). A lam tuned at 250 m therefore does
+#: NOT transfer to 125 m or 500 m, and every published lam on this project is
+#: specific to the posting it was tuned at. Re-tune when you change resolution.
+#:
+#: The posting-invariant form would divide the differences by dx and dy, making
+#: the regulariser a true squared gradient in (m/yr)/m and lam carry m^2. That
+#: is deliberately NOT done here: it would change every solved field and
+#: invalidate every calibrated lam on record. Kept as a named constant so the
 #: calibration is one edit, not a magic number scattered across drivers.
 LAM_SIGMA2_COEF = 1.0
 
@@ -669,7 +693,16 @@ def budget_bridging_melt_rate(
         estimate, so spatially correlated error (PIG's strip residual is
         coherent at ~4 km) inflates it and over-damps the melt by 300-3000x on
         that same tier. It warns when it can detect that, but the check is
-        one-sided.
+        one-sided. And ``"auto"`` is an EMPIRICAL calibration, not a
+        dimensional identity -- lam is dimensionless (see
+        :data:`LAM_SIGMA2_COEF`).
+
+        **Any lam, fixed or auto, is specific to the POSTING it was tuned at.**
+        The smoothness term differences the melt field per pixel with no
+        ``dx``, so it measures curvature per pixel: the same physical field on
+        a 500 m grid produces twice the gradient it does on 250 m, and the
+        regularisation term scales as ``res^2``. A lam carried across a
+        resolution change silently changes how much the melt is smoothed.
     ridge
         Wiener weight on :math:`\\lVert\\dot m\\rVert^2`. With uniform weights the
         minimiser is :math:`D^*/(|D|^2 + \\text{ridge})`, so the deconvolution

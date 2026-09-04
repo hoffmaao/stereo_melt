@@ -74,6 +74,69 @@ form :math:`\hat h(k, t) = -\delta B/\mu \cdot \bigl[(e^{\lambda_+ t}
 and the steady-state :math:`t \to \infty` limit collapses to the Green's
 function of Eq. 3.12.
 
+The :math:`k=0` (DC) bin, across the spectral representations
+------------------------------------------------------------
+Several operators in :mod:`stereo_melt.dynamics` are diagonal in a spectral
+basis, and each has to decide what the :math:`k=0` bin means. They do **not**
+all agree, and that is deliberate -- a mean-free perturbation operator and a
+forward kernel with a physical long-wavelength limit want opposite things. The
+full table, so the difference is explicit rather than implicit:
+
+==================================================  ==========================
+operator                                            ``k = 0`` bin
+==================================================  ==========================
+:meth:`LinearPerturbation.transfer_functions`       ``R = B = 0``. Both diverge
+                                                    as :math:`k\to 0`; zeroing
+                                                    dodges the 0/0, and every
+                                                    caller that needs the true
+                                                    limit patches it back.
+:meth:`LinearPerturbation.kernel_time_integral_stationary`  analytic
+                                                    :math:`I_h(0,t)`,
+                                                    :math:`I_s(0,t)` -- finite
+                                                    and physical.
+:meth:`LinearPerturbation.steady_state_kernel`      analytic
+                                                    :math:`t\to\infty` limit of
+                                                    the same expressions, so
+                                                    :func:`steady_state` and
+                                                    ``forward(stationary=True)``
+                                                    agree at DC.
+:func:`inverse_stationary`, :func:`inverse_dhdt`    structurally blind (they
+                                                    invert the zeroed kernel);
+                                                    ``recover_dc=True`` splices
+                                                    the mean back from a 1-D OLS
+                                                    slope of the basin-mean
+                                                    :math:`h(t)`.
+:class:`~.perturbation_dct.PerturbationForwardOpDCT`  same as the FFT parent --
+                                                    it only swaps the wavenumber
+                                                    lattice, and DCT bin 0 is
+                                                    :math:`k=0` exactly as
+                                                    ``fftfreq`` bin 0 is.
+:func:`~.stubblefield_forward.stubblefield_forward_multiplier`  pinned to **0**:
+                                                    DC-blind BY POLICY, because
+                                                    the variational inverse it
+                                                    feeds is fitted against a
+                                                    high-passed target. See its
+                                                    docstring.
+:func:`~.budget_bridging.bridging_transfer_multiplier`  pinned to **1**, the
+                                                    analytic limit of
+                                                    :math:`G_h/(f_b(G_h-G_s))`
+                                                    (checked against the kernel
+                                                    before pinning).
+:func:`~.budget_bridging.normalized_bridging_multiplier`  pinned to **1**; its
+                                                    plateau is measured over the
+                                                    RESOLVED bins only.
+:func:`~.bridging_restoration.bridging_restoration_filter`,
+:func:`~.bridging_restoration.bridging_inverse_filter`  pinned to **1**
+                                                    (identity / DC passthrough:
+                                                    the spatial mean is
+                                                    authoritative, not lifted).
+==================================================  ==========================
+
+The three ``pinned`` entries are the ones that intentionally override the
+kernel: two because unity is what a *ratio* tends to in the hydrostatic limit,
+one because the operator's own input has had its mean deleted. Everything else
+either carries the physical limit or is honestly blind and says so.
+
 Implementation notes
 --------------------
 
@@ -89,6 +152,8 @@ Implementation notes
 """
 
 from __future__ import annotations
+
+import warnings
 
 import numpy as np
 import xarray as xr
@@ -423,13 +488,20 @@ class LinearPerturbation:
         hydrostatic flotation, an infinite-wavelength load carrying no bridging
         — and the flotation departure :math:`T = G_h/(f_b(G_h - G_s))` is
         exactly 1 for **any** :math:`\gamma`, because :math:`\lambda_0`
-        cancels. If :math:`\lambda_0 \ge 0` the DC mode does not relax, no
-        steady state exists there, and the bin is returned as **NaN** rather
-        than as a finite wrong number or a silent zero.
+        cancels.
 
         The limit is the Newtonian one (it comes from the :math:`k\to 0`
         asymptotics of :math:`R` and :math:`B`), and is applied for
         ``n != 1`` too, matching :meth:`kernel_time_integral_stationary`.
+
+        **No stability screening is applied, at DC or anywhere else.** A mode
+        has a steady state only where :math:`\operatorname{Re}\lambda_+ < 0`;
+        where it does not, the formula still returns a finite number that is
+        the analytic continuation, not a physical steady amplitude. This
+        method does not distinguish the two -- masking one bin while returning
+        finite values for an equally unrelaxed band would be worse than not
+        screening at all. Ask :meth:`unrelaxed_modes` which bins are affected;
+        see it for the criterion.
         """
         R, B, lp, lm, mu = self.transfer_functions(kx, ky)
         # ĥ_e = -δ B m̂ / [δ(R² - B²) + (i(αx kx'+αy ky') − γ)(δ+1) R + (i(αx kx'+αy ky') − γ)²]
@@ -446,15 +518,87 @@ class LinearPerturbation:
         zero = kmag <= 0
         if bool(xp.any(zero)):
             delta = self.delta
-            lam0 = float(self.gamma - delta / (2.0 * (delta + 1.0)))
-            if lam0 < 0.0:
+            lam0 = np.float64(self.dc_eigenvalue())
+            with np.errstate(divide="ignore", invalid="ignore"):
                 g_h0 = (delta / (delta + 1.0)) / lam0
                 g_s0 = -(1.0 / (delta + 1.0)) / lam0
-            else:
-                g_h0 = g_s0 = float("nan")
             G_h = xp.where(zero, xp.asarray(g_h0, dtype=G_h.dtype), G_h)
             G_s = xp.where(zero, xp.asarray(g_s0, dtype=G_s.dtype), G_s)
         return G_h, G_s
+
+    def dc_eigenvalue(self) -> float:
+        r"""Return :math:`\lambda_0`, the true :math:`k=0` eigenvalue.
+
+        :math:`\lambda_0 = \gamma - \delta/(2(\delta+1))`. This is NOT what
+        :meth:`transfer_functions` reports at DC: there ``R`` and ``B`` are
+        hard-zeroed, so it returns :math:`\gamma`. The finite limit comes from
+        the subleading behaviour of :math:`B/R \to 1`, and :math:`\alpha` does
+        not enter because :math:`k'_x = k'_y = 0`.
+        """
+        return float(self.gamma - self.delta / (2.0 * (self.delta + 1.0)))
+
+    def unrelaxed_modes(self, kx, ky):
+        r"""Boolean mask of wavenumbers with **no steady state**.
+
+        A mode relaxes to a steady amplitude only where
+        :math:`\operatorname{Re}\lambda_+ < 0`; this returns
+        :math:`\operatorname{Re}\lambda_+ \ge 0`. Where it is ``True``,
+        :meth:`steady_state_kernel` still returns a finite number, but that
+        number is an analytic continuation, not a physical steady state.
+
+        Two regimes, both driven by :math:`\gamma` (extension,
+        :math:`\gamma = E t_r`; for a divergent flow
+        :math:`\gamma = \nabla\!\cdot\!u\,t_r`):
+
+        * **High wavenumbers.** For ``n = 1`` the large-:math:`k'` asymptotics
+          are :math:`R \to 1/k'` and :math:`B \to 0`, so
+          :math:`\mu \to R(1-\delta)` and
+          :math:`\operatorname{Re}\lambda_+ \to \gamma - \delta R =
+          \gamma - \delta/k'`. Every :math:`k' = kH > \delta/\gamma` is
+          therefore unrelaxed -- every wavelength below
+          :math:`\lambda_c = 2\pi H\gamma/\delta`
+          (:meth:`unrelaxed_cutoff_wavelength_m`). ANY :math:`\gamma > 0`
+          leaves such a band; it is simply off the grid until :math:`\gamma`
+          is large enough. At :math:`H = 500` m and
+          :math:`\bar\eta = 10^{14}` Pa s, :math:`t_r = 1.41` yr, so an
+          ordinary trunk divergence of 0.04 yr\ :sup:`-1` puts the cut at
+          ~1.5 km.
+        * **The DC bin**, evaluated at :math:`\lambda_0` from
+          :meth:`dc_eigenvalue` rather than at the hard-zeroed :math:`\gamma`
+          :meth:`transfer_functions` would report. It is unrelaxed once
+          :math:`\gamma \ge \delta/(2(\delta+1))`, and because
+          :math:`\operatorname{Re}\lambda_+` grows with :math:`k'`, by then
+          every mode is unrelaxed.
+
+        Numerical caveat: below :math:`k' \sim 10^{-2}` the Tikhonov cap
+        (:math:`R \to 1/\theta`) makes
+        :math:`\tfrac12(\delta+1)R - \tfrac12\mu` a difference of numbers
+        :math:`\sim 1/\theta` cancelling to :math:`O(10^{-2})`, so the sign
+        there is float noise -- which is exactly why DC is special-cased
+        analytically. Real FFT grids do not reach that band (a 250 m posting
+        on a 32 km tile has :math:`k'_{\min} \approx 0.1`).
+        """
+        _R, _B, lam_plus, _lm, _mu = self.transfer_functions(kx, ky)
+        re_lp = xp.real(lam_plus)
+        kmag = xp.sqrt(kx**2 + ky**2)
+        zero = kmag <= 0
+        if bool(xp.any(zero)):
+            re_lp = xp.where(zero, xp.asarray(self.dc_eigenvalue()), re_lp)
+        return re_lp >= 0.0
+
+    def unrelaxed_cutoff_wavelength_m(self) -> float:
+        r"""Wavelength below which modes are unrelaxed, :math:`2\pi H\gamma/\delta`.
+
+        The large-:math:`k'` asymptote of :meth:`unrelaxed_modes` (exact to
+        ~0.03 % an order of magnitude above the cut, looser as :math:`\gamma`
+        approaches :math:`\delta/(2(\delta+1))`, where the band swallows the
+        whole spectrum). ``inf`` when :math:`\gamma \le 0`, i.e. no unrelaxed
+        band at all -- which is every production path here, all of which run
+        :math:`\gamma = 0`.
+        """
+        if self.gamma <= 0.0:
+            return float("inf")
+        return float(2.0 * np.pi * self.H * self.gamma / self.delta)
 
 
 def _wavenumber_grids(nx: int, ny: int, dx: float, dy: float):
@@ -708,9 +852,15 @@ def steady_state(
     :func:`forward` at large :math:`t/t_r`, including the :math:`k=0`
     mode (a spatially uniform melt does thin the shelf, and
     :meth:`LinearPerturbation.steady_state_kernel` carries the analytic DC
-    limit of that relaxation). The DC bin is NaN, and the returned field
-    therefore all-NaN, when :math:`\gamma \ge \delta/(2(\delta+1))` leaves
-    the uniform mode unrelaxed.
+    limit of that relaxation).
+
+    A steady state only exists for modes with
+    :math:`\operatorname{Re}\lambda_+ < 0`. Where some do not, the returned
+    field still contains numbers -- the analytic continuation -- so this warns
+    (``RuntimeWarning``) naming :math:`\gamma`, the cutoff wavelength and how
+    many bins are affected, rather than either failing or staying silent. See
+    :meth:`LinearPerturbation.unrelaxed_modes`. With :math:`\gamma = 0` (every
+    production path here) there are none and nothing is warned.
 
     Parameters
     ----------
@@ -752,6 +902,18 @@ def steady_state(
     dy = float(abs(y_coords[1] - y_coords[0]))
 
     kx, ky = _wavenumber_grids(nx, ny, dx, dy)
+    bad = model.unrelaxed_modes(kx, ky)
+    n_bad = int(to_numpy(bad).sum())
+    if n_bad:
+        lam_c = model.unrelaxed_cutoff_wavelength_m()
+        warnings.warn(
+            f"steady_state: {n_bad} of {to_numpy(bad).size} wavenumbers have "
+            f"Re(lam_+) >= 0 (no steady state) at gamma={model.gamma:g}; the "
+            f"unrelaxed band is wavelengths below ~{lam_c:.4g} m"
+            + (" and includes k=0, so no mode relaxes"
+               if model.dc_eigenvalue() >= 0 else "")
+            + ". The returned field is the analytic continuation there, not a "
+            "steady state.", RuntimeWarning, stacklevel=2)
     G_h, G_s = model.steady_state_kernel(kx, ky)
 
     # Convert user m (m/yr) to SI (m/s); ĥ_dim = tr · G_h · m̂_SI gives meters.

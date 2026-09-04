@@ -228,8 +228,15 @@ BAD_EPOCHS: tuple[str, ...] = ()
 # strips -- residual tilt is ~2.3x larger across-track than along -- and Ey was
 # 4.5x too tight. Truth-free, from independent altimetry (no plane<->trend
 # degeneracy); see results/pig_strip_residual_planes_250m_is2ctempo_sheltilt.csv.
-# Override per run with PIG_TILT_EX / PIG_TILT_EY (the canon is reproduced with
-# PIG_TILT_EX=2e-6 PIG_TILT_EY=6.6667e-7).
+# Override per run with PIG_TILT_EX / PIG_TILT_EY; PIG_TILT_EX=2e-6
+# PIG_TILT_EY=6.6667e-7 restores the canon PRIORS, but NOT the canon PRODUCT --
+# the 15-strip control-QC drop in BAD_STRIPS below is unconditional and
+# deliberate (they are genuine alignment failures), and has no escape hatch. The
+# canon numbers 84.6/89.6/90.4/93.3 belong to the products already on disk under
+# tag is2ctempo_sheltilt and are a historical record, not something this config
+# regenerates. The corrected state is is2ctempo_sheltilt_qcey. The two agree to
+# <= 0.2 Gt/yr on every field because the strip drop (-0.6..-0.9) and the
+# recalibrated priors (+0.6..+0.7) very nearly cancel.
 TILT_EX: float = float(os.environ.get("PIG_TILT_EX", "1.31e-6"))
 TILT_EY: float = float(os.environ.get("PIG_TILT_EY", "3.02e-6"))
 

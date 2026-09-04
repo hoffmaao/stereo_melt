@@ -123,14 +123,75 @@ for gam in (0.0, -0.02, 0.03):
         assert abs(Gs0.real - 2.0 / delta) < 1e-9, f"G_s(0) at gamma=0 must be 2/delta"
 print("  PASS: DC kernel is exact flotation, T(0) = 1, G_h(0) = -2 at gamma = 0.")
 
-# gamma >= delta/(2(delta+1)) leaves the uniform mode unrelaxed: no steady
-# state exists there, and the kernel must say so rather than return a number.
-_m_hot = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81,
-                            gamma=delta / (2.0 * (delta + 1.0)) + 1e-6)
-_gh_hot, _gs_hot = _m_hot.steady_state_kernel(_zero, _zero)
-assert not np.isfinite(complex(_gh_hot[0, 0])), "unrelaxed DC mode must be NaN, not a number"
-assert not np.isfinite(complex(_gs_hot[0, 0])), "unrelaxed DC mode must be NaN, not a number"
-print("  PASS: no steady state at DC (lambda_0 >= 0) is reported as NaN.")
+# ---- Which modes have no steady state (Re lambda_+ >= 0) ----
+# The kernel does NOT screen for stability -- it returns the analytic
+# continuation everywhere -- so the diagnostic is what has to be right. The
+# criterion is Re(lambda_+) >= 0; asymptotically R -> 1/k', B -> 0, so
+# Re(lambda_+) -> gamma - delta/k' and every k'H > delta/gamma is unrelaxed.
+from stereo_melt.dynamics.linear_perturbation import _wavenumber_grids  # noqa: E402
+
+_kx, _ky = _wavenumber_grids(128, 96, 250.0, 250.0)
+_kp = np.hypot(np.asarray(_kx), np.asarray(_ky)) * H          # k' = k H
+_dc = np.asarray(_kp) <= 0
+_gamma_dc = delta / (2.0 * (delta + 1.0))                     # DC threshold
+
+_m0 = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81, gamma=0.0)
+_u0 = np.asarray(_m0.unrelaxed_modes(_kx, _ky))
+print(f"\nUnrelaxed modes: gamma=0 -> {_u0.sum()} of {_u0.size}; "
+      f"cutoff wavelength {_m0.unrelaxed_cutoff_wavelength_m()}")
+assert not _u0.any(), "gamma = 0 must leave every mode relaxed"
+assert _m0.unrelaxed_cutoff_wavelength_m() == np.inf
+
+# Below the DC threshold: a HIGH-k band only, cut where the asymptote says.
+_gam = 0.02
+assert _gam < _gamma_dc
+_m1 = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81, gamma=_gam)
+_u1 = np.asarray(_m1.unrelaxed_modes(_kx, _ky))
+_cut = _kp[_u1].min()
+_asym = delta / _gam
+print(f"  gamma={_gam}: {_u1.sum()} of {_u1.size} unrelaxed; first unrelaxed k'={_cut:.3f}, "
+      f"asymptotic delta/gamma={_asym:.3f}; lambda_c={_m1.unrelaxed_cutoff_wavelength_m():.0f} m")
+assert not _u1[_dc], "DC must still relax below the DC threshold"
+assert _u1.any() and _u1.all() is not True, "expected a partial (high-k) band"
+assert abs(_cut / _asym - 1.0) < 0.01, f"cutoff {_cut} vs asymptote {_asym}"
+assert np.all(_kp[_u1] >= _cut), "the unrelaxed set must be the HIGH-k tail"
+assert abs(_m1.unrelaxed_cutoff_wavelength_m() / (2 * np.pi * H * _gam / delta) - 1) < 1e-12
+
+# At/above the DC threshold the DC bin joins, and then nothing relaxes.
+_m2 = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81,
+                         gamma=_gamma_dc + 1e-6)
+_u2 = np.asarray(_m2.unrelaxed_modes(_kx, _ky))
+print(f"  gamma={_gamma_dc + 1e-6:.5f} (just past the DC threshold): "
+      f"{_u2.sum()} of {_u2.size} unrelaxed, DC flagged={bool(_u2[_dc][0])}")
+assert _u2[_dc].all(), "DC must be flagged once gamma >= delta/(2(delta+1))"
+assert _u2.all(), "past the DC threshold every mode is unrelaxed"
+print("  PASS: unrelaxed-mode diagnostic matches Re(lambda_+) >= 0 and its asymptote.")
+
+# The kernel itself stays finite there -- it does not mask one bin while
+# returning numbers for an equally unrelaxed band.
+_gh_hot, _gs_hot = _m2.steady_state_kernel(_zero, _zero)
+assert np.isfinite(complex(_gh_hot[0, 0])), "kernel must not NaN-mask only the DC bin"
+assert np.isfinite(complex(_gs_hot[0, 0]))
+_T_hot = complex(_gh_hot[0, 0]) / (fb * (complex(_gh_hot[0, 0]) - complex(_gs_hot[0, 0])))
+assert abs(_T_hot.real - 1.0) < 1e-12, "T(0) = 1 holds for any lambda_0 != 0"
+print("  PASS: kernel is unscreened and self-consistent past the threshold.")
+
+# steady_state must not stay silent when it hands back a non-steady field.
+import warnings as _warnings  # noqa: E402
+
+with _warnings.catch_warnings(record=True) as _w:
+    _warnings.simplefilter("always")
+    steady_state(m_wide, H=H, eta_bar=eta_bar, gamma=_gam)
+_msgs = [str(x.message) for x in _w if issubclass(x.category, RuntimeWarning)]
+assert any("no steady state" in t for t in _msgs), f"expected a warning, got {_msgs}"
+with _warnings.catch_warnings(record=True) as _w2:
+    _warnings.simplefilter("always")
+    steady_state(m_wide, H=H, eta_bar=eta_bar, gamma=0.0)
+# (transfer_functions emits its own numpy divide warnings at k=0; only ours
+# is about stability, so match on the message rather than the category.)
+assert not [x for x in _w2 if "no steady state" in str(x.message)], \
+    "gamma = 0 has no unrelaxed modes and must not warn"
+print("  PASS: steady_state warns iff some mode has no steady state.")
 
 # ---- Stationary forward at large t should match the steady state ----
 from stereo_melt.dynamics import forward

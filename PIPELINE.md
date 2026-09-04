@@ -150,7 +150,12 @@ never branch on basin name inside the library.
   near-oracle on white noise but over-damps under correlated error, and warns
   when its own white estimate exceeds the observation variance; a float
   reproduces a published run but does not transfer across noise levels.
-  Omitting it raises.
+  Omitting it raises. `lam` is **dimensionless** (both loss terms are
+  (m/yr)²), so `"auto"` is an empirical calibration rather than a dimensional
+  identity — and because the smoothness term differences the melt **per pixel**
+  with no `dx`, every calibrated `lam` is specific to the **posting** it was
+  tuned at: carrying a 250 m `lam` to another resolution silently changes the
+  smoothing (the term scales as `res²`).
 - **Area-mean error bars need `n_eff`, not the pixel count**
   (`stereo_melt.spatialstats`). On PIG the melt-error correlation range is
   *not* identifiable from the domain (the fitted range tracks `max_lag`), so
