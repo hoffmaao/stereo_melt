@@ -482,10 +482,14 @@ def fit_variogram(
     r"""Weighted fit of a **sum** of variogram models.
 
     Real DEM error is multi-scale, so a single range fits badly; the default is
-    a nugget plus two spherical structures. Bins are weighted by
-    ``counts/lag`` -- pair count for precision, and :math:`1/h` because the
-    short lags are where a correlation length is actually determined and a
-    plain count weighting lets the long lags dominate.
+    a nugget plus two spherical structures. The per-bin RESIDUAL weight is
+    ``sqrt(counts)/lag``; ``least_squares`` squares it, so the effective COST
+    weight is :math:`\mathrm{counts}/h^2` -- pair count for precision, and
+    :math:`1/h^2` because the short lags are where a correlation length is
+    actually determined and a plain count weighting lets the long lags
+    dominate. Quote the cost weighting, not the residual one, when reasoning
+    about why a fitted range moves (the ``max_lag`` sweep in the module
+    docstring turns on exactly this).
 
     Returns ``dict(params=[(model, sill, range), ...], total_sill, ranges,
     rmse, r2, n_bins)``; ``params`` feeds

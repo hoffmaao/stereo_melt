@@ -461,12 +461,27 @@ def strip_prior_from_residual_planes(
     contain ALIGNMENT FAILURES: on PIG's 513-strip canon ~15 % of strips carry
     residual offsets of 60-207 m and fit scatter of 68-175 m, none of them in
     ``BAD_STRIPS``, and they carried 100 % of the non-robust variance (rms
-    2.3e-3 m/m against a robust 2.0e-6). Strips failing the QC gates --
-    ``sd > max_sd`` (a residual scatter against control of metres means the
-    alignment did not converge) or ``n < min_n`` -- are excluded from the
-    population and get the population value; the summary reports them as
-    ``n_qc_dropped`` and ``qc_dropped`` (dem_ids), which is a bad-strip list
-    the stack-side screens do not produce. ``per_strip=True`` instead uses
+    2.3e-3 m/m against a robust 2.0e-6). Strips failing either QC gate are
+    excluded from the tau^2 population and get the population value, but the
+    two gates mean DIFFERENT THINGS and the summary keeps them apart:
+
+    ``qc_alignment_failures`` / ``n_qc_alignment_failures``
+        ``sd > max_sd``: a residual scatter against control of metres means
+        the alignment did not converge. **This is the only list that is a
+        ``BAD_STRIPS`` candidate** -- a genuinely broken strip the stack-side
+        screens do not catch.
+    ``qc_low_control`` / ``n_qc_low_control``
+        ``n < min_n`` and NOT an alignment failure: a well-aligned strip whose
+        control cloud merely clips its footprint. Its plane is too weakly
+        determined to vote in the population, but the STRIP is fine. Do NOT
+        put these in ``BAD_STRIPS``; dropping them discards good epochs. On
+        PIG's canon the two sets were 15 and 15 -- the 15 failures were added
+        to ``BAD_STRIPS``, the 15 low-control strips (scatter 0.36 m, pc_align
+        ``end_p50`` 0.25 m) were deliberately KEPT.
+
+    The two lists are disjoint and their counts sum to ``n_qc_dropped``;
+    ``qc_dropped`` remains as the pooled "excluded from the tau^2 population"
+    view and is NOT a bad-strip list. ``per_strip=True`` instead uses
     ``max(est_k^2 - se_k^2, floor)`` for each QC-passing strip (noisier).
 
     ``offset`` modes are NOT filled from control: the control lives on the
@@ -493,12 +508,17 @@ def strip_prior_from_residual_planes(
     est = {"tilt_x": ("ax", "se_ax"), "tilt_y": ("ay", "se_ay")}
     # QC: a plane fitted through metres of scatter, or through too few
     # control points, is an alignment failure, not a survey error statistic.
-    qc = np.isfinite(pl["ax"].to_numpy(float))
+    fitted = np.isfinite(pl["ax"].to_numpy(float))
+    failed_align = np.zeros(fitted.shape, bool)
     if max_sd is not None and "sd" in pl.columns:
-        qc &= ~(pl["sd"].to_numpy(float) > max_sd)
+        failed_align = pl["sd"].to_numpy(float) > max_sd
+    low_ctl = np.zeros(fitted.shape, bool)
     if min_n and "n" in pl.columns:
-        qc &= pl["n"].to_numpy(float) >= min_n
-    dropped = [str(d) for d in pl.index[np.isfinite(pl["ax"].to_numpy(float)) & ~qc]]
+        low_ctl = pl["n"].to_numpy(float) < min_n
+    qc = fitted & ~failed_align & ~low_ctl
+    align_ids = [str(d) for d in pl.index[fitted & failed_align]]
+    lowctl_ids = [str(d) for d in pl.index[fitted & low_ctl & ~failed_align]]
+    dropped = [str(d) for d in pl.index[fitted & ~qc]]
     pop, summary = {}, {}
     for comp, (col, secol) in est.items():
         v = pl[col].to_numpy(float)
@@ -516,6 +536,10 @@ def strip_prior_from_residual_planes(
                              var_nonrobust=float(np.var(v[ok])))
     summary["n_qc_dropped"] = len(dropped)
     summary["qc_dropped"] = dropped
+    summary["n_qc_alignment_failures"] = len(align_ids)
+    summary["qc_alignment_failures"] = align_ids
+    summary["n_qc_low_control"] = len(lowctl_ids)
+    summary["qc_low_control"] = lowctl_ids
     tau2 = np.empty(component.size, float)
     for m, (k, comp) in enumerate(zip(strip_index, component)):
         if comp == "offset":

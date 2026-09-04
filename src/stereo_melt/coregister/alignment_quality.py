@@ -245,7 +245,11 @@ def sample_dem_at_points(dem_path: "Path | str", easting: np.ndarray,
     with ``dataset.nodata or 0``, so a DEM written without a nodata tag -- or
     with ``nodata == 0.0``, which that ``or`` collapses to the same value --
     would otherwise hand back a real 0.0 m elevation for every control point
-    overhanging the strip. Downstream that is a residual of ``0 - h_control``,
+    overhanging the strip. The bounds test is HALF-OPEN on the far edges
+    (``e < right``, ``n > bottom``) to match rasterio's flooring ``rowcol``:
+    a point exactly on ``bounds.right`` maps to ``col == width`` and one on
+    ``bounds.bottom`` to ``row == height``, both of which the sampler rejects
+    and fills, so a closed test would let those two edges through. Downstream that is a residual of ``0 - h_control``,
     tens of metres on a shelf, which inflates
     :func:`fit_residual_plane`'s ``sd`` and can make a good strip look like an
     alignment failure. (Robustness only: every PIG and twin aligned DEM
@@ -260,8 +264,8 @@ def sample_dem_at_points(dem_path: "Path | str", easting: np.ndarray,
     with rasterio.open(dem_path) as src:
         b = src.bounds
         inside = (np.isfinite(e) & np.isfinite(n)
-                  & (e >= b.left) & (e <= b.right)
-                  & (n >= b.bottom) & (n <= b.top))
+                  & (e >= b.left) & (e < b.right)
+                  & (n > b.bottom) & (n <= b.top))
         if inside.any():
             vals = np.array([v[0] for v in src.sample(zip(e[inside], n[inside]))], float)
             if src.nodata is not None:

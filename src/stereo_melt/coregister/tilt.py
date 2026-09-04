@@ -522,12 +522,19 @@ def fit_tilt_stack(
         ``10000`` because 40 km disabled slope fitting almost
         everywhere; it was never a value production ran at, which is why
         the default change leaves PIG's published numbers untouched.
-        Two call sites do NOT pass ``min_width`` and so did change
-        behaviour, neither of them production and neither asserting on
-        slopes: ``scripts/test_gpu_tilt_fit.py`` (a GPU
-        segfault/timing smoke script with no assertions) and
-        ``tests/sanity_tilt_stack.py`` (which now exercises the
-        no-gate path deliberately). NOTE the gate still bites hard
+        Three call sites, in two non-production files, do NOT pass
+        ``min_width`` and so take the new default.
+        ``scripts/test_gpu_tilt_fit.py`` is a GPU segfault/timing smoke
+        script that asserts nothing. ``tests/sanity_tilt_stack.py``
+        (both of its fits) takes the new default DELIBERATELY and DOES
+        assert on slopes -- tightly, at ``atol`` 1e-9 mean-removed and
+        1e-6 for the T=2 case, since slope recovery is the whole point
+        of that file. Its 10 km synthetic gives ``dist_ptp`` ~4.7 km,
+        so under the old ``40000`` default ``fit_xy`` was False and the
+        slope columns came back empty: the assertions were passing
+        against a solver that had not fitted anything, which is exactly
+        the stale-test bug this default change fixed. Raising the
+        default again would break that registered gate. NOTE the gate still bites hard
         at the drivers' 10 km: 52.8 % of PIG's 513 epochs fit
         :math:`\alpha_z` only. Changing what the *drivers* pass is a
         science change that moves published melt numbers -- do it

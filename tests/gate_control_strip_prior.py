@@ -19,7 +19,12 @@ C5  control points OUTSIDE a strip's footprint sample as NaN, whatever the
     raster's nodata tag says -- rasterio fills out-of-grid points with
     (nodata or 0), so an untagged or 0-nodata DEM would otherwise return a
     real 0.0 m elevation and turn an overhanging control cloud into a
-    metres-scale fake residual.
+    metres-scale fake residual. Includes the exact right/bottom bounds, which
+    rasterio's flooring rowcol puts one pixel PAST the grid.
+C6  the two QC gates are reported separately: sd > max_sd is an alignment
+    failure (a BAD_STRIPS candidate), n < min_n is a well-aligned strip whose
+    control clips the footprint (must NOT be). Pooling them is how a good
+    epoch gets discarded.
 
 Run::
 
@@ -207,8 +212,14 @@ def main() -> int:
     trc = from_origin(x0c, y0c, res_c, res_c)
     inside_e = np.array([x0c + 10 * res_c, x0c + 30 * res_c])
     inside_n = np.array([y0c - 10 * res_c, y0c - 20 * res_c])
-    outside_e = np.array([x0c - 50 * res_c, x0c + (nxc + 50) * res_c, x0c + 10 * res_c])
-    outside_n = np.array([y0c - 10 * res_c, y0c - 10 * res_c, y0c + 50 * res_c])
+    # far outside on each side, then the two EXACT far edges: rasterio's
+    # rowcol floors, so x == right maps to col == width and y == bottom to
+    # row == height -- both one pixel past the grid, and both filled.
+    right_edge, bottom_edge = x0c + nxc * res_c, y0c - nyc * res_c
+    outside_e = np.array([x0c - 50 * res_c, x0c + (nxc + 50) * res_c, x0c + 10 * res_c,
+                          right_edge, x0c + 10 * res_c])
+    outside_n = np.array([y0c - 10 * res_c, y0c - 10 * res_c, y0c + 50 * res_c,
+                          y0c - 10 * res_c, bottom_edge])
     ee = np.concatenate([inside_e, outside_e])
     nn = np.concatenate([inside_n, outside_n])
     for tag in (None, 0.0, -9999.0):
@@ -220,8 +231,51 @@ def main() -> int:
         z = sample_dem_at_points(pth, ee, nn)
         ok_in = np.allclose(z[:len(inside_e)], 40.0)
         ok_out = bool(np.all(np.isnan(z[len(inside_e):])))
-        check(f"nodata={tag}: inside sampled, outside NaN",
+        check(f"nodata={tag}: inside sampled, outside (incl. exact far edges) NaN",
               ok_in and ok_out, f"inside {z[:len(inside_e)]}  outside {z[len(inside_e):]}")
+    # ...and the near edges, which ARE in the grid, must still sample.
+    z_edge = sample_dem_at_points(tmp / "nodata_None.tif",
+                                  np.array([x0c, x0c + 10 * res_c]),
+                                  np.array([y0c - 10 * res_c, y0c]))
+    check("the left/top bounds are inside the grid and still sample",
+          np.allclose(z_edge, 40.0), f"{z_edge}")
+
+    print("C6  QC gates are reported by reason, not pooled")
+    # One genuine alignment failure (huge sd, plenty of control) and one
+    # well-aligned strip whose control merely clips the footprint (tiny sd,
+    # too few points). Only the first may be offered as a BAD_STRIPS entry.
+    split = df2.copy()
+    fail_id, low_id = split.dem_id.values[0], split.dem_id.values[1]
+    split.loc[0, ["sd", "n"]] = [90.0, 4000]
+    split.loc[1, ["sd", "n"]] = [0.36, 40]
+    s_sp = strip_prior_from_residual_planes(
+        split, split.dem_id.values, sidx, comp, max_sd=5.0, min_n=100,
+        return_summary=True)[1]
+    print(f"      alignment failures {s_sp['qc_alignment_failures']}  "
+          f"low control {s_sp['qc_low_control']}  pooled {s_sp['n_qc_dropped']}")
+    check("the sd failure is named an alignment failure",
+          s_sp["qc_alignment_failures"] == [fail_id] and s_sp["n_qc_alignment_failures"] == 1,
+          f"{s_sp['qc_alignment_failures']}")
+    check("the low-control strip is NOT in the alignment-failure list",
+          low_id not in s_sp["qc_alignment_failures"], f"{s_sp['qc_alignment_failures']}")
+    check("the low-control strip is reported under its own reason",
+          s_sp["qc_low_control"] == [low_id] and s_sp["n_qc_low_control"] == 1,
+          f"{s_sp['qc_low_control']}")
+    check("the two lists are disjoint and sum to the pooled count",
+          not set(s_sp["qc_alignment_failures"]) & set(s_sp["qc_low_control"])
+          and s_sp["n_qc_alignment_failures"] + s_sp["n_qc_low_control"] == s_sp["n_qc_dropped"],
+          f"{s_sp['n_qc_alignment_failures']} + {s_sp['n_qc_low_control']} "
+          f"vs {s_sp['n_qc_dropped']}")
+    # A strip that trips BOTH gates is an alignment failure, counted once.
+    both = df2.copy()
+    both.loc[0, ["sd", "n"]] = [90.0, 40]
+    s_both = strip_prior_from_residual_planes(
+        both, both.dem_id.values, sidx, comp, max_sd=5.0, min_n=100,
+        return_summary=True)[1]
+    check("a strip failing both gates counts once, as an alignment failure",
+          s_both["qc_alignment_failures"] == [fail_id] and s_both["qc_low_control"] == []
+          and s_both["n_qc_dropped"] == 1,
+          f"align {s_both['qc_alignment_failures']} low {s_both['qc_low_control']}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1
