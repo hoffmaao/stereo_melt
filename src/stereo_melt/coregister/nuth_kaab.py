@@ -11,8 +11,8 @@ r"""Nuth & Kääb (2011) sub-pixel translation, point-cloud against raster.
 **Why this exists.** ASP ``pc_align`` (6-DOF point-to-plane ICP) is our primary
 coregistration, and it stays that way -- it solves rotation, which nothing here
 does. But ICP's weakness is exactly sub-pixel *horizontal* accuracy, and the
-community convention (xDEM's documented recommendation) is to **finish** an ICP
-or deramp pipeline with Nuth & Kääb rather than to use either alone. Our chain
+standard DEM-coregistration practice is to **finish** an ICP or deramp
+pipeline with Nuth & Kääb rather than to use either alone. Our chain
 had no such refinement step; this is it. It does not replace ``pc_align``.
 
 **The method.** A DEM displaced horizontally by :math:`\mathbf{s}=(s_x,s_y)`
@@ -40,8 +40,8 @@ Two ``method`` options, same first-order model:
 ``"nuth_kaab"``
     The published form above: divide by :math:`\tan\alpha`, fit
     :math:`[\sin\psi, \cos\psi, 1]`, recover :math:`\Delta z = c\,
-    \overline{\tan\alpha}`. Use it when comparability with xDEM /
-    the literature is the point. Needs the ``min_slope_deg`` guard because
+    \overline{\tan\alpha}`. Use it when comparability with the published
+    method is the point. Needs the ``min_slope_deg`` guard because
     :math:`dh/\tan\alpha` blows up as the terrain flattens.
 ``"gradient"`` (default)
     Fit :math:`dh = -g_x s_x - g_y s_y + \Delta z` directly on
@@ -62,8 +62,9 @@ align path without re-measuring. The NMAD pairs below were measured while
 ``nmad_after`` was still taken over every finite control point rather than
 over the slope-gated set ``nmad_before`` uses (fixed 2026-09-03); they are
 kept as the figures the decision was actually made on, and the like-for-like
-pair has not been re-measured on the strips.** Run as xDEM recommends, i.e. as
-a finish after ``pc_align``, on the 173 uncorrupted processing-twin strips
+pair has not been re-measured on the strips.** Run as the literature
+recommends, i.e. as a finish after ``pc_align``, on the 173 uncorrupted
+processing-twin strips
 against the same control ``pc_align`` was fed, it makes the residual WORSE:
 NMAD 0.756 -> 0.774 m, residual-offset rms 0.181 -> 0.285 m, residual tilt
 essentially unchanged (it models translation, not tilt). It reports shifts of
@@ -112,7 +113,7 @@ def terrain_slope_aspect(dem: np.ndarray, dx: float, dy: float):
     ``gx``/``gy`` are :math:`\partial z/\partial\mathrm{east}` and
     :math:`\partial z/\partial\mathrm{north}` -- note the row axis is negated
     so that ``gy`` is a true northward derivative. ``aspect`` is measured
-    clockwise from north and points **downhill**, matching the GDAL/xDEM
+    clockwise from north and points **downhill**, matching the GDAL
     convention.
     """
     dz_drow, dz_dcol = np.gradient(dem, dy, dx)

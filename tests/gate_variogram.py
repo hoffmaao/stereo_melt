@@ -10,7 +10,7 @@ n_eff path is the one that has to be right.
 
 G1  recovery: simulate a Gaussian field with a KNOWN correlation range and
     recover range and sill from the empirical variogram. Ranges are the
-    scikit-gstat/xDEM EFFECTIVE range, so a Gaussian covariance of e-folding
+    standard geostatistical EFFECTIVE range, so a Gaussian covariance of e-folding
     scale L is the gaussian model with range 2L -- the expectations below are
     stated that way, not re-tuned to whatever the fit prints.
 G2  limits: white noise -> pure nugget, n_eff ~ N; a field correlated across
@@ -85,7 +85,7 @@ def main() -> int:
     # gaussian_field synthesises C(h) = exp(-(h/CORR)^2), i.e. the gaussian
     # model with e-folding scale a = CORR. The effective range reported by
     # fit_variogram is r = 2a (gamma(r) = 98 % of the sill), which is the
-    # number an xDEM/scikit-gstat fit of the same field would print.
+    # number a published fit of the same field would report.
     EFF_RANGE = 2.0 * CORR
     z = gaussian_field(N, RES, CORR, SIG, rng).ravel()
     ev = empirical_variogram(e, n, z, max_lag=10000.0, n_bins=18, seed=1)

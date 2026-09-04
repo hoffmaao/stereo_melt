@@ -10,6 +10,12 @@
 4. The self-test is INVARIANT to the ``eta_bar`` calibration knob (forward and
    inverse share the operator), confirming that on real truth the residual is a
    forward-model choice, not a machinery defect.
+5. The operator is DC-BLIND by policy: a uniform melt produces no surface
+   response, and adding a constant to the melt does not change the output. The
+   variational inverse is fitted against a high-passed target, so a live k=0
+   bin would let it fit a domain-mean melt to the high-pass's leftovers; the
+   mean pin in ``variational_melt_inverse`` assumes this null direction exists.
+   Asserted here so the general kernel's k=0 limit cannot silently reach it.
 
 Run::
 
@@ -117,6 +123,34 @@ def main():
     n_fail += not ok
     print(f"[4] eta_bar-invariant self-test: ratios {ratios[0]:.3f}, "
           f"{ratios[1]:.3f} {'PASS' if ok else 'FAIL'}")
+
+    # 5. DC-blind by policy: a constant melt is in the operator's null space.
+    with torch.no_grad():
+        flat_out = fwd(torch.full((NY, NX), 3.7, dtype=torch.float64)).cpu().numpy()
+        shifted = fwd(torch.from_numpy(m_true + 3.7)).cpu().numpy()
+    const_resp = float(np.abs(flat_out).max())
+    shift_resp = float(np.abs(shifted - torch_out).max())
+    dc_bin = abs(complex(M_h[0, 0]))
+    ok = const_resp < 1e-12 and shift_resp < 1e-12 and dc_bin == 0.0
+    n_fail += not ok
+    print(f"[5] DC-blind: uniform melt -> max|dzs| {const_resp:.2e}; "
+          f"m + const unchanged to {shift_resp:.2e}; |M_h[0,0]| {dc_bin:.2e} "
+          f"{'PASS' if ok else 'FAIL'}")
+
+    # A blended (spatially varying) operator must inherit the same policy: a
+    # convex blend of per-bin responses is only DC-blind if every bin is.
+    from stereo_melt.dynamics.stubblefield_forward import BlendedStubblefieldForward
+    Hf = np.full((NY, NX), H)
+    uxf = np.where(X > X.mean(), 2.0 * U, U)
+    blend = BlendedStubblefieldForward(NY, NX, RES, RES, Hf, uxf,
+                                       np.zeros((NY, NX)), n_bins=2)
+    with torch.no_grad():
+        b_const = float(np.abs(blend(torch.full((NY, NX), 3.7,
+                                                dtype=torch.float64)).cpu().numpy()).max())
+    ok = b_const < 1e-12
+    n_fail += not ok
+    print(f"[6] blended operator is DC-blind too: uniform melt -> max|dzs| "
+          f"{b_const:.2e} {'PASS' if ok else 'FAIL'}")
 
     print(f"\n{'ALL PASS' if n_fail == 0 else f'{n_fail} FAILURES'}")
     sys.exit(1 if n_fail else 0)

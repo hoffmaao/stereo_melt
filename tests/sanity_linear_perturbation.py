@@ -10,11 +10,16 @@ Reproduces the qualitative behavior of paper Figures 7-8:
   damped and asymmetric.
 """
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import xarray as xr
 
-from stereo_melt.constants import rhoi, rhow
-from stereo_melt.dynamics import steady_state
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from stereo_melt.constants import rhoi, rhow  # noqa: E402
+from stereo_melt.dynamics import steady_state  # noqa: E402
 
 print("Linear perturbation module imports OK.")
 

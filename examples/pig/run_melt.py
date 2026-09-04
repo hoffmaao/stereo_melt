@@ -898,9 +898,10 @@ def main(
         #                      background inside the model, projected out of the
         #                      residual each step. No wavelength band is
         #                      discarded; sigma_hp_H is then ignored.
-        # The operator stays DC-blind either way (that is a property of T(k),
-        # not of the filter), but with bg_degree the unconstrained long
-        # wavelengths are left to the background/prior instead of deleted.
+        # The operator stays DC-blind either way (its k=0 bin is pinned to
+        # zero in stubblefield_forward_multiplier, independently of the
+        # filter), but with bg_degree the unconstrained long wavelengths are
+        # left to the background/prior instead of deleted.
         _bg = os.environ.get("PIG_VAR_BG_DEGREE", "").strip()
         varfit = variational_melt_rate(
             stack, vx, vy, floating_mask=floating, d=firn,

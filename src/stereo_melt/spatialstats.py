@@ -8,9 +8,9 @@
 
 r"""Empirical variograms and spatially-correlated error propagation.
 
-The Hugonnet et al. (2022) treatment of DEM error, in the vocabulary xDEM's
-``spatialstats`` module uses, so our numbers are comparable with the
-community's. Companion to :mod:`stereo_melt.spectra` (radial PSD): a variogram
+The Hugonnet et al. (2022) treatment of DEM error, in the standard
+geostatistical vocabulary the DEM-error literature uses, so our numbers are
+comparable with the community's. Companion to :mod:`stereo_melt.spectra` (radial PSD): a variogram
 is the same second-order information in lag space, and it is the form the DEM
 literature reports and the form that propagates to the error of a **spatial
 average** -- which is what a basal-melt flux is.
@@ -66,8 +66,9 @@ spanning 1.0-89.8 m/yr). Three checks say that is largely an artefact:
   and the east's own model only reaches 1.47. The clean "-> 1.00" is a
   whole-domain fit quoting its in-sample residual.
 
-xDEM's version is calibrated on small regional differences where sigma really
-is terrain-driven and the domain cannot hold much low-wavenumber structure;
+The published method is calibrated on small regional differences where sigma
+really is terrain-driven and the domain cannot hold much low-wavenumber
+structure;
 PIG is 156 x 107 km with 33 km error coherence, and there the two are
 confounded. **What survives:** a real but modest and noisy decrease of error
 with epoch count, consistent with the previously measured sigma(n) slope --
@@ -111,14 +112,24 @@ why :func:`fit_variogram` takes a list.
 
 Range convention
 ----------------
-Every range accepted or reported here is the scikit-gstat / xDEM **effective**
-range :math:`r` -- the lag at which a structure has essentially reached its
-sill -- not the internal e-folding scale :math:`a`. The two coincide only for
+Every range this **API** accepts or reports -- ``variogram_model``'s ``rng_``,
+``fit_variogram``'s ``ranges``, and the ``params`` tuples the propagation
+functions consume -- is the standard geostatistical **effective** range
+:math:`r`: the lag at which a structure has essentially reached its sill, not
+the internal e-folding scale :math:`a`. The two coincide only for
 ``spherical`` (:math:`a=r`); ``exponential`` uses :math:`a=r/3` and
 ``gaussian`` :math:`a=r/2`, so :math:`\gamma(r)` is 95 % and 98 % of the sill
-respectively. This is the whole point of the comparability claim above:
+respectively. That is what makes the comparability claim above mean anything:
 quoting an e-folding scale as a "range" would report an exponential structure
-as 3x shorter than ``xdem.spatialstats`` measures the same field.
+as 3x shorter than the literature measures the same field.
+
+This is a statement about the API, not a retroactive relabelling of the
+measurements above. Every PIG figure quoted in this docstring came from a
+``spherical`` structure, where :math:`a = r` already, so none of them moves
+under the convention: the 4.12 km strip-residual range, the ``max_lag`` sweep
+of melt-error ranges, the standardised short and long ranges, and the 33 km
+``log sigma`` range in the retraction are all unaffected and need no
+re-derivation.
 """
 from __future__ import annotations
 
@@ -159,7 +170,8 @@ _MAD_TO_SIGMA = 1.4826
 # Ours is strongly heteroscedastic (PIG melt error: robust sd 12 m/yr against
 # an rms of 90), so this step is not optional.
 #
-# xDEM bins on terrain (slope, maximum curvature). The equivalent quality
+# The published method bins on terrain (slope, maximum curvature). The
+# equivalent quality
 # proxies for a DEM-stack melt product are the per-pixel epoch COUNT and the
 # regression RMSE -- the count dependence is already measured (sigma ~ n^-0.87
 # on the trunk, n^-0.38 on the slow shelf), which is exactly the kind of
@@ -432,7 +444,7 @@ def empirical_variogram(
 def variogram_model(h: np.ndarray, model: str, sill: float, rng_: float) -> np.ndarray:
     """One variogram model evaluated at lags ``h``.
 
-    ``rng_`` is the **effective** range in metres (scikit-gstat / xDEM
+    ``rng_`` is the **effective** range in metres (the standard geostatistical
     convention -- see the module docstring): the e-folding scale used inside
     each model is ``a = r`` for ``spherical``, ``r/3`` for ``exponential`` and
     ``r/2`` for ``gaussian``.
@@ -479,7 +491,7 @@ def fit_variogram(
     rmse, r2, n_bins)``; ``params`` feeds
     :func:`covariance_from_variogram` and :func:`number_effective_samples`.
     Every range is the **effective** range (module docstring), so it is
-    directly comparable with a published xDEM/scikit-gstat number.
+    directly comparable with a published DEM-error range.
     """
     from scipy.optimize import least_squares
 

@@ -2,8 +2,8 @@
 
 Why this exists. `pc_align` (6-DOF ICP) is our primary coregistration and
 solves rotation, which this does not; but ICP's known weakness is sub-pixel
-HORIZONTAL accuracy, and the community convention (xDEM) is to finish such a
-pipeline with Nuth & Kääb. This gate checks the refinement itself on
+HORIZONTAL accuracy, and standard DEM-coregistration practice is to finish
+such a pipeline with Nuth & Kääb. This gate checks the refinement itself on
 synthetics where the true shift is known.
 
 N1  recovery: both methods find a known sub-pixel (dx, dy, dz) on real-ish

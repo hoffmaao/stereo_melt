@@ -10,12 +10,17 @@ Start from a flat reference DEM. Add a known per-epoch planar tilt
 Also tests the T=2 degenerate case.
 """
 
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from stereo_melt.backend import backend as _BACKEND
-from stereo_melt.coregister.tilt import apply_tilt, fit_tilt_stack
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from stereo_melt.backend import backend as _BACKEND  # noqa: E402
+from stereo_melt.coregister.tilt import apply_tilt, fit_tilt_stack  # noqa: E402
 
 print("All new modules import.")
 
