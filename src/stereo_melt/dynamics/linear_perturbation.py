@@ -100,12 +100,37 @@ operator                                            ``k = 0`` bin
                                                     :func:`steady_state` and
                                                     ``forward(stationary=True)``
                                                     agree at DC.
-:func:`inverse_stationary`, :func:`inverse_dhdt`    structurally blind (they
-                                                    invert the zeroed kernel);
-                                                    ``recover_dc=True`` splices
-                                                    the mean back from a 1-D OLS
-                                                    slope of the basin-mean
-                                                    :math:`h(t)`.
+:func:`inverse_stationary`, :func:`inverse_dhdt`    **not** blind: both build
+                                                    their kernel from
+                                                    ``kernel_time_integral_stationary``,
+                                                    so the DC bin is finite and
+                                                    non-zero and the data do
+                                                    constrain the mean.
+                                                    ``recover_dc=True``
+                                                    nonetheless OVERWRITES it
+                                                    with a mass-balance estimate
+                                                    :math:`\bar m = \bar a -
+                                                    R\langle dh/dt\rangle`
+                                                    (from a 1-D OLS slope of the
+                                                    basin-mean :math:`h(t)` in
+                                                    ``inverse_stationary``, from
+                                                    the finite-cell mean of
+                                                    ``dh_dt`` in
+                                                    ``inverse_dhdt``);
+                                                    ``recover_dc=False`` keeps
+                                                    the kernel's own DC.
+:class:`~.pseudospectral.PerturbationForwardOp` and everything built on it
+(:func:`~.pseudospectral.pseudospectral_eulerian_inverse`,
+:mod:`~.parcel_frame_inverse`)                      genuinely DC-blind: it uses
+                                                    ``transfer_functions``
+                                                    DIRECTLY, where ``B = 0`` at
+                                                    DC makes :math:`K_h(0)=0`.
+                                                    This is the row the
+                                                    stationary inverses above
+                                                    are often confused with --
+                                                    the two families differ
+                                                    because they build from
+                                                    different kernels.
 :class:`~.perturbation_dct.PerturbationForwardOpDCT`  same as the FFT parent --
                                                     it only swaps the wavenumber
                                                     lattice, and DCT bin 0 is
@@ -132,10 +157,15 @@ operator                                            ``k = 0`` bin
                                                     authoritative, not lifted).
 ==================================================  ==========================
 
-The three ``pinned`` entries are the ones that intentionally override the
-kernel: two because unity is what a *ratio* tends to in the hydrostatic limit,
-one because the operator's own input has had its mean deleted. Everything else
-either carries the physical limit or is honestly blind and says so.
+The four ``pinned`` entries are the ones that intentionally override the
+kernel: three because unity is what a *ratio* or a *filter* tends to in the
+hydrostatic limit, one because the operator's own input has had its mean
+deleted. The rest split into two families that are easy to conflate: anything
+built on ``kernel_time_integral_stationary`` (the stationary inverses) carries
+the physical DC limit and is NOT blind, while anything built on
+``transfer_functions`` directly (the pseudospectral operators) is blind because
+``B = 0`` there. A DC splice on top of the first family is a deliberate
+preference for a mass-balance estimate, not a repair of a missing mode.
 
 Implementation notes
 --------------------
@@ -448,9 +478,12 @@ class LinearPerturbation:
         #   I_h(0, t) = -(δ/(δ+1)) · expm1(λ+(0)·t) / λ+(0)
         #   I_s(0, t) =  (1/(δ+1)) · expm1(λ+(0)·t) / λ+(0)
         # In the long-time limit I_h → -2, matching steady_state_kernel's
-        # G_h analytic value, which is the right cross-check. λ+(0) ≥ 0
-        # leaves the mode unrelaxed; steady_state_kernel returns NaN there
-        # while this integral stays finite at finite t.
+        # G_h analytic value, which is the right cross-check. Neither method
+        # screens for stability: at λ+(0) ≥ 0 the mode never relaxes, and this
+        # integral stays finite at finite t while steady_state_kernel returns
+        # the analytic continuation 1/λ+(0) -- finite for λ+(0) > 0, ±inf only
+        # at exactly λ+(0) = 0. unrelaxed_modes is the single place that says
+        # which modes those are; do not re-state the rule here.
         kmag = xp.sqrt(kx ** 2 + ky ** 2)
         zero_mask = kmag <= 0
         if bool(xp.any(zero_mask)):
@@ -560,9 +593,14 @@ class LinearPerturbation:
           (:meth:`unrelaxed_cutoff_wavelength_m`). ANY :math:`\gamma > 0`
           leaves such a band; it is simply off the grid until :math:`\gamma`
           is large enough. At :math:`H = 500` m and
-          :math:`\bar\eta = 10^{14}` Pa s, :math:`t_r = 1.41` yr, so an
-          ordinary trunk divergence of 0.04 yr\ :sup:`-1` puts the cut at
-          ~1.5 km.
+          :math:`\bar\eta = 10^{14}` Pa s, :math:`t_r = 1.41` yr, so a
+          divergence of 0.02 yr\ :sup:`-1` gives
+          :math:`\gamma = 0.028` and puts the cut at ~745 m (1.5 H) -- a
+          genuine high-:math:`k` band, with everything longer still relaxing.
+          The regime changes above :math:`\nabla\!\cdot\!u = 0.038`
+          yr\ :sup:`-1`, where :math:`\gamma` passes the DC threshold below
+          and NO mode relaxes; 0.04 yr\ :sup:`-1` is already there, so do not
+          read it as a merely-short-wavelength case.
         * **The DC bin**, evaluated at :math:`\lambda_0` from
           :meth:`dc_eigenvalue` rather than at the hard-zeroed :math:`\gamma`
           :meth:`transfer_functions` would report. It is unrelaxed once
@@ -1100,9 +1138,11 @@ def inverse_dhdt(
         # Mass-balance DC mode (no advection through boundary, stationary
         # forcing). Internally we stay in Stubblefield's positive=melt
         # convention: mean(dh/dt) * R = -mean(m) + mean(a_dot), with
-        # R = rho_w / (rho_w - rho_i). The spectral inverse zeros m at
-        # k=0 by construction (kernel R_reg, B_reg both 0 there); we
-        # restore the spatial-mean offset analytically. The final
+        # R = rho_w / (rho_w - rho_i). K is built from
+        # kernel_time_integral_stationary, so its k=0 bin is NOT zero and the
+        # inverse does constrain the mean; this REPLACES that kernel-derived
+        # level with the mass-balance one rather than restoring a missing
+        # mode. recover_dc=False keeps the kernel's own DC. The final
         # negation below flips both the AC and DC modes to the Shean
         # public convention (positive = accretion).
         R_hydro = rho_w / (rho_w - rho_i)
@@ -1302,10 +1342,12 @@ def inverse_stationary(
         m_si = to_numpy(_idctn(m_hat_si))
 
     if recover_dc:
-        # Splice the mass-balance DC mode back in. The stationary
-        # spectral inverse is structurally blind to k=0 (kernel R_reg,
-        # B_reg both zero there); we recover the spatial-mean melt rate
-        # from a 1D OLS slope of the basin-mean h(t) time series.
+        # Replace the DC mode with the mass-balance estimate. A_i comes from
+        # kernel_time_integral_stationary, whose k=0 bin is finite and
+        # non-zero, so this is a preference for the budget-exact level over
+        # the kernel's own, not a repair of a mode the inverse cannot see
+        # (recover_dc=False keeps the kernel's). We take the spatial-mean melt
+        # rate from a 1D OLS slope of the basin-mean h(t) time series.
         # Internally we stay in Stubblefield's positive=melt convention
         # (m_DC = -R · ⟨dh/dt⟩ + ⟨a_dot⟩, no advection through tile);
         # the final negation below flips everything to the Shean public

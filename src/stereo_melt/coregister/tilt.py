@@ -518,9 +518,16 @@ def fit_tilt_stack(
         says otherwise, and ill-conditioned slopes are damped
         continuously by the ``Ex``/``Ey`` Tikhonov prior rather than by
         a cliff. The old default was ``40000`` (inherited from Shean
-        PIG), which every basin driver already overrode with ``10000``
-        because 40 km disabled slope fitting almost everywhere; it was
-        never a value production ran at. NOTE the gate still bites hard
+        PIG), which all seven basin drivers already overrode with
+        ``10000`` because 40 km disabled slope fitting almost
+        everywhere; it was never a value production ran at, which is why
+        the default change leaves PIG's published numbers untouched.
+        Two call sites do NOT pass ``min_width`` and so did change
+        behaviour, neither of them production and neither asserting on
+        slopes: ``scripts/test_gpu_tilt_fit.py`` (a GPU
+        segfault/timing smoke script with no assertions) and
+        ``tests/sanity_tilt_stack.py`` (which now exercises the
+        no-gate path deliberately). NOTE the gate still bites hard
         at the drivers' 10 km: 52.8 % of PIG's 513 epochs fit
         :math:`\alpha_z` only. Changing what the *drivers* pass is a
         science change that moves published melt numbers -- do it

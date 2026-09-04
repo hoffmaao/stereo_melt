@@ -15,6 +15,11 @@ C2  the population tau^2 is the true across-strip variance -- INCLUDING the
     var(est) overshoots, and subtracting mean(se^2) brings it back;
 C3  the prior maps onto strip_mode_design's (strip_index, component) modes,
     per-strip and population; offset modes refuse to run without offset_var.
+C5  control points OUTSIDE a strip's footprint sample as NaN, whatever the
+    raster's nodata tag says -- rasterio fills out-of-grid points with
+    (nodata or 0), so an untagged or 0-nodata DEM would otherwise return a
+    real 0.0 m elevation and turn an overhanging control cloud into a
+    metres-scale fake residual.
 
 Run::
 
@@ -39,6 +44,7 @@ from rasterio.transform import from_origin  # noqa: E402
 from stereo_melt.coregister.alignment_quality import (  # noqa: E402
     fit_residual_plane,
     residual_planes_for_strips,
+    sample_dem_at_points,
 )
 from stereo_melt.dynamics.budget_bridging import strip_prior_from_residual_planes  # noqa: E402
 
@@ -191,6 +197,31 @@ def main() -> int:
     # direct fit_residual_plane sanity: too few points -> NaNs, n reported
     r = fit_residual_plane(np.arange(10.0), np.arange(10.0), np.zeros(10))
     check("fit refuses < min_points with NaNs and n", np.isnan(r["ax"]) and r["n"] == 10)
+
+    print("C5  control outside the footprint samples as NaN, for ANY nodata tag")
+    # rasterio's sample() fills out-of-grid points with (nodata or 0), so the
+    # two tags that collapse to a real 0.0 m are the ones that matter: absent,
+    # and 0.0 itself. A constant-40 m DEM makes an unmasked fill obvious.
+    res_c, nxc, nyc = 50.0, 60, 40
+    x0c, y0c = -1_600_000.0, -290_000.0
+    trc = from_origin(x0c, y0c, res_c, res_c)
+    inside_e = np.array([x0c + 10 * res_c, x0c + 30 * res_c])
+    inside_n = np.array([y0c - 10 * res_c, y0c - 20 * res_c])
+    outside_e = np.array([x0c - 50 * res_c, x0c + (nxc + 50) * res_c, x0c + 10 * res_c])
+    outside_n = np.array([y0c - 10 * res_c, y0c - 10 * res_c, y0c + 50 * res_c])
+    ee = np.concatenate([inside_e, outside_e])
+    nn = np.concatenate([inside_n, outside_n])
+    for tag in (None, 0.0, -9999.0):
+        pth = tmp / f"nodata_{tag}.tif"
+        kw = {} if tag is None else {"nodata": tag}
+        with rasterio.open(pth, "w", driver="GTiff", height=nyc, width=nxc, count=1,
+                           dtype="float32", transform=trc, **kw) as dst:
+            dst.write(np.full((nyc, nxc), 40.0, np.float32), 1)
+        z = sample_dem_at_points(pth, ee, nn)
+        ok_in = np.allclose(z[:len(inside_e)], 40.0)
+        ok_out = bool(np.all(np.isnan(z[len(inside_e):])))
+        check(f"nodata={tag}: inside sampled, outside NaN",
+              ok_in and ok_out, f"inside {z[:len(inside_e)]}  outside {z[len(inside_e):]}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

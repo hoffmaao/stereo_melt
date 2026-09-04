@@ -238,13 +238,35 @@ def load_control_glob(control_dir: "Path | str", dem_id: str,
 
 def sample_dem_at_points(dem_path: "Path | str", easting: np.ndarray,
                          northing: np.ndarray) -> np.ndarray:
-    """Aligned-DEM height at each point (NaN where nodata / outside), windowed read."""
+    """Aligned-DEM height at each point (NaN where nodata / outside), windowed read.
+
+    Out-of-footprint points are masked against the raster BOUNDS, not against
+    the nodata sentinel. rasterio's ``sample`` fills points outside the grid
+    with ``dataset.nodata or 0``, so a DEM written without a nodata tag -- or
+    with ``nodata == 0.0``, which that ``or`` collapses to the same value --
+    would otherwise hand back a real 0.0 m elevation for every control point
+    overhanging the strip. Downstream that is a residual of ``0 - h_control``,
+    tens of metres on a shelf, which inflates
+    :func:`fit_residual_plane`'s ``sd`` and can make a good strip look like an
+    alignment failure. (Robustness only: every PIG and twin aligned DEM
+    carries ``nodata = -9999.0``, so no measured result on record went through
+    the unguarded path.)
+    """
     import rasterio
 
+    e = np.asarray(easting, float)
+    n = np.asarray(northing, float)
+    z = np.full(e.shape, np.nan, float)
     with rasterio.open(dem_path) as src:
-        z = np.array([v[0] for v in src.sample(zip(easting, northing))], float)
-        if src.nodata is not None:
-            z[z == src.nodata] = np.nan
+        b = src.bounds
+        inside = (np.isfinite(e) & np.isfinite(n)
+                  & (e >= b.left) & (e <= b.right)
+                  & (n >= b.bottom) & (n <= b.top))
+        if inside.any():
+            vals = np.array([v[0] for v in src.sample(zip(e[inside], n[inside]))], float)
+            if src.nodata is not None:
+                vals[vals == src.nodata] = np.nan
+            z[inside] = vals
     return z
 
 

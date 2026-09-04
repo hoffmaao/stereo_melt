@@ -152,9 +152,20 @@ _asym = delta / _gam
 print(f"  gamma={_gam}: {_u1.sum()} of {_u1.size} unrelaxed; first unrelaxed k'={_cut:.3f}, "
       f"asymptotic delta/gamma={_asym:.3f}; lambda_c={_m1.unrelaxed_cutoff_wavelength_m():.0f} m")
 assert not _u1[_dc], "DC must still relax below the DC threshold"
-assert _u1.any() and _u1.all() is not True, "expected a partial (high-k) band"
-assert abs(_cut / _asym - 1.0) < 0.01, f"cutoff {_cut} vs asymptote {_asym}"
-assert np.all(_kp[_u1] >= _cut), "the unrelaxed set must be the HIGH-k tail"
+# A genuine PARTIAL band: some modes in, some out (bool(...) so a numpy scalar
+# is compared by value, not against the Python singleton).
+assert bool(_u1.any()) and bool((~_u1).any()), "expected a partial (high-k) band"
+# ...and the band is the HIGH-k tail, split at the ANALYTIC cut delta/gamma,
+# which is computed from the model constants and never from the mask itself.
+# A scattered mid-k mask would fail this even though it passed the old form.
+_tol = 0.01
+_far_above = _kp > _asym * (1.0 + _tol)
+_far_below = _kp < _asym * (1.0 - _tol)
+assert _far_above.any() and bool(_u1[_far_above].all()), \
+    "every k' well above delta/gamma must be unrelaxed"
+assert _far_below.any() and not bool(_u1[_far_below].any()), \
+    "no k' well below delta/gamma may be unrelaxed"
+assert abs(_cut / _asym - 1.0) < _tol, f"cutoff {_cut} vs asymptote {_asym}"
 assert abs(_m1.unrelaxed_cutoff_wavelength_m() / (2 * np.pi * H * _gam / delta) - 1) < 1e-12
 
 # At/above the DC threshold the DC bin joins, and then nothing relaxes.
