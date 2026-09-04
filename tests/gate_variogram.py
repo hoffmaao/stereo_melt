@@ -30,10 +30,13 @@ H5  binning keeps samples sitting exactly at a covariate's CEILING. Quantile
     edges put the top edge at the data maximum, and a per-pixel epoch count
     piles up there, so dropping them would estimate the top sigma bin without
     the very pixels it describes.
-G6  `counts` is a pair count, not a replication count: when the subsample is
-    the whole cloud, extra draws re-form the identical pairs, so repeating
-    them must not inflate `counts` nor let a pair-starved bin clear
-    `min_pairs`.
+G6  `counts` is a DISTINCT-pair count at every n_subsample, not a replication
+    count. Overlapping draws (total overlap once n_subsample reaches the cloud
+    size, ~n_draws-fold just below it) must not inflate `counts` nor let a
+    pair-starved bin clear `min_pairs`.
+H6  a covariate may share a name with a statistic -- `count` is this module's
+    headline covariate -- so the bin interval and the sample count must both
+    survive in the binning table.
 
 Run::
 
@@ -346,8 +349,13 @@ def main() -> int:
           and np.allclose(one["gamma"], ten["gamma"], rtol=0, atol=0)
           and len(one["lags"]) == len(ten["lags"]),
           f"counts equal {np.array_equal(one['counts'], ten['counts'])}")
-    check("only one pass is made when the subsample is the whole cloud",
-          one["n_draws_used"] == 1 and ten["n_draws_used"] == 1)
+    # All n_draws passes still RUN; deduplication is what makes them harmless,
+    # so the pooled total grows with n_draws while `counts` does not.
+    check("every draw runs, but only distinct pairs are counted",
+          ten["n_draws_used"] == 10
+          and np.array_equal(ten["n_pairs_pooled"], 10 * one["n_pairs_pooled"])
+          and np.array_equal(ten["counts"], one["counts"]),
+          f"pooled {ten['n_pairs_pooled'][:3]} vs counts {ten['counts'][:3]}")
     # every admitted bin must really hold min_pairs DISTINCT pairs
     iu6, ju6 = np.triu_indices(m6b, k=1)
     d6 = np.hypot(e6[iu6] - e6[ju6], n6[iu6] - n6[ju6])
@@ -366,6 +374,53 @@ def main() -> int:
                               n_draws=4, seed=1)
     check("a genuine subsample still pools every draw", sub["n_draws_used"] == 4,
           f"{sub['n_draws_used']}")
+
+    # Just BELOW the subsample size is the regime the exhaustive special case
+    # missed: 301 points at n_subsample=300 re-forms a given pair in ~10 of 10
+    # draws, so counts must still be distinct pairs, not ~10x them.
+    e7 = np.append(e6, 12500.0)
+    n7 = np.append(n6, 12500.0)
+    v7 = np.append(v6, 0.25)
+    near = empirical_variogram(e7, n7, v7, bin_edges=edges6, n_subsample=m6b,
+                               n_draws=10, seed=1)
+    iu7, ju7 = np.triu_indices(e7.size, k=1)
+    d7 = np.hypot(e7[iu7] - e7[ju7], n7[iu7] - n7[ju7])
+    all_counts7 = np.array([int(((d7 >= edges6[b]) & (d7 < edges6[b + 1])).sum())
+                            for b in range(edges6.size - 1)])
+    kept7 = np.searchsorted(0.5 * (edges6[:-1] + edges6[1:]), near["lags"])
+    infl = near["n_pairs_pooled"] / np.maximum(near["counts"], 1)
+    print(f"      N={e7.size}, n_subsample={m6b}, n_draws=10: pooled/distinct "
+          f"{infl.min():.1f}-{infl.max():.1f}x, counts <= all-pairs: "
+          f"{bool(np.all(near['counts'] <= all_counts7[kept7]))}")
+    check("draws really do overlap in this regime (pooled >> distinct)",
+          float(infl.max()) > 5.0, f"{float(infl.max()):.1f}x")
+    check("counts stay a DISTINCT-pair count just below n_subsample",
+          bool(np.all(near["counts"] <= all_counts7[kept7])),
+          f"{near['counts'][:4]} vs all-pairs {all_counts7[kept7][:4]}")
+    check("no bin admitted on fewer than min_pairs distinct pairs (subsampled)",
+          int(near["counts"].min()) >= 30, f"{int(near['counts'].min())}")
+
+    print("H6  a covariate may be named after a statistic")
+    rh6 = np.random.default_rng(41)
+    cnt6 = rh6.integers(4, 60, 800).astype(float)
+    df6 = nd_binning(rh6.normal(0, 1.0, 800), [cnt6], ["count"])
+    m6 = df6[df6["nd"] == 1]
+    import pandas as _pd
+    check("the bin interval survives under <name>_bin",
+          "count_bin" in df6.columns
+          and all(isinstance(x, _pd.Interval) for x in m6["count_bin"]),
+          f"{list(df6.columns)}")
+    check("the 'count' statistic is still the sample count",
+          int(m6["count"].sum()) == cnt6.size, f"{int(m6['count'].sum())} of {cnt6.size}")
+    check("each interval brackets its own midpoint",
+          all(iv.left <= mid <= iv.right for iv, mid in zip(m6["count_bin"], m6["count_mid"])))
+    # dropping 'count' from `statistics` must not leave an Interval where
+    # interp_nd_binning expects a number
+    df6b = nd_binning(rh6.normal(0, 1.0, 800), [cnt6], ["count"],
+                      statistics=("nmad",))
+    f6 = interp_nd_binning(df6b, ["count"], statistic="nmad", min_count=0)
+    check("binning without the 'count' statistic still interpolates",
+          np.isfinite(f6(np.array([30.0]))[0]), f"{f6(np.array([30.0]))}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

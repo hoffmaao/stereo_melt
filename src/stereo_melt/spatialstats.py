@@ -198,10 +198,16 @@ def nd_binning(values, list_var, list_var_names, *, list_var_bins=None,
     this is built for -- per-pixel epoch count -- piles up at its ceiling.
 
     Returns a tidy ``DataFrame`` holding, for every 1-D marginal AND the full
-    N-D cell, the bin edges per variable plus the requested statistics. The
-    marginals are what you inspect to see whether a variable matters at all;
-    the N-D block is what :func:`interp_nd_binning` turns into ``sigma(...)``.
-    ``nsd`` is the dispersion (NMAD) and is the one used as the error model.
+    N-D cell, the bin per variable plus the requested statistics. Columns are
+    ``nd``, then ``<name>_bin`` (the ``pd.Interval``) and ``<name>_mid`` (its
+    centre) for each variable, then one column per statistic. The interval is
+    SUFFIXED rather than named for the variable so a covariate can share a name
+    with a statistic -- ``count`` is exactly that case, and it is this module's
+    headline covariate, so an unsuffixed column would be silently overwritten
+    by the sample count. The marginals are what you inspect to see whether a
+    variable matters at all; the N-D block is what :func:`interp_nd_binning`
+    turns into ``sigma(...)``. ``nmad`` is the dispersion and is the one used
+    as the error model.
     """
     import itertools
 
@@ -264,10 +270,11 @@ def nd_binning(values, list_var, list_var_names, *, list_var_bins=None,
             for k in range(nvar):
                 if k in dims:
                     b = combo[dims.index(k)]
-                    row[list_var_names[k]] = pd.Interval(list_var_bins[k][b], list_var_bins[k][b + 1])
+                    row[list_var_names[k] + "_bin"] = pd.Interval(
+                        list_var_bins[k][b], list_var_bins[k][b + 1])
                     row[list_var_names[k] + "_mid"] = 0.5 * (list_var_bins[k][b] + list_var_bins[k][b + 1])
                 else:
-                    row[list_var_names[k]] = np.nan
+                    row[list_var_names[k] + "_bin"] = np.nan
                     row[list_var_names[k] + "_mid"] = np.nan
             row.update(_stats(mask))
             rows.append(row)
@@ -397,18 +404,20 @@ def empirical_variogram(
     lags in the same pass (a single subsample would under-sample the short
     lags, a pure random-pair draw would under-sample them badly).
 
-    ``counts`` is the pooled pair count each bin was estimated from, and is
-    what ``min_pairs`` gates on and what :func:`fit_variogram` weights by. When
-    ``n_subsample >= len(east)`` a single pass is made, because every further
-    pass would re-form the same pairs; with a genuine subsample the draws are
-    independent, so a pair can recur across draws and ``counts`` is a pooled
-    rather than a strictly distinct count.
+    ``counts`` is the number of DISTINCT point pairs each bin was estimated
+    from -- what ``min_pairs`` gates on and what :func:`fit_variogram` weights
+    by -- for every relationship between ``n_subsample``, ``n_draws`` and the
+    cloud size. Draws overlap (completely, once ``n_subsample`` reaches the
+    cloud size), so pairs formed more than once are carried once;
+    ``n_pairs_pooled`` reports the pre-deduplication total, and its ratio to
+    ``counts`` is how much the draws repeated themselves.
 
     Returns
     -------
     dict
-        ``lags`` (bin centres, metres), ``gamma``, ``counts``, ``bin_edges``,
-        ``variance`` (of the pooled sample), ``estimator``, ``n_draws_used``.
+        ``lags`` (bin centres, metres), ``gamma``, ``counts`` (distinct pairs),
+        ``n_pairs_pooled``, ``bin_edges``, ``variance`` (of the pooled sample),
+        ``estimator``, ``n_draws_used``.
     """
     if estimator not in ("matheron", "dowd"):
         raise ValueError(f'estimator must be "matheron" or "dowd", got {estimator!r}')
@@ -430,31 +439,45 @@ def empirical_variogram(
     nb = bin_edges.size - 1
 
     rng = np.random.default_rng(seed)
-    acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
     m = min(n_subsample, e.size)
-    # One pass when the "subsample" IS the whole cloud: repeating it re-forms
-    # the identical pair set, which would multiply `counts` by n_draws without
-    # adding one distinct pair -- enough to let a bin holding 4 pairs clear
-    # min_pairs=30 and then be weighted as if it held 40.
-    n_pass = 1 if m >= e.size else max(1, n_draws)
+    n_pass = max(1, n_draws)
+    # Draws overlap: a pair can be formed by more than one of them, and the
+    # closer m is to the cloud size the likelier that is (at m = N every pass
+    # re-forms the identical set). Pooling the repeats would make `counts` a
+    # replication count rather than a pair count, letting a bin holding 3
+    # distinct pairs clear min_pairs=30 and then be weighted as if it held 30.
+    # So each pair is carried once, keyed by its ORIGINAL index pair; the sign
+    # of the kept difference is arbitrary, which is immaterial to gamma (it
+    # squares or takes |.|).
+    pid_acc: list[np.ndarray] = [np.empty(0, np.int64) for _ in range(nb)]
+    dv_acc: list[np.ndarray] = [np.empty(0, float) for _ in range(nb)]
+    n_pooled = np.zeros(nb, dtype=np.int64)
     for _ in range(n_pass):
         idx = rng.choice(e.size, m, replace=False) if m < e.size else np.arange(e.size)
         ee, nn, vv = e[idx], n[idx], v[idx]
         iu, ju = np.triu_indices(m, k=1)
         d = np.hypot(ee[iu] - ee[ju], nn[iu] - nn[ju])
         dv = vv[iu] - vv[ju]
+        gi = idx[iu].astype(np.int64)
+        gj = idx[ju].astype(np.int64)
+        pid = np.minimum(gi, gj) * np.int64(e.size) + np.maximum(gi, gj)
         which = np.digitize(d, bin_edges) - 1
         good = (which >= 0) & (which < nb)
         for b in np.unique(which[good]):
-            acc[b].append(dv[good & (which == b)])
+            sel = good & (which == b)
+            n_pooled[b] += int(sel.sum())
+            uniq, first = np.unique(
+                np.concatenate([pid_acc[b], pid[sel]]), return_index=True)
+            pid_acc[b] = uniq
+            dv_acc[b] = np.concatenate([dv_acc[b], dv[sel]])[first]
 
     lags = np.full(nb, np.nan)
     gamma = np.full(nb, np.nan)
     counts = np.zeros(nb, dtype=int)
     for b in range(nb):
-        if not acc[b]:
+        if dv_acc[b].size == 0:
             continue
-        dv = np.concatenate(acc[b])
+        dv = dv_acc[b]
         counts[b] = dv.size
         if dv.size < min_pairs:
             continue
@@ -465,6 +488,7 @@ def empirical_variogram(
             gamma[b] = 0.5 * (_MAD_TO_SIGMA * float(np.median(np.abs(dv)))) ** 2
     keep = np.isfinite(gamma)
     return dict(lags=lags[keep], gamma=gamma[keep], counts=counts[keep],
+                n_pairs_pooled=n_pooled[keep],
                 bin_edges=bin_edges, variance=float(np.var(v)), estimator=estimator,
                 n_draws_used=int(n_pass))
 

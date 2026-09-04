@@ -21,10 +21,13 @@ C5  control points OUTSIDE a strip's footprint sample as NaN, whatever the
     real 0.0 m elevation and turn an overhanging control cloud into a
     metres-scale fake residual. Includes the exact right/bottom bounds, which
     rasterio's flooring rowcol puts one pixel PAST the grid.
-C6  the two QC gates are reported separately: sd > max_sd is an alignment
-    failure (a BAD_STRIPS candidate), n < min_n is a well-aligned strip whose
-    control clips the footprint (must NOT be). Pooling them is how a good
-    epoch gets discarded.
+C6  the QC classes are reported separately AND reconcile: sd > max_sd is an
+    alignment failure (a BAD_STRIPS candidate), n < min_n is a well-aligned
+    strip whose control clips the footprint (must NOT be), and a strip with no
+    usable plane at all is its own class. Pooling the first two is how a good
+    epoch gets discarded; leaving the third out of every list is how a
+    missing-control strip becomes invisible. The four classes must partition
+    the input table exactly.
 
 Run::
 
@@ -276,6 +279,45 @@ def main() -> int:
           s_both["qc_alignment_failures"] == [fail_id] and s_both["qc_low_control"] == []
           and s_both["n_qc_dropped"] == 1,
           f"align {s_both['qc_alignment_failures']} low {s_both['qc_low_control']}")
+
+    # A strip with NO usable plane: residual_planes_for_strips emits exactly
+    # this row (all-NaN, n=0) when the control file is missing, so it must be
+    # visible rather than falling out of every list.
+    unfit = df2.copy()
+    nofit_id, lin_id = unfit.dem_id.values[2], unfit.dem_id.values[3]
+    unfit.loc[2, ["ax", "ay", "se_ax", "se_ay", "offset", "sd", "n"]] = \
+        [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, 0]
+    unfit.loc[3, ["se_ax", "se_ay"]] = [np.nan, np.nan]   # LinAlgError path
+    unfit.loc[0, ["sd", "n"]] = [90.0, 4000]
+    unfit.loc[1, ["sd", "n"]] = [0.36, 40]
+    s_u = strip_prior_from_residual_planes(
+        unfit, unfit.dem_id.values, sidx, comp, max_sd=5.0, min_n=100,
+        return_summary=True)[1]
+    print(f"      strips {s_u['n_strips']} = population {s_u['n_population']} "
+          f"+ align {s_u['n_qc_alignment_failures']} + low {s_u['n_qc_low_control']} "
+          f"+ unfitted {s_u['n_qc_unfitted']}")
+    check("a no-plane strip is reported as unfitted, not silently dropped",
+          nofit_id in s_u["qc_unfitted"], f"{s_u['qc_unfitted']}")
+    check("the NaN-standard-error strip is unfitted too",
+          lin_id in s_u["qc_unfitted"], f"{s_u['qc_unfitted']}")
+    check("unfitted strips are NOT offered as alignment failures",
+          not ({nofit_id, lin_id} & set(s_u["qc_alignment_failures"])),
+          f"{s_u['qc_alignment_failures']}")
+    buckets = [set(s_u["qc_alignment_failures"]), set(s_u["qc_low_control"]),
+               set(s_u["qc_unfitted"])]
+    check("the classes are disjoint",
+          all(not (a & b) for i, a in enumerate(buckets) for b in buckets[i + 1:]),
+          f"{[sorted(b) for b in buckets]}")
+    check("the classes are exhaustive (counts sum to the row count)",
+          s_u["n_population"] + s_u["n_qc_alignment_failures"]
+          + s_u["n_qc_low_control"] + s_u["n_qc_unfitted"] == s_u["n_strips"]
+          == len(unfit),
+          f"{s_u['n_population']}+{s_u['n_qc_alignment_failures']}"
+          f"+{s_u['n_qc_low_control']}+{s_u['n_qc_unfitted']} vs {s_u['n_strips']}")
+    check("qc_dropped is exactly the non-population strips",
+          set(s_u["qc_dropped"]) == set().union(*buckets)
+          and s_u["n_qc_dropped"] == s_u["n_strips"] - s_u["n_population"],
+          f"{s_u['n_qc_dropped']} vs {s_u['n_strips'] - s_u['n_population']}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

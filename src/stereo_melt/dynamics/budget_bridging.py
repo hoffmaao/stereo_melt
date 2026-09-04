@@ -478,11 +478,22 @@ def strip_prior_from_residual_planes(
         PIG's canon the two sets were 15 and 15 -- the 15 failures were added
         to ``BAD_STRIPS``, the 15 low-control strips (scatter 0.36 m, pc_align
         ``end_p50`` 0.25 m) were deliberately KEPT.
+    ``qc_unfitted`` / ``n_qc_unfitted``
+        No usable plane at all: ``ax``/``ay``/``se_ax``/``se_ay`` not all
+        finite. :func:`~stereo_melt.coregister.alignment_quality.residual_planes_for_strips`
+        emits a NaN row with ``n=0`` when the control file is missing, so this
+        is normally "no control", not "bad strip"; the degenerate-design
+        ``LinAlgError`` path (finite slopes, NaN standard errors) lands here
+        too. Also NOT a ``BAD_STRIPS`` candidate -- a missing control FILE and
+        a broken ALIGNMENT are different problems.
 
-    The two lists are disjoint and their counts sum to ``n_qc_dropped``;
-    ``qc_dropped`` remains as the pooled "excluded from the tau^2 population"
-    view and is NOT a bad-strip list. ``per_strip=True`` instead uses
-    ``max(est_k^2 - se_k^2, floor)`` for each QC-passing strip (noisier).
+    The four classes -- population, alignment failure, low control, unfitted --
+    are disjoint and exhaustive: ``n_population + n_qc_alignment_failures +
+    n_qc_low_control + n_qc_unfitted == n_strips``, the row count of
+    ``planes``. ``qc_dropped`` remains as the pooled "excluded from the tau^2
+    population" view (the last three classes) and is NOT a bad-strip list.
+    ``per_strip=True`` instead uses ``max(est_k^2 - se_k^2, floor)`` for each
+    QC-passing strip (noisier).
 
     ``offset`` modes are NOT filled from control: the control lives on the
     static apron where pc_align pins the offset, while the shelf carries
@@ -508,17 +519,32 @@ def strip_prior_from_residual_planes(
     est = {"tilt_x": ("ax", "se_ax"), "tilt_y": ("ay", "se_ay")}
     # QC: a plane fitted through metres of scatter, or through too few
     # control points, is an alignment failure, not a survey error statistic.
-    fitted = np.isfinite(pl["ax"].to_numpy(float))
-    failed_align = np.zeros(fitted.shape, bool)
+    usable = np.ones(len(pl.index), bool)
+    for c in ("ax", "ay", "se_ax", "se_ay"):
+        if c in pl.columns:
+            usable &= np.isfinite(pl[c].to_numpy(float))
+        else:
+            usable &= False
+    failed_align = np.zeros(usable.shape, bool)
     if max_sd is not None and "sd" in pl.columns:
         failed_align = pl["sd"].to_numpy(float) > max_sd
-    low_ctl = np.zeros(fitted.shape, bool)
+    low_ctl = np.zeros(usable.shape, bool)
     if min_n and "n" in pl.columns:
         low_ctl = pl["n"].to_numpy(float) < min_n
-    qc = fitted & ~failed_align & ~low_ctl
-    align_ids = [str(d) for d in pl.index[fitted & failed_align]]
-    lowctl_ids = [str(d) for d in pl.index[fitted & low_ctl & ~failed_align]]
-    dropped = [str(d) for d in pl.index[fitted & ~qc]]
+    # Four buckets, disjoint and exhaustive over every row of `planes`, so the
+    # counts reconcile: no plane at all, then (of those with one) an alignment
+    # failure, then merely thin control, then the tau^2 population. "Unfitted"
+    # is its own class rather than folded into low-control because a missing
+    # control FILE and a thin control CLOUD are different operational problems.
+    unfitted = ~usable
+    align = usable & failed_align
+    lowctl = usable & ~failed_align & low_ctl
+    qc = usable & ~failed_align & ~low_ctl
+    ids = pl.index
+    unfitted_ids = [str(d) for d in ids[unfitted]]
+    align_ids = [str(d) for d in ids[align]]
+    lowctl_ids = [str(d) for d in ids[lowctl]]
+    dropped = [str(d) for d in ids[~qc]]
     pop, summary = {}, {}
     for comp, (col, secol) in est.items():
         v = pl[col].to_numpy(float)
@@ -540,6 +566,10 @@ def strip_prior_from_residual_planes(
     summary["qc_alignment_failures"] = align_ids
     summary["n_qc_low_control"] = len(lowctl_ids)
     summary["qc_low_control"] = lowctl_ids
+    summary["n_qc_unfitted"] = len(unfitted_ids)
+    summary["qc_unfitted"] = unfitted_ids
+    summary["n_population"] = int(qc.sum())
+    summary["n_strips"] = int(len(ids))
     tau2 = np.empty(component.size, float)
     for m, (k, comp) in enumerate(zip(strip_index, component)):
         if comp == "offset":
