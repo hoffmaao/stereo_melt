@@ -58,10 +58,14 @@ content sits at ``x - dx``. Correct it by **sampling the DEM at**
 ``tests/gate_nuth_kaab.py``.
 
 **MEASURED ON OUR DATA (2026-09-02) -- do not wire this into the production
-align path without re-measuring.** Run as xDEM recommends, i.e. as a finish
-after ``pc_align``, on the 173 uncorrupted processing-twin strips against the
-same control ``pc_align`` was fed, it makes the residual WORSE: NMAD
-0.756 -> 0.774 m, residual-offset rms 0.181 -> 0.285 m, residual tilt
+align path without re-measuring. The NMAD pairs below were measured while
+``nmad_after`` was still taken over every finite control point rather than
+over the slope-gated set ``nmad_before`` uses (fixed 2026-09-03); they are
+kept as the figures the decision was actually made on, and the like-for-like
+pair has not been re-measured on the strips.** Run as xDEM recommends, i.e. as
+a finish after ``pc_align``, on the 173 uncorrupted processing-twin strips
+against the same control ``pc_align`` was fed, it makes the residual WORSE:
+NMAD 0.756 -> 0.774 m, residual-offset rms 0.181 -> 0.285 m, residual tilt
 essentially unchanged (it models translation, not tilt). It reports shifts of
 median 5.1 m (p90 17 m) -- larger than the 2.8 m a-priori shift ``pc_align``
 had already removed -- and 109/160 of them exceed twice their own standard
@@ -80,8 +84,11 @@ production path is unchanged.
 
 Flat surfaces carry no horizontal information at all -- on a floating shelf the
 horizontal shift is unidentifiable, and this returns it as such (large
-``se_dx``/``se_dy``, small ``slope_p90``) rather than inventing a number. Run it
-against the static apron control (rock + slow ice), which is where the relief is.
+``se_dx``/``se_dy``, small ``slope_p90``) rather than inventing a number. If the
+slope gate leaves too few usable points to fit at all, the shift comes back as
+**NaN** rather than as an exact ``(0, 0, 0)`` that a caller could not tell from
+a converged "no shift needed". Run it against the static apron control
+(rock + slow ice), which is where the relief is.
 """
 from __future__ import annotations
 
@@ -213,8 +220,12 @@ def nuth_kaab_point_raster(
         ``dx``, ``dy``, ``dz`` (metres, DEM position error -- see the module
         docstring for the sign), ``se_dx``/``se_dy``/``se_dz``, ``n_iter``,
         ``converged``, ``n_points`` used, ``nmad_before``/``nmad_after`` of the
-        residual, ``slope_p90`` (degrees; low means the horizontal solve is
-        weakly constrained) and the per-iteration ``history``.
+        residual over the SAME control points (the slope-gated set selected on
+        the first iteration, so the pair is like-for-like -- an ungated
+        ``nmad_after`` would mix in the quieter sub-gate points and overstate
+        the improvement), ``slope_p90`` (degrees; low means the horizontal solve is
+        weakly constrained) and the per-iteration ``history``. ``dx``/``dy``/
+        ``dz`` stay NaN if no iteration ever had ``min_points`` usable points.
     """
     if method not in ("gradient", "nuth_kaab"):
         raise ValueError(f'method must be "gradient" or "nuth_kaab", got {method!r}')
@@ -240,6 +251,7 @@ def nuth_kaab_point_raster(
                history=[], method=method)
 
     tot = np.zeros(3)          # cumulative (dx, dy, dz)
+    ok0 = None                 # the gated point set nmad_before was measured on
     lo, hi = np.radians(min_slope_deg), np.radians(max_slope_deg)
     for it in range(max_iter):
         pe, pn = apply_shift_to_points(east, north, tot[0], tot[1])
@@ -251,6 +263,7 @@ def nuth_kaab_point_raster(
             out["history"].append(dict(iter=it, n=int(ok.sum()), note="too few usable points"))
             break
         if it == 0:
+            ok0 = ok
             out["nmad_before"] = float(1.4826 * np.median(np.abs(dh[ok] - np.median(dh[ok]))))
             out["slope_p90"] = float(np.degrees(np.percentile(sl[ok], 90)))
 
@@ -290,10 +303,19 @@ def nuth_kaab_point_raster(
             out["converged"] = True
             break
 
+    # Only claim a shift if an iteration actually ran: bailing on the first
+    # pass (a strip whose control is all below min_slope_deg) would otherwise
+    # report an exact (0, 0, 0), indistinguishable from a converged "no shift
+    # needed" and folded into any per-strip aggregate as a real measurement.
+    if out["n_iter"] == 0:
+        return out
     out.update(dx=float(tot[0]), dy=float(tot[1]), dz=float(tot[2]))
     pe, pn = apply_shift_to_points(east, north, tot[0], tot[1])
     dh_f = _at(pe, pn, s_dem) - z_ref - tot[2]
-    f = np.isfinite(dh_f)
+    # Same points as nmad_before, not every finite one: dh scatter grows with
+    # slope, so scoring "after" on the ungated set measures a quieter sample
+    # and reports an improvement the shift did not make.
+    f = ok0 & np.isfinite(dh_f)
     if f.any():
         out["nmad_after"] = float(1.4826 * np.median(np.abs(dh_f[f] - np.median(dh_f[f]))))
     return out

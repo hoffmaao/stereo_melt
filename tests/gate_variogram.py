@@ -9,7 +9,10 @@ correlated understates a flux uncertainty by an order of magnitude, so the
 n_eff path is the one that has to be right.
 
 G1  recovery: simulate a Gaussian field with a KNOWN correlation range and
-    recover range and sill from the empirical variogram.
+    recover range and sill from the empirical variogram. Ranges are the
+    scikit-gstat/xDEM EFFECTIVE range, so a Gaussian covariance of e-folding
+    scale L is the gaussian model with range 2L -- the expectations below are
+    stated that way, not re-tuned to whatever the fit prints.
 G2  limits: white noise -> pure nugget, n_eff ~ N; a field correlated across
     the whole domain -> n_eff ~ 1. These bracket every real case.
 G3  robustness: Dowd resists blunders that wreck Matheron (real DEM residuals
@@ -79,15 +82,26 @@ def main() -> int:
 
     print("G1  recover a known correlation range")
     CORR, SIG = 2000.0, 1.5
+    # gaussian_field synthesises C(h) = exp(-(h/CORR)^2), i.e. the gaussian
+    # model with e-folding scale a = CORR. The effective range reported by
+    # fit_variogram is r = 2a (gamma(r) = 98 % of the sill), which is the
+    # number an xDEM/scikit-gstat fit of the same field would print.
+    EFF_RANGE = 2.0 * CORR
     z = gaussian_field(N, RES, CORR, SIG, rng).ravel()
     ev = empirical_variogram(e, n, z, max_lag=10000.0, n_bins=18, seed=1)
     fit = fit_variogram(ev["lags"], ev["gamma"], counts=ev["counts"],
                         models=("nugget", "gaussian"))
     rec_range = fit["ranges"][0]
     print(f"      sill {fit['total_sill']:.3f} (sample var {ev['variance']:.3f})   range {rec_range:.0f} m "
-          f"(true {CORR:.0f})   r2 {fit['r2']:.4f}   bins {fit['n_bins']}")
-    check("range recovered within 30 %", abs(rec_range / CORR - 1) < 0.30,
-          f"{rec_range:.0f} vs {CORR:.0f} m")
+          f"(true effective {EFF_RANGE:.0f}, e-folding {CORR:.0f})   r2 {fit['r2']:.4f}   bins {fit['n_bins']}")
+    check("effective range recovered within 30 %", abs(rec_range / EFF_RANGE - 1) < 0.30,
+          f"{rec_range:.0f} vs {EFF_RANGE:.0f} m")
+    check("gaussian model saturates at its effective range (98 % of sill)",
+          abs(variogram_model(np.array([EFF_RANGE]), "gaussian", 1.0, EFF_RANGE)[0]
+              - 0.9817) < 1e-3)
+    check("exponential model reaches 95 % of sill at its effective range",
+          abs(variogram_model(np.array([1000.0]), "exponential", 1.0, 1000.0)[0]
+              - 0.9502) < 1e-3)
     check("sill recovered within 25 % of the sample variance",
           abs(fit["total_sill"] / ev["variance"] - 1) < 0.25,
           f"{fit['total_sill']:.3f} vs {ev['variance']:.3f}")
@@ -246,12 +260,14 @@ def main() -> int:
     ev_std = empirical_variogram(ee6, nn6, z, max_lag=8000.0, n_bins=14, seed=12)
     f_std = fit_variogram(ev_std["lags"], ev_std["gamma"], counts=ev_std["counts"],
                           models=("nugget", "gaussian"))
+    H3_EFF_RANGE = 2.0 * 1500.0            # e-folding 1500 m -> effective range
     print(f"      standardised: sill {f_std['total_sill']:.2f} (expect ~1), "
-          f"range {f_std['ranges'][0]:.0f} m (true 1500), r2 {f_std['r2']:.3f}")
+          f"range {f_std['ranges'][0]:.0f} m (true effective {H3_EFF_RANGE:.0f}), "
+          f"r2 {f_std['r2']:.3f}")
     check("standardised sill ~ 1 (dimensionless correlation)",
           abs(f_std["total_sill"] - 1.0) < 0.35, f"{f_std['total_sill']:.2f}")
-    check("standardised variogram recovers the true range within 35 %",
-          abs(f_std["ranges"][0] / 1500.0 - 1) < 0.35, f"{f_std['ranges'][0]:.0f} m")
+    check("standardised variogram recovers the true effective range within 35 %",
+          abs(f_std["ranges"][0] / H3_EFF_RANGE - 1) < 0.35, f"{f_std['ranges'][0]:.0f} m")
     check("the raw variogram sill is inflated by the sigma variation",
           ev_raw["gamma"][-1] > 3 * ev_std["gamma"][-1] * np.median(tru) ** 2 / 3,
           f"raw {ev_raw['gamma'][-1]:.2f} vs standardised {ev_std['gamma'][-1]:.2f}")
@@ -269,8 +285,17 @@ def main() -> int:
     check("empty cells filled, no NaN leaks", np.all(np.isfinite(q)), f"{q}")
     far = sig_fun(np.array([1e6]), np.array([1e6]))
     check("queries outside the binned range are clamped, not extrapolated",
-          np.isfinite(far[0]) and far[0] <= 1.2 * float(np.nanmax(sig_fun.grid)) * scale,
+          np.isfinite(far[0]) and far[0] <= 1.2 * float(np.nanmax(sig_fun.grid)),
           f"{far[0]:.2f}")
+    # .grid must be in the units the function itself returns, or plotting it as
+    # "the error model" is wrong by exactly `scale` with nothing to signal it.
+    on_grid = sig_fun(np.array([sig_fun.centres[0][2]]), np.array([sig_fun.centres[1][3]]))
+    check("sig_fun.grid is the CALIBRATED model (same units as sig_fun(...))",
+          abs(float(on_grid[0]) / float(sig_fun.grid[2, 3]) - 1) < 1e-9,
+          f"{float(on_grid[0]):.3f} vs grid {float(sig_fun.grid[2, 3]):.3f}")
+    check("the raw binned dispersion is still reachable as .unscaled.grid",
+          abs(float(sig_fun.grid[2, 3]) / (scale * float(sig_fun.unscaled.grid[2, 3])) - 1) < 1e-9,
+          f"scale {scale:.3f}")
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

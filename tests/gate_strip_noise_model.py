@@ -19,6 +19,10 @@ S3  THE MELT. With the noise model the channel rmse vs the clean-stack
     stack, at the same lam.
 S4  NO MODES == OLD PATH. ``strip_modes=None`` is bit-identical to the
     solver before this change (same numbers as the local gate's L1 path).
+S5  LAM IS REQUIRED. There is no defensible universal default -- a fixed lam
+    does not transfer across noise levels and the ``"auto"`` rule is built on a
+    WHITE variance estimate that this project's ~4 km correlated strip error
+    violates -- so omitting it must raise rather than pick one silently.
 
 Run::
 
@@ -127,6 +131,15 @@ def main() -> int:
     tau2 = np.array([{"offset": 0.3 ** 2, "tilt_x": 1.5e-4 ** 2, "tilt_y": 1.5e-4 ** 2}[c]
                      for c in comp])
     kw = dict(bridging=True, eta_bar=1e14, lam=1e-4, iters=4000, converge_tol=1e-12, **RHO)
+    no_lam = {k: v for k, v in kw.items() if k != "lam"}
+    try:
+        budget_bridging_melt_rate(clean, vx, vy, **no_lam)
+    except TypeError as exc:
+        msg = str(exc)
+        check("omitting lam raises, naming both valid choices",
+              "lam" in msg and "auto" in msg and "float" in msg, msg.split(".")[0])
+    else:
+        check("omitting lam raises, naming both valid choices", False, "no error raised")
     ref = budget_bridging_melt_rate(clean, vx, vy, **kw)
     plain = budget_bridging_melt_rate(corrupt, vx, vy, **kw)
     # sigma2: the stack has NO white noise, so give the prior a small but

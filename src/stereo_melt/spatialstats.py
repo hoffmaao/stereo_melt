@@ -108,6 +108,17 @@ Models are the standard nested set (``nugget``, ``spherical``, ``exponential``,
 ``gaussian``); real DEM error usually needs a **sum** of two ranges, a short
 one from the sensor/matching and a long one from the georeferencing, which is
 why :func:`fit_variogram` takes a list.
+
+Range convention
+----------------
+Every range accepted or reported here is the scikit-gstat / xDEM **effective**
+range :math:`r` -- the lag at which a structure has essentially reached its
+sill -- not the internal e-folding scale :math:`a`. The two coincide only for
+``spherical`` (:math:`a=r`); ``exponential`` uses :math:`a=r/3` and
+``gaussian`` :math:`a=r/2`, so :math:`\gamma(r)` is 95 % and 98 % of the sill
+respectively. This is the whole point of the comparability claim above:
+quoting an e-folding scale as a "range" would report an exponential structure
+as 3x shorter than ``xdem.spatialstats`` measures the same field.
 """
 from __future__ import annotations
 
@@ -309,7 +320,11 @@ def two_step_standardization(dvalues, list_var, unscaled_sigma, *, out_scale=Fal
     # Carry the binning introspection through the rescaling: callers reach for
     # .grid/.centres to inspect or plot the error model, and silently dropping
     # them on the calibrated function (the one you actually use) is a trap.
-    sigma_scaled.grid = getattr(unscaled_sigma, "grid", None)
+    # .grid is the CALIBRATED grid -- same units as what sigma_scaled() returns,
+    # so plotting it against those values is meaningful; the raw binned
+    # dispersion stays reachable, unscaled, as .unscaled.grid.
+    _grid = getattr(unscaled_sigma, "grid", None)
+    sigma_scaled.grid = None if _grid is None else scale * np.asarray(_grid, float)
     sigma_scaled.centres = getattr(unscaled_sigma, "centres", None)
     sigma_scaled.scale = scale
     sigma_scaled.unscaled = unscaled_sigma
@@ -415,18 +430,24 @@ def empirical_variogram(
 
 
 def variogram_model(h: np.ndarray, model: str, sill: float, rng_: float) -> np.ndarray:
-    """One variogram model evaluated at lags ``h`` (``rng_`` in metres)."""
+    """One variogram model evaluated at lags ``h``.
+
+    ``rng_`` is the **effective** range in metres (scikit-gstat / xDEM
+    convention -- see the module docstring): the e-folding scale used inside
+    each model is ``a = r`` for ``spherical``, ``r/3`` for ``exponential`` and
+    ``r/2`` for ``gaussian``.
+    """
     h = np.asarray(h, float)
     if model == "nugget":
         return np.where(h > 0, sill, 0.0)
-    a = max(float(rng_), 1e-12)
+    r = max(float(rng_), 1e-12)
     if model == "spherical":
-        r = np.clip(h / a, 0.0, 1.0)
-        return sill * np.where(h < a, 1.5 * r - 0.5 * r ** 3, 1.0)
+        t = np.clip(h / r, 0.0, 1.0)
+        return sill * np.where(h < r, 1.5 * t - 0.5 * t ** 3, 1.0)
     if model == "exponential":
-        return sill * (1.0 - np.exp(-h / a))
+        return sill * (1.0 - np.exp(-3.0 * h / r))
     if model == "gaussian":
-        return sill * (1.0 - np.exp(-((h / a) ** 2)))
+        return sill * (1.0 - np.exp(-((2.0 * h / r) ** 2)))
     raise ValueError(f"unknown model {model!r}")
 
 
@@ -457,6 +478,8 @@ def fit_variogram(
     Returns ``dict(params=[(model, sill, range), ...], total_sill, ranges,
     rmse, r2, n_bins)``; ``params`` feeds
     :func:`covariance_from_variogram` and :func:`number_effective_samples`.
+    Every range is the **effective** range (module docstring), so it is
+    directly comparable with a published xDEM/scikit-gstat number.
     """
     from scipy.optimize import least_squares
 

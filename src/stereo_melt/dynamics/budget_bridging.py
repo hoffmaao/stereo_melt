@@ -353,6 +353,13 @@ def strip_mode_design(
 #: calibration is one edit, not a magic number scattered across drivers.
 LAM_SIGMA2_COEF = 1.0
 
+#: Sentinel for the REQUIRED ``lam`` argument of
+#: :func:`budget_bridging_melt_rate`. There is no defensible universal default:
+#: a fixed lam is not safe across noise levels, and the ``"auto"`` rule above is
+#: near-oracle only under WHITE noise -- which PIG's ~4 km correlated strip
+#: error is not. Omitting lam must therefore be an error, not a silent choice.
+_LAM_REQUIRED = object()
+
 
 def _estimate_sigma2_white(reg, w, weight, H_f_stack, vxm, vym, dx, wv, fit):
     r"""Truth-free white-noise variance of the thickness-rate observation.
@@ -540,7 +547,7 @@ def budget_bridging_melt_rate(
     strip_modes: np.ndarray | None = None,
     strip_prior: np.ndarray | float | None = None,
     sigma2: float | str = "auto",
-    lam: float | str = "auto",
+    lam: float | str = _LAM_REQUIRED,
     ridge: float = 0.0,
     iters: int = 300,
     weight: str = "leverage",
@@ -635,16 +642,22 @@ def budget_bridging_melt_rate(
         Viscosity for the bridging operator; ``eta_field`` (a map, e.g. from the
         momentum-balance inversion) overrides the scalar via its masked median.
     lam
-        Tikhonov weight on :math:`\\lVert\\nabla \\dot m\\rVert^2`. ``"auto"``
-        (default) sets it from the data as
-        ``LAM_SIGMA2_COEF * sigma2_est`` using the truth-free noise estimate
-        in :func:`_estimate_sigma2_white`; the resolved float is returned as
-        the ``lam`` attr and the estimate as ``sigma2_est``. A fixed lam is
-        NOT safe across noise levels: on the 08-29 pigreal (correlated-error)
-        tier the same operator scores nrmse 3.76 at lam 1e-3 -- worse than
-        Eulerian, flux x2.58 -- and 0.95-1.09 at lam 0.032-0.32, which beats
-        Eulerian on every metric. Pass a float only to reproduce a specific
-        published run.
+        Tikhonov weight on :math:`\\lVert\\nabla \\dot m\\rVert^2`. **Required**
+        -- there is no safe default, so omitting it raises rather than
+        silently picking one. Two valid choices: a float, to reproduce a
+        specific published run, or ``"auto"``, which sets it from the data as
+        ``LAM_SIGMA2_COEF * sigma2_est`` using the truth-free noise estimate in
+        :func:`_estimate_sigma2_white` (the resolved float comes back as the
+        ``lam`` attr and the estimate as ``sigma2_est``). Neither is
+        universally right. A fixed lam is NOT safe across noise levels: on the
+        08-29 pigreal (correlated-error) tier the same operator scores nrmse
+        3.76 at lam 1e-3 -- worse than Eulerian, flux x2.58 -- and 0.95-1.09 at
+        lam 0.032-0.32, which beats Eulerian on every metric. ``"auto"`` is
+        near-oracle under WHITE noise only: it is built on a white variance
+        estimate, so spatially correlated error (PIG's strip residual is
+        coherent at ~4 km) inflates it and over-damps the melt by 300-3000x on
+        that same tier. It warns when it can detect that, but the check is
+        one-sided.
     ridge
         Wiener weight on :math:`\\lVert\\dot m\\rVert^2`. With uniform weights the
         minimiser is :math:`D^*/(|D|^2 + \\text{ridge})`, so the deconvolution
@@ -672,6 +685,16 @@ def budget_bridging_melt_rate(
         against real observations** — not a contract-dependent kept-band score.
     """
     import torch
+
+    if lam is _LAM_REQUIRED:
+        raise TypeError(
+            "budget_bridging_melt_rate() requires an explicit lam: there is no "
+            "safe default. Pass a float (to reproduce a published run -- a "
+            "fixed lam is not transferable across noise levels), or "
+            '"auto" to derive it as LAM_SIGMA2_COEF * sigma2_est, which is '
+            "near-oracle under WHITE noise but over-damps the melt when the "
+            "observation error is spatially correlated (PIG: ~4 km). See the "
+            "lam entry in the docstring.")
 
     # ---- observed side: identical construction to eulerian_melt_rate, so the
     # bridging=False identity gate holds for the right reason, not by luck.

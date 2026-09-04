@@ -12,8 +12,12 @@ N2  sign convention: the returned shift, applied as documented, actually
     removes the offset (the classic bug in this method).
 N3  identifiability: on a FLAT surface the horizontal shift carries no
     information -- the fit must say so (large standard errors) rather than
-    invent a number; the vertical shift is still recovered.
+    invent a number; the vertical shift is still recovered. And when the slope
+    gate leaves too few usable points to fit at all, the answer must come back
+    NaN, not an exact (0, 0, 0) that reads as a converged "no shift needed".
 N4  robustness: 15 % blunders in the control do not move the answer.
+N6  nmad_before/nmad_after are measured on the SAME gated points, so noise
+    sitting below the slope gate cannot manufacture an apparent improvement.
 
 Run::
 
@@ -137,6 +141,20 @@ def main() -> int:
           abs(rf["dz"] - 1.85) < 0.2, f"dz {rf['dz']:+.3f}")
     check("sloped case reports much smaller horizontal SEs than flat",
           r["se_dx"] < rf["se_dx"] / 10, f"{r['se_dx']:.3f} vs {rf['se_dx']:.2f} m")
+    # Same shelf, but now the default 3 deg gate leaves nothing to fit: the
+    # solver never runs an iteration, so there is no shift to report.
+    rn = nuth_kaab_point_raster(demf, xf, yf, ef, nf, zcf, method="gradient")
+    print(f"      unusable (default 3° gate): dx {rn['dx']} dy {rn['dy']} dz {rn['dz']} "
+          f"n_points {rn['n_points']} n_iter {rn['n_iter']}")
+    check("too few usable points -> NaN shift, not (0, 0, 0)",
+          not np.isfinite(rn["dx"]) and not np.isfinite(rn["dy"])
+          and not np.isfinite(rn["dz"]),
+          f"({rn['dx']}, {rn['dy']}, {rn['dz']})")
+    check("and it says why: no points, no iterations, not converged",
+          rn["n_points"] == 0 and rn["n_iter"] == 0 and not rn["converged"],
+          f"n_points {rn['n_points']} n_iter {rn['n_iter']}")
+    check("no NMAD is claimed for a fit that never ran",
+          not np.isfinite(rn["nmad_before"]) and not np.isfinite(rn["nmad_after"]))
 
     print("N4  robustness to blunders in the control")
     rng = np.random.default_rng(7)
@@ -147,6 +165,28 @@ def main() -> int:
     d = np.hypot(rb["dx"] - TRUE[0], rb["dy"] - TRUE[1])
     print(f"      with 15 % blunders -> ({rb['dx']:+.3f}, {rb['dy']:+.3f}, {rb['dz']:+.3f}) m")
     check("robust fit still within 1 m horizontally", d < 1.0, f"|Δh| {d:.3f} m")
+
+    print("N6  before/after NMAD are measured on the same gated points")
+    # Half the control sits below the gate and carries 25x the noise. The fit
+    # never sees those points, so a like-for-like NMAD pair must not either;
+    # scoring "after" over every finite point would report an improvement the
+    # (here zero) shift did not make.
+    slope_grid = terrain_slope_aspect(z_true, abs(x[1] - x[0]), abs(y[1] - y[0]))[0]
+    slope_c = np.degrees(sample_bilinear(slope_grid, x, y, e, n))
+    thr = float(np.nanmedian(slope_c))
+    below = slope_c < thr
+    zc_het = zc.copy()
+    zc_het[below] += np.random.default_rng(19).normal(0, 4.0, int(below.sum()))
+    r6 = nuth_kaab_point_raster(z_true, x, y, e, n, zc_het, method="gradient",
+                                min_slope_deg=thr)
+    print(f"      gate {thr:.2f}° excludes {100*below.mean():.0f} % of the control; "
+          f"NMAD {r6['nmad_before']:.3f} -> {r6['nmad_after']:.3f} m "
+          f"(shift {np.hypot(r6['dx'], r6['dy']):.3f} m)")
+    check("the fixture really does exclude a large share of the control",
+          below.mean() > 0.3, f"{100*below.mean():.0f} %")
+    check("gate-excluded noise does not leak into nmad_after",
+          abs(r6["nmad_after"] / r6["nmad_before"] - 1) < 0.25,
+          f"{r6['nmad_before']:.3f} -> {r6['nmad_after']:.3f}")
 
     print("N5  terrain conventions (aspect points downhill, cw from north)")
     xs = np.arange(5) * 10.0

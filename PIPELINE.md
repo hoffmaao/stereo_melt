@@ -145,11 +145,12 @@ never branch on basin name inside the library.
 - **Observation noise is correlated, so white-noise machinery misleads.** The
   per-strip residual is correlated at **~4 km** (measured 2026-09-02, PIG:
   nugget 0.063 m² + 0.190 m² spherical) — inside the bridging band. The
-  monolithic solver's `lam` therefore has no safe fixed value: `lam="auto"`
-  (`LAM_SIGMA2_COEF * sigma2_est`) is near-oracle on white noise but
-  over-damps under correlated error, and warns when its own white estimate
-  exceeds the observation variance. Pass an explicit `lam` to reproduce a
-  published run.
+  monolithic solver's `lam` therefore has no safe value to default to, and is
+  a **required** argument: `lam="auto"` (`LAM_SIGMA2_COEF * sigma2_est`) is
+  near-oracle on white noise but over-damps under correlated error, and warns
+  when its own white estimate exceeds the observation variance; a float
+  reproduces a published run but does not transfer across noise levels.
+  Omitting it raises.
 - **Area-mean error bars need `n_eff`, not the pixel count**
   (`stereo_melt.spatialstats`). On PIG the melt-error correlation range is
   *not* identifiable from the domain (the fitted range tracks `max_lag`), so
