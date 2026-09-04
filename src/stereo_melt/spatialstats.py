@@ -449,10 +449,16 @@ def empirical_variogram(
     # So each pair is carried once, keyed by its ORIGINAL index pair; the sign
     # of the kept difference is arbitrary, which is immaterial to gamma (it
     # squares or takes |.|).
-    pid_acc: list[np.ndarray] = [np.empty(0, np.int64) for _ in range(nb)]
-    dv_acc: list[np.ndarray] = [np.empty(0, float) for _ in range(nb)]
+    exhaustive = m >= e.size
+    pid_acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
+    dv_acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
     n_pooled = np.zeros(nb, dtype=np.int64)
-    for _ in range(n_pass):
+    # An exhaustive draw re-forms the identical pair set every pass, so one
+    # pass already holds every distinct pair and the repeats only scale the
+    # pooled total. Otherwise append the raw chunks and deduplicate ONCE per
+    # bin below: sorting each bin a single time is O(K log K), where merging
+    # into the accumulator every pass would re-sort what is already there.
+    for _ in range(1 if exhaustive else n_pass):
         idx = rng.choice(e.size, m, replace=False) if m < e.size else np.arange(e.size)
         ee, nn, vv = e[idx], n[idx], v[idx]
         iu, ju = np.triu_indices(m, k=1)
@@ -466,18 +472,22 @@ def empirical_variogram(
         for b in np.unique(which[good]):
             sel = good & (which == b)
             n_pooled[b] += int(sel.sum())
-            uniq, first = np.unique(
-                np.concatenate([pid_acc[b], pid[sel]]), return_index=True)
-            pid_acc[b] = uniq
-            dv_acc[b] = np.concatenate([dv_acc[b], dv[sel]])[first]
+            pid_acc[b].append(pid[sel])
+            dv_acc[b].append(dv[sel])
+    if exhaustive:
+        n_pooled = n_pooled * n_pass
 
     lags = np.full(nb, np.nan)
     gamma = np.full(nb, np.nan)
     counts = np.zeros(nb, dtype=int)
     for b in range(nb):
-        if dv_acc[b].size == 0:
+        if not dv_acc[b]:
             continue
-        dv = dv_acc[b]
+        dv = np.concatenate(dv_acc[b])
+        if n_pass > 1 and not exhaustive:
+            _, first = np.unique(np.concatenate(pid_acc[b]), return_index=True)
+            dv = dv[first]
+        pid_acc[b] = dv_acc[b] = []
         counts[b] = dv.size
         if dv.size < min_pairs:
             continue
@@ -638,9 +648,10 @@ def number_effective_samples(
         \operatorname{Var}(\bar z) = \frac{1}{N^2}\sum_i\sum_j C(h_{ij}),
         \qquad n_{\rm eff} = \sigma^2_{\rm tot}/\operatorname{Var}(\bar z).
 
-    ``offdiag_draws`` holds one entry per pass; when ``n_subsample >= N`` there
-    is a single pass, since repeating an exhaustive draw cannot vary the
-    estimate. Evaluated on random subsets of the domain's own geometry, so it
+    ``offdiag_draws`` holds one entry per pass. When ``n_subsample >= N`` a
+    single pass is made: every draw would then be the identical point set, so
+    repeating it cannot vary ``mean_off`` and would only fill
+    ``offdiag_draws`` with copies that read as a Monte-Carlo spread. Evaluated on random subsets of the domain's own geometry, so it
     needs no shape idealisation, but reported for the FULL set of points
     passed in:
     the subsampling estimates the mean off-diagonal covariance only, and the
@@ -661,9 +672,11 @@ def number_effective_samples(
     # silently wrong for the area the caller asked about.
     offs = []
     m = min(n_subsample, N)
-    # Same one-pass rule as empirical_variogram: with m == N every draw is the
-    # identical point set, so extra passes would leave mean_off untouched while
-    # filling offdiag_draws with copies that read as a Monte-Carlo spread.
+    # With m == N every draw is the identical point set: extra passes would
+    # leave mean_off untouched while filling offdiag_draws with copies that
+    # read as a Monte-Carlo spread. (empirical_variogram needs no such rule --
+    # it deduplicates pairs instead, which this estimator has no use for since
+    # it averages whole draws rather than pooling them.)
     for _ in range(1 if m >= N else max(1, n_draws)):
         idx = rng.choice(N, m, replace=False) if m < N else np.arange(N)
         ee, nn = e[idx], n[idx]

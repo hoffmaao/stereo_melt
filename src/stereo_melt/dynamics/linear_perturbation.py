@@ -93,7 +93,17 @@ operator                                            ``k = 0`` bin
 :meth:`LinearPerturbation.kernel_time_integral_stationary`  analytic
                                                     :math:`I_h(0,t)`,
                                                     :math:`I_s(0,t)` -- finite
-                                                    and physical.
+                                                    and physical. Backs
+                                                    ``forward(stationary=True)``.
+:meth:`LinearPerturbation.convolution_kernel_dc`    analytic
+                                                    :math:`K_h(0,t)`,
+                                                    :math:`K_s(0,t)`, the
+                                                    :math:`\partial_t` of those
+                                                    integrals. Backs
+                                                    ``forward(stationary=False)``,
+                                                    so BOTH branches of
+                                                    ``forward`` carry the same
+                                                    physical DC response.
 :meth:`LinearPerturbation.steady_state_kernel`      analytic
                                                     :math:`t\to\infty` limit of
                                                     the same expressions, so
@@ -570,6 +580,40 @@ class LinearPerturbation:
         """
         return float(self.gamma - self.delta / (2.0 * (self.delta + 1.0)))
 
+    def convolution_kernel_dc(self, t_ndim):
+        r"""Return the analytic :math:`k=0` values of ``(K_h, K_s)`` at ``t_ndim``.
+
+        :meth:`transfer_functions` hard-zeros :math:`R` and :math:`B` at DC to
+        dodge a 0/0, which sends the convolution kernels
+        :math:`K_h = -(\delta B/\mu)(e^{\lambda_+ t} - e^{\lambda_- t})` and
+        :math:`K_s` to exactly zero there. Their true limits are finite.
+
+        Derivation, taken from the kernels themselves rather than from the
+        stationary integral. As :math:`k\to 0`, :math:`R` and :math:`B` both
+        diverge with :math:`B/R \to 1`, so
+        :math:`\mu = \sqrt{4\delta B^2 + R^2(\delta-1)^2} \to R(\delta+1)`,
+        :math:`\lambda_+ \to \lambda_0 = \gamma - \delta/(2(\delta+1))` and
+        :math:`\lambda_- \to -\infty` (so :math:`e^{\lambda_- t}\to 0` for
+        :math:`t>0`). Hence
+
+        .. math::
+            \frac{\delta B}{\mu} \to \frac{\delta}{\delta+1}, \qquad
+            \frac{\mu + (1-\delta)R}{2\mu} \to \frac{1}{\delta+1},
+
+        giving :math:`K_h(0,t) = -\frac{\delta}{\delta+1}e^{\lambda_0 t}` and
+        :math:`K_s(0,t) = \frac{1}{\delta+1}e^{\lambda_0 t}`.
+
+        Cross-check: these are exactly :math:`\partial_t` of
+        :meth:`kernel_time_integral_stationary`'s DC limits
+        :math:`I_h(0,t) = -\frac{\delta}{\delta+1}\,\mathrm{expm1}(\lambda_0
+        t)/\lambda_0` and :math:`I_s(0,t)`, as they must be, which is what
+        keeps ``forward``'s two branches one model rather than two
+        conventions.
+        """
+        delta = self.delta
+        ex = np.exp(np.float64(self.dc_eigenvalue()) * np.asarray(t_ndim, float))
+        return -(delta / (delta + 1.0)) * ex, ex / (delta + 1.0)
+
     def unrelaxed_modes(self, kx, ky):
         r"""Boolean mask of wavenumbers with **no steady state**.
 
@@ -828,6 +872,11 @@ def forward(
     R, B, lp, lm, mu = model.transfer_functions(kx, ky)
     tiny = 1e-30
     mu_safe = xp.where(xp.abs(mu) > tiny, mu, xp.asarray(tiny))
+    # R and B are hard-zeroed at DC, which would zero K_h and K_s there for
+    # every t; carry their analytic limits instead, so this branch and the
+    # stationary one describe the same physics at k=0.
+    dc = xp.sqrt(kx ** 2 + ky ** 2) <= 0
+    has_dc = bool(xp.any(dc))
 
     for n in range(n_t):
         # Trapezoidal ∫₀^{t_n} K_h(t_n - t̃) m̂(t̃) dt̃
@@ -838,6 +887,9 @@ def forward(
             e_p = xp.exp(lp * t_ndim)
             e_m = xp.exp(lm * t_ndim)
             K_h = -(model.delta * B / mu_safe) * (e_p - e_m)
+            if has_dc:
+                kh0, ks0 = model.convolution_kernel_dc(t_ndim)
+                K_h = xp.where(dc, xp.asarray(kh0, dtype=K_h.dtype), K_h)
             # Trapezoid weight
             if i == 0 or i == n:
                 w = 0.5
@@ -855,6 +907,8 @@ def forward(
                 K_s = (1.0 / (2.0 * mu_safe)) * (
                     (mu + (1.0 - model.delta) * R) * e_p + (mu - (1.0 - model.delta) * R) * e_m
                 )
+                if has_dc:
+                    K_s = xp.where(dc, xp.asarray(ks0, dtype=K_s.dtype), K_s)
                 s_hat_n = s_hat_n + w * K_s * m_hat[i] * dt_i
         h_field = xp.fft.ifft2(h_hat_n).real
         h_out[n] = to_numpy(h_field)

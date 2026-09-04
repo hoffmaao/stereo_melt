@@ -11,7 +11,10 @@ Reproduces the qualitative behavior of paper Figures 7-8:
 
 It also pins the k=0 (DC) behaviour of ``steady_state_kernel``, the
 unrelaxed-mode diagnostic and its asymptote, and the agreement between
-``forward(t -> infty)`` and ``steady_state`` including the DC mode.
+``forward(t -> infty)`` and ``steady_state`` including the DC mode -- for
+BOTH branches of ``forward``, since the stationary integral and the
+time-varying convolution carry the same analytic k=0 limit and must not
+drift apart.
 
 Run::
 
@@ -242,5 +245,53 @@ mean_ratio = float(h_forward.isel(time=0).values.mean()) / float(h_ss.values.mea
 print(f"  domain-mean ratio (the k = 0 mode alone) = {mean_ratio:.6f}")
 assert abs(mean_ratio - 1.0) < 0.02, f"DC mode disagrees: mean ratio {mean_ratio}"
 print("  PASS: forward(t -> infty) agrees with steady_state, DC mode included.")
+
+# ---- Both branches of forward carry the same DC response ----
+# The time-varying convolution kernel is built from transfer_functions, where
+# R and B are hard-zeroed at k=0. Without its analytic limit the domain mean of
+# the time-varying result is EXACTLY 0 while steady_state thins the shelf, so
+# the two branches of one public function disagreed on the DC mode.
+_t_end = 200.0 * tr
+_h_st = forward(m_wide, H=H, eta_bar=eta_bar, stationary=True,
+                times=np.array([_t_end])).isel(time=0)
+_mean_st = float(_h_st.values.mean())
+
+
+def _tv_mean(n_t):
+    ts = np.linspace(0.0, _t_end, n_t)
+    mt = xr.DataArray(np.repeat(m_wide.values[None], n_t, 0), dims=("time", "y", "x"),
+                      coords={"time": ts, "y": y, "x": x})
+    return float(forward(mt, H=H, eta_bar=eta_bar,
+                         stationary=False).isel(time=-1).values.mean())
+
+
+_mean_20, _mean_40 = _tv_mean(20), _tv_mean(40)
+_rel_20, _rel_40 = abs(_mean_20 / _mean_st - 1), abs(_mean_40 / _mean_st - 1)
+print(f"\nforward(stationary=False) domain mean at t = 200 tr: {_mean_20:.6f} m (20 epochs), "
+      f"{_mean_40:.6f} m (40); steady_state {_mean_st:.6f} m")
+assert abs(_mean_20) > 0.5 * abs(_mean_st), \
+    f"time-varying branch is DC-blind: mean {_mean_20} vs {_mean_st}"
+assert _rel_20 < 0.05, f"time-varying DC disagrees with steady_state by {_rel_20:.3e}"
+print(f"  rel. disagreement {_rel_20:.2e} (20 epochs) -> {_rel_40:.2e} (40)")
+# The residual is trapezoid time-discretisation of the convolution, not a model
+# difference: halving dt must shrink it, which a genuine DC mismatch would not.
+assert _rel_40 < 0.5 * _rel_20, \
+    f"disagreement does not converge with dt: {_rel_20:.3e} -> {_rel_40:.3e}"
+print("  PASS: both branches of forward carry the DC mode, converging in dt.")
+
+# The DC convolution kernel must be the time derivative of the DC integral --
+# the identity that keeps the two branches one physical model.
+_mdl = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81)
+_eps = 1e-6
+_zg = np.array([[0.0]])
+for _t in (0.5, 2.0, 5.0):
+    _kh, _ks = _mdl.convolution_kernel_dc(_t)
+    _ip, _sp = _mdl.kernel_time_integral_stationary(_zg, _zg, _t + _eps)
+    _im, _sm = _mdl.kernel_time_integral_stationary(_zg, _zg, _t - _eps)
+    _dih = (float(np.real(_ip[0, 0])) - float(np.real(_im[0, 0]))) / (2 * _eps)
+    _dis = (float(np.real(_sp[0, 0])) - float(np.real(_sm[0, 0]))) / (2 * _eps)
+    assert abs(_dih - _kh) < 1e-6, f"K_h(0,{_t}) != d/dt I_h(0,{_t}): {_kh} vs {_dih}"
+    assert abs(_dis - _ks) < 1e-6, f"K_s(0,{_t}) != d/dt I_s(0,{_t}): {_ks} vs {_dis}"
+print("  PASS: K_h(0,t), K_s(0,t) are d/dt of the stationary DC integrals.")
 
 print("\nGATE PASSED: all linear-perturbation checks.")
