@@ -162,10 +162,13 @@ def bridging_transfer_multiplier(
 
     ``T[0, 0]`` is set to **1**, which is the analytic limit rather than a
     convention: :math:`G_h \to -2` and :math:`G_s \to 2/\delta` as
-    :math:`k \to 0`, so :math:`T \to \delta/(f_b(\delta+1)) = 1` exactly. The
-    :math:`k=0` bin only needs setting because
+    :math:`k \to 0`, so :math:`T \to \delta/(f_b(\delta+1)) = 1` exactly.
     :meth:`~stereo_melt.dynamics.linear_perturbation.LinearPerturbation.steady_state_kernel`
-    hard-zeros DC to keep perturbation operators mean-free.
+    now carries that limit itself, so the pin is a redundant defensive
+    assertion: a finite DC bin that disagrees with 1 raises rather than being
+    silently overwritten. It stays non-optional because the kernel returns NaN
+    at DC when :math:`\gamma` leaves the uniform mode unrelaxed, while
+    :math:`T` there is still 1 (:math:`\lambda_0` cancels in the ratio).
 
     With ``alpha_scale=0`` the result is real, isotropic and depends on nothing
     but :math:`\lambda/H` and :math:`\rho_i/\rho_w` — no viscosity, no velocity.
@@ -184,6 +187,12 @@ def bridging_transfer_multiplier(
     T = np.ascontiguousarray(to_numpy(T)).astype(np.complex128)
     if not np.isfinite(T[1:, 1:]).any():
         raise ValueError("bridging transfer is entirely non-finite")
+    dc = complex(T[0, 0])
+    if np.isfinite(dc) and abs(dc - 1.0) > 1e-8:
+        raise ValueError(
+            f"steady_state_kernel's DC flotation departure is {dc!r}, not the "
+            "analytic 1: the k=0 limit of G_h/(f_b (G_h - G_s)) disagrees with "
+            "the transfer this operator is built from")
     T[0, 0] = 1.0 + 0.0j
     return T
 
@@ -215,10 +224,12 @@ def normalized_bridging_multiplier(
     maximum, not the modulus itself — see the inline note; using ``max|M_h|``
     inverted the sign of every non-zero wavenumber.
 
-    The ``k = 0`` bin is set to **1**, overriding the hand-zeroing in
-    :mod:`.linear_perturbation` — appropriate for an anomaly operator, wrong for
-    a relative damping, and the difference is exactly what makes the melt mean
-    identifiable here.
+    The ``k = 0`` bin is set to **1**: a relative damping is unity where the
+    shelf floats hydrostatically, and pinning it is what makes the melt mean
+    identifiable here. The plateau it is normalised against is measured over
+    the **resolved** (non-DC) bins, so this stays a statement about what the
+    grid can actually see rather than about
+    :mod:`.linear_perturbation`'s analytic :math:`k=0` limit.
 
     That pin is only self-consistent if :math:`|M_h|` actually plateaus at
     the longest resolved wavelengths. Whether it does depends on ``eta_bar``
@@ -242,7 +253,8 @@ def normalized_bridging_multiplier(
     # the domain mean and the rest of the spectrum in opposite signs. Taking
     # the plateau bin's complex value instead leaves |D| untouched and sends
     # D -> +1 in the hydrostatic limit, which is what D[0, 0] = 1 asserts.
-    flat = np.abs(M).ravel()
+    flat = np.abs(M).ravel().copy()
+    flat[0] = np.nan                     # DC is pinned below, not a resolved bin
     if not np.isfinite(flat).any():
         raise ValueError("bridging multiplier is entirely non-finite")
     plateau = M.ravel()[int(np.nanargmax(flat))]

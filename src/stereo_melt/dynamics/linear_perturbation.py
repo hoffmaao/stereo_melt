@@ -373,7 +373,8 @@ class LinearPerturbation:
         # k=0 analytic limit. transfer_functions hard-zeros R and B at
         # the DC mode to dodge a 0/0 in the naive R = R_num/denom
         # evaluation, which propagates a spurious zero into I_h, I_s
-        # here. The actual k=0 limit is finite and physical: with no
+        # here. The actual k=0 limit is finite and physical, and
+        # steady_state_kernel applies its t -> infinity value: with no
         # spatial gradients the bending operator vanishes, leaving a
         # coupled (h, s) system whose eigenvalues are
         #   λ+(0) = γ - δ/(2(δ+1)),     λ-(0) → -∞,
@@ -382,7 +383,9 @@ class LinearPerturbation:
         #   I_h(0, t) = -(δ/(δ+1)) · expm1(λ+(0)·t) / λ+(0)
         #   I_s(0, t) =  (1/(δ+1)) · expm1(λ+(0)·t) / λ+(0)
         # In the long-time limit I_h → -2, matching steady_state_kernel's
-        # G_h analytic value, which is the right cross-check.
+        # G_h analytic value, which is the right cross-check. λ+(0) ≥ 0
+        # leaves the mode unrelaxed; steady_state_kernel returns NaN there
+        # while this integral stays finite at finite t.
         kmag = xp.sqrt(kx ** 2 + ky ** 2)
         zero_mask = kmag <= 0
         if bool(xp.any(zero_mask)):
@@ -403,6 +406,30 @@ class LinearPerturbation:
         Evaluates Stubblefield Eq. 3.12–3.13 directly. Dimensional:
         multiply :math:`\hat m` by ``H`` conversion internally if used
         by :func:`steady_state`.
+
+        The :math:`k=0` bin carries the analytic long-wavelength limit — the
+        :math:`t\to\infty` value of the very expressions
+        :meth:`kernel_time_integral_stationary` integrates, so
+        :func:`steady_state` and ``forward(stationary=True)`` agree at DC:
+
+        .. math::
+            \lambda_0 = \gamma - \frac{\delta}{2(\delta+1)}, \qquad
+            G_h(0) = \frac{\delta/(\delta+1)}{\lambda_0}, \qquad
+            G_s(0) = -\frac{1/(\delta+1)}{\lambda_0}.
+
+        :math:`\alpha` does not enter, since :math:`k'_x = k'_y = 0` there.
+        At :math:`\gamma = 0` this is :math:`G_h(0) = -2` and
+        :math:`G_s(0) = 2/\delta`, so :math:`\hat h/\hat s = -\delta` — exact
+        hydrostatic flotation, an infinite-wavelength load carrying no bridging
+        — and the flotation departure :math:`T = G_h/(f_b(G_h - G_s))` is
+        exactly 1 for **any** :math:`\gamma`, because :math:`\lambda_0`
+        cancels. If :math:`\lambda_0 \ge 0` the DC mode does not relax, no
+        steady state exists there, and the bin is returned as **NaN** rather
+        than as a finite wrong number or a silent zero.
+
+        The limit is the Newtonian one (it comes from the :math:`k\to 0`
+        asymptotics of :math:`R` and :math:`B`), and is applied for
+        ``n != 1`` too, matching :meth:`kernel_time_integral_stationary`.
         """
         R, B, lp, lm, mu = self.transfer_functions(kx, ky)
         # ĥ_e = -δ B m̂ / [δ(R² - B²) + (i(αx kx'+αy ky') − γ)(δ+1) R + (i(αx kx'+αy ky') − γ)²]
@@ -415,11 +442,18 @@ class LinearPerturbation:
         denom_safe = xp.where(xp.abs(denom) > tiny, denom, xp.asarray(tiny))
         G_h = -self.delta * B / denom_safe
         G_s = (R + q) / denom_safe
-        # Zero-out k=0 (DC) component.
         kmag = xp.sqrt(kx**2 + ky**2)
         zero = kmag <= 0
-        G_h = xp.where(zero, xp.asarray(0.0), G_h)
-        G_s = xp.where(zero, xp.asarray(0.0), G_s)
+        if bool(xp.any(zero)):
+            delta = self.delta
+            lam0 = float(self.gamma - delta / (2.0 * (delta + 1.0)))
+            if lam0 < 0.0:
+                g_h0 = (delta / (delta + 1.0)) / lam0
+                g_s0 = -(1.0 / (delta + 1.0)) / lam0
+            else:
+                g_h0 = g_s0 = float("nan")
+            G_h = xp.where(zero, xp.asarray(g_h0, dtype=G_h.dtype), G_h)
+            G_s = xp.where(zero, xp.asarray(g_s0, dtype=G_s.dtype), G_s)
         return G_h, G_s
 
 
@@ -671,7 +705,12 @@ def steady_state(
     Evaluates Stubblefield Eq. 3.12–3.13 directly in Fourier space
     (no time integration). Convenience wrapper for the :math:`t
     \to \infty` limit; expect agreement with
-    :func:`forward` at large :math:`t/t_r`.
+    :func:`forward` at large :math:`t/t_r`, including the :math:`k=0`
+    mode (a spatially uniform melt does thin the shelf, and
+    :meth:`LinearPerturbation.steady_state_kernel` carries the analytic DC
+    limit of that relaxation). The DC bin is NaN, and the returned field
+    therefore all-NaN, when :math:`\gamma \ge \delta/(2(\delta+1))` leaves
+    the uniform mode unrelaxed.
 
     Parameters
     ----------

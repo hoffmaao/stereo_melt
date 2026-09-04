@@ -225,7 +225,9 @@ def nuth_kaab_point_raster(
         ``nmad_after`` would mix in the quieter sub-gate points and overstate
         the improvement), ``slope_p90`` (degrees; low means the horizontal solve is
         weakly constrained) and the per-iteration ``history``. ``dx``/``dy``/
-        ``dz`` stay NaN if no iteration ever had ``min_points`` usable points.
+        ``dz`` stay NaN if no iteration ever had ``min_points`` usable points;
+        ``n_points`` then reports how many the slope gate did leave, which is
+        not necessarily zero.
     """
     if method not in ("gradient", "nuth_kaab"):
         raise ValueError(f'method must be "gradient" or "nuth_kaab", got {method!r}')
@@ -260,6 +262,8 @@ def nuth_kaab_point_raster(
         sl = _at(pe, pn, s_slope)
         ok = np.isfinite(dh) & np.isfinite(sl) & (sl >= lo) & (sl <= hi)
         if ok.sum() < min_points:
+            if out["n_iter"] == 0:
+                out["n_points"] = int(ok.sum())
             out["history"].append(dict(iter=it, n=int(ok.sum()), note="too few usable points"))
             break
         if it == 0:

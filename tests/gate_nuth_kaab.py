@@ -155,6 +155,15 @@ def main() -> int:
           f"n_points {rn['n_points']} n_iter {rn['n_iter']}")
     check("no NMAD is claimed for a fit that never ran",
           not np.isfinite(rn["nmad_before"]) and not np.isfinite(rn["nmad_after"]))
+    # A sub-threshold bail is still a bail, but "25 of the 30 needed" and
+    # "none at all" are different diagnoses and must not both report 0.
+    rs = nuth_kaab_point_raster(dem, x, y, e, n, zc, method="gradient",
+                                min_points=10 ** 7)
+    print(f"      sub-threshold (min_points 1e7): n_points {rs['n_points']} n_iter {rs['n_iter']}")
+    check("a sub-threshold bail reports the count it did have, not 0",
+          rs["n_points"] > 0 and rs["n_points"] == rs["history"][-1]["n"]
+          and not np.isfinite(rs["dx"]),
+          f"n_points {rs['n_points']} vs history {rs['history'][-1]['n']}")
 
     print("N4  robustness to blunders in the control")
     rng = np.random.default_rng(7)

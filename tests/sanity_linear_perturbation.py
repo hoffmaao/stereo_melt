@@ -97,36 +97,64 @@ assert abs(h_inflow) < abs(
 ), "inflow should diminish the narrow-channel surface expression"
 print("  PASS: inflow mutes narrow-channel surface topography.")
 
+# ---- The k = 0 (DC) mode of the steady kernel ----
+# A spatially uniform melt has no gradients, so it thins the shelf in exact
+# hydrostatic flotation: h/s = -delta, and the flotation departure T = 1.
+from stereo_melt.dynamics.linear_perturbation import LinearPerturbation
+
+fb = 1.0 - rhoi / rhow
+_zero = np.array([[0.0]])
+for gam in (0.0, -0.02, 0.03):
+    _m = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81, gamma=gam)
+    Gh0, Gs0 = _m.steady_state_kernel(_zero, _zero)
+    Gh0, Gs0 = complex(Gh0[0, 0]), complex(Gs0[0, 0])
+    T0 = Gh0 / (fb * (Gh0 - Gs0))
+    print(f"\nDC kernel at gamma={gam:+.2f}: G_h(0)={Gh0.real:.6f}  G_s(0)={Gs0.real:.6f}  "
+          f"h/s={(Gh0 / Gs0).real:+.6f}  T(0)={T0.real:.9f}")
+    assert abs((Gh0 / Gs0).real + delta) < 1e-12, "DC mode must be exact flotation h/s = -delta"
+    assert abs(T0.real - 1.0) < 1e-12 and abs(T0.imag) < 1e-12, "T(0) must be exactly 1"
+    if gam == 0.0:
+        assert abs(Gh0.real + 2.0) < 1e-12, f"G_h(0) at gamma=0 must be -2, got {Gh0.real}"
+        assert abs(Gs0.real - 2.0 / delta) < 1e-9, f"G_s(0) at gamma=0 must be 2/delta"
+print("  PASS: DC kernel is exact flotation, T(0) = 1, G_h(0) = -2 at gamma = 0.")
+
+# gamma >= delta/(2(delta+1)) leaves the uniform mode unrelaxed: no steady
+# state exists there, and the kernel must say so rather than return a number.
+_m_hot = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rhoi, rho_w=rhow, g=9.81,
+                            gamma=delta / (2.0 * (delta + 1.0)) + 1e-6)
+_gh_hot, _gs_hot = _m_hot.steady_state_kernel(_zero, _zero)
+assert not np.isfinite(complex(_gh_hot[0, 0])), "unrelaxed DC mode must be NaN, not a number"
+assert not np.isfinite(complex(_gs_hot[0, 0])), "unrelaxed DC mode must be NaN, not a number"
+print("  PASS: no steady state at DC (lambda_0 >= 0) is reported as NaN.")
+
 # ---- Stationary forward at large t should match the steady state ----
 from stereo_melt.dynamics import forward
 
-# This comparison is only well-posed on the DC-FREE part of the melt field.
-# The Stubblefield kernel zeros k=0 by construction -- the membrane response
-# to a spatially uniform melt is degenerate, so no steady state exists there
-# and `steady_state` drops the mode. `forward`, being a forward model, does
-# evolve it: a uniform melt really does thin the shelf. The two therefore
-# disagree by exactly the DC content of m, which is not a bug in either.
-# A Gaussian on a finite tile carries a large mean, and the WIDE channel
-# carries ~10x the mean of the narrow one (0.346 vs 0.035 in these units),
-# so comparing the raw fields reads as a 7.5% "error" that is purely k=0.
-# Mean-removed, the two agree to 1.000000 for both widths.
-m_wide_ac = m_wide - m_wide.mean()
-
 # Long-wavelength relaxation time scale t_e = 2 tr (1 + 1/delta) ≈ 19 tr
-# for delta ≈ 0.11, so a wide-channel steady state needs many t_e.
+# for delta ≈ 0.11, so a wide-channel steady state needs many t_e. The
+# comparison covers the FULL field, DC included: a Gaussian on a finite tile
+# carries a large mean, and that mode is exactly where the two paths used to
+# disagree.
 t_many = tr * 200.0
 h_forward = forward(
-    m_wide_ac,
+    m_wide,
     H=H,
     eta_bar=eta_bar,
     stationary=True,
     times=np.array([t_many]),
     return_basal=False,
 )
-h_ss = steady_state(m_wide_ac, H=H, eta_bar=eta_bar)
+h_ss = steady_state(m_wide, H=H, eta_bar=eta_bar)
 ratio = float(h_forward.isel(time=0).values[center]) / float(h_ss.values[center])
 print(f"\nforward(t = 200 tr) / steady_state at wide-channel center = {ratio:.6f} (want ~1.0)")
 assert abs(ratio - 1.0) < 0.02, f"forward at large t should match steady_state, got ratio={ratio}"
-print("  PASS: forward(t -> infty) agrees with steady_state (DC-free part).")
+rel_field = float(np.max(np.abs(h_forward.isel(time=0).values - h_ss.values))
+                  / np.max(np.abs(h_ss.values)))
+print(f"  max|forward - steady_state| / max|steady_state| over the whole field = {rel_field:.2e}")
+assert rel_field < 0.02, f"forward and steady_state disagree over the field by {rel_field:.3e}"
+mean_ratio = float(h_forward.isel(time=0).values.mean()) / float(h_ss.values.mean())
+print(f"  domain-mean ratio (the k = 0 mode alone) = {mean_ratio:.6f}")
+assert abs(mean_ratio - 1.0) < 0.02, f"DC mode disagrees: mean ratio {mean_ratio}"
+print("  PASS: forward(t -> infty) agrees with steady_state, DC mode included.")
 
 print("\nAll linear-perturbation sanity checks passed.")
