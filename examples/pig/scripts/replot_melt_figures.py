@@ -7,7 +7,8 @@ is a pure function of a saved `.nc`, and this script is that function applied to
 the products already on disk:
 
   * `pig_melt_<res>_<tag>[_suffix]_<window>.nc`  -> `melt_comparison_*.png`
-    (Eulerian / Lagrangian / Stubblefield, via `run_melt.plot_melt_comparison`)
+    (Eulerian / Lagrangian, their difference, flux divergence, via
+    `run_melt.plot_melt_comparison`)
   * `pig_fused_melt_map[_tag].nc`                -> `pig_fused_melt_map*.png`
     (Eulerian / budget lin-inv / variational / fused, via
     `fused_melt_map.render_map`)
@@ -44,7 +45,7 @@ FIGS = str(config.FIGURES_DIR)
 
 
 def replot_production(path: str) -> None:
-    """`pig_melt_*.nc` -> the 6-panel melt_comparison figure."""
+    """`pig_melt_*.nc` -> the 4-panel melt_comparison figure."""
     ds = xr.open_dataset(path)
     euler = xr.Dataset({"melt_rate": ds["melt_rate_eulerian"],
                         "flux_div": ds["flux_div"]})

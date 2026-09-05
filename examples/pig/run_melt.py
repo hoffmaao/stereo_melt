@@ -897,8 +897,7 @@ def main(
     lagr_melt = lagr.melt_rate.where(floating)
     print(
         f"  floating-only Eulerian median={float(euler_melt.median()):.2f}  "
-        f"Lagrangian median={float(lagr_melt.median()):.2f}"
-        + " m ice/yr"
+        f"Lagrangian median={float(lagr_melt.median()):.2f} m ice/yr"
     )
 
     out_nc = (
