@@ -454,6 +454,11 @@ def empirical_variogram(
     # of the kept difference is arbitrary, which is immaterial to gamma (it
     # squares or takes |.|).
     exhaustive = m >= e.size
+    # Pair ids exist only to deduplicate overlapping draws. A single pass, or an
+    # exhaustive one (whose repeats are skipped below), has no overlap to
+    # remove, so building them there would retain an int64 array per pair that
+    # is never read -- doubling the accumulator for nothing.
+    dedup = n_pass > 1 and not exhaustive
     pid_acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
     dv_acc: list[list[np.ndarray]] = [[] for _ in range(nb)]
     n_pooled = np.zeros(nb, dtype=np.int64)
@@ -468,15 +473,17 @@ def empirical_variogram(
         iu, ju = np.triu_indices(m, k=1)
         d = np.hypot(ee[iu] - ee[ju], nn[iu] - nn[ju])
         dv = vv[iu] - vv[ju]
-        gi = idx[iu].astype(np.int64)
-        gj = idx[ju].astype(np.int64)
-        pid = np.minimum(gi, gj) * np.int64(e.size) + np.maximum(gi, gj)
+        if dedup:
+            gi = idx[iu].astype(np.int64)
+            gj = idx[ju].astype(np.int64)
+            pid = np.minimum(gi, gj) * np.int64(e.size) + np.maximum(gi, gj)
         which = np.digitize(d, bin_edges) - 1
         good = (which >= 0) & (which < nb)
         for b in np.unique(which[good]):
             sel = good & (which == b)
             n_pooled[b] += int(sel.sum())
-            pid_acc[b].append(pid[sel])
+            if dedup:
+                pid_acc[b].append(pid[sel])
             dv_acc[b].append(dv[sel])
     if exhaustive:
         n_pooled = n_pooled * n_pass
@@ -488,7 +495,7 @@ def empirical_variogram(
         if not dv_acc[b]:
             continue
         dv = np.concatenate(dv_acc[b])
-        if n_pass > 1 and not exhaustive:
+        if dedup:
             _, first = np.unique(np.concatenate(pid_acc[b]), return_index=True)
             dv = dv[first]
         pid_acc[b] = dv_acc[b] = []

@@ -220,11 +220,14 @@ def _read_xyh_csv(path: Path) -> np.ndarray | None:
     non-empty cell that will not coerce to a number); a missing cell is not
     evidence. A column counts as numeric when every non-empty cell coerces,
     so gaps are allowed but a label column is not. The
-    :data:`_XYH_COLUMNS` names are preferred when all three are present (any
-    order, any case, extra columns ignored); otherwise the first three numeric
-    columns are taken POSITIONALLY as easting, northing, height -- which is
-    what makes a headerless file work, and what an unrecognised header falls
-    back to.
+    :data:`_XYH_COLUMNS` names, when all three are present (any order, any
+    case, extra columns ignored), ARE the columns: if one of them does not
+    parse, that raises rather than falling back, since substituting a column
+    positionally would return different coordinates under a valid-looking
+    header. Positional selection -- the first three numeric columns as easting,
+    northing, height -- applies only when the names are absent altogether,
+    which is what makes a headerless file work and what an unrecognised header
+    falls back to.
     """
     path = Path(path)
     if not path.exists():
@@ -265,20 +268,30 @@ def _read_xyh_csv(path: Path) -> np.ndarray | None:
         raise _unusable("a header row and no data rows")
 
     numeric = [c for c in body.columns if _is_numeric(body[c])]
-    if len(numeric) < 3:
-        found = list(row0) if has_header else f"{len(body.columns)} column(s)"
-        raise _unusable(
-            f"only {len(numeric)} numeric column(s); need 3 "
-            f"(easting, northing, height). Found: {found}")
-
-    picked = None
+    named = {}
     if has_header:
         lookup = {str(v).strip().lower(): i for i, v in enumerate(row0)}
         if all(c in lookup for c in _XYH_COLUMNS):
-            by_name = [lookup[c] for c in _XYH_COLUMNS]
-            if all(c in numeric for c in by_name):
-                picked = by_name
-    if picked is None:
+            named = {c: lookup[c] for c in _XYH_COLUMNS}
+
+    if named:
+        # The names ARE the columns. A named column that will not parse is an
+        # error in the file, not a reason to go looking for another column:
+        # substituting one positionally returns different coordinates, which
+        # downstream reads as a broken alignment rather than a bad file.
+        bad = [c for c in _XYH_COLUMNS if named[c] not in numeric]
+        if bad:
+            raise _unusable(
+                f"column(s) {bad} are named in the header but do not parse as "
+                "numbers (every non-empty cell must); refusing to substitute "
+                "another column positionally")
+        picked = [named[c] for c in _XYH_COLUMNS]
+    else:
+        if len(numeric) < 3:
+            found = list(row0) if has_header else f"{len(body.columns)} column(s)"
+            raise _unusable(
+                f"only {len(numeric)} numeric column(s); need 3 "
+                f"(easting, northing, height). Found: {found}")
         picked = numeric[:3]
 
     arr = np.column_stack([

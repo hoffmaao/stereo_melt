@@ -140,18 +140,69 @@ def main() -> int:
     check("an absent file is None -- the ONLY case that returns None",
           _read_xyh_csv(tmp / "does_not_exist.csv") is None)
 
+    # A NAMED coordinate column that will not parse is an error in the file.
+    # Substituting another column positionally returns different coordinates
+    # under a valid-looking header -- here the n_src counts would arrive as
+    # heights, ~35 m wrong, and be reported downstream as a broken alignment.
+    named_bad = {
+        "named h_mean has a sentinel token": (
+            "easting,northing,h_mean,n_src\n"
+            "-1600000.0,-290000.0,40.0,3\n"
+            "-1599950.0,-290050.0,41.0,4\n"
+            "-1599900.0,-290100.0,NODATA,5\n"
+            "-1599850.0,-290150.0,43.0,6"),
+        "named h_mean is entirely empty": (
+            "easting,northing,h_mean,n_src\n"
+            "-1600000.0,-290000.0,,3\n"
+            "-1599950.0,-290050.0,,4\n"
+            "-1599900.0,-290100.0,,5"),
+    }
+    for name, txt in named_bad.items():
+        pth = tmp / f"ctl_named_{name.replace(' ', '_')}.csv"
+        pth.write_text(txt + "\n")
+        try:
+            got = _read_xyh_csv(pth)
+        except ValueError as exc:
+            check(f"{name}: raises naming the column, no positional substitute",
+                  "h_mean" in str(exc), str(exc).split(": ", 1)[-1][:72])
+        except Exception as exc:            # noqa: BLE001
+            check(f"{name}: raises naming the column, no positional substitute",
+                  False, f"{type(exc).__name__}: {exc}")
+        else:
+            check(f"{name}: raises naming the column, no positional substitute",
+                  False, f"returned heights {got[:, 2]} -- wrong column")
+    # ...but a GAP in a named column is fine: the incomplete row is dropped.
+    gap_named = tmp / "ctl_named_gap.csv"
+    gap_named.write_text("easting,northing,h_mean,n_src\n"
+                         "-1600000.0,-290000.0,40.0,3\n"
+                         "-1599950.0,-290050.0,,4\n"
+                         "-1599900.0,-290100.0,42.0,5\n")
+    got = _read_xyh_csv(gap_named)
+    check("a gap in a named column drops that row, keeps the named heights",
+          got is not None and got.shape == (2, 3)
+          and abs(got[0, 2] - 40.0) < 1e-12 and abs(got[1, 2] - 42.0) < 1e-12,
+          "None" if got is None else f"{got.shape} heights {got[:, 2]}")
+
     # Present but unusable must RAISE on every path, naming the file. Before
     # this, an unreadable file failed on the probe read and came back None,
     # i.e. exactly what an absent file returns.
     unreadable = tmp / "ctl_unreadable.csv"
     unreadable.write_text("easting,northing,h_mean\n" + rows + "\n")
     os.chmod(unreadable, 0o000)
-    bad_cases = {
-        "unreadable (mode 000)": unreadable,
-        "two columns": None,
-        "header, no data rows": None,
-        "empty file": None,
-    }
+    # Mode bits are not honoured for root, nor on some overlay/NFS/CIFS mounts.
+    # Probe the precondition instead of assuming it, so this gate cannot go red
+    # on one host and green on another for a reason that is not about the reader.
+    try:
+        with open(unreadable, "rb"):
+            readable_anyway = True
+    except OSError:
+        readable_anyway = False
+    bad_cases = {}
+    if readable_anyway:
+        print("      (skipping the unreadable-file case: mode 000 is still "
+              "readable here, so the environment cannot express it)")
+    else:
+        bad_cases["unreadable (mode 000)"] = unreadable
     two_col = tmp / "ctl_bad_two_columns.csv"
     two_col.write_text("easting,northing\n" + "\n".join(
         f"{-1600000.0 + i * 50},{-290000.0 - i * 50}" for i in range(5)) + "\n")
