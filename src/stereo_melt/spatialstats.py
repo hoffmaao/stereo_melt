@@ -661,12 +661,22 @@ def number_effective_samples(
     the subsampling estimates the mean off-diagonal covariance only, and the
     diagonal is applied exactly. ``n_eff`` -> the point count for white noise,
     -> ~1 when the field is correlated across the whole area.
+
+    A single point has no off-diagonal pairs at all, so the double sum is just
+    :math:`C(0)`: ``var_mean`` is the total sill, ``n_eff`` is 1, and
+    ``mean_offdiag_cov`` is reported as ``0.0`` (the sum over an empty set),
+    with ``offdiag_draws`` empty. Raises ``ValueError`` if no point has finite
+    coordinates -- an area mean of nothing has no error bar.
     """
     e = np.asarray(east, float)
     n = np.asarray(north, float)
     ok = np.isfinite(e) & np.isfinite(n)
     e, n = e[ok], n[ok]
     N = int(e.size)
+    if N == 0:
+        raise ValueError(
+            "number_effective_samples needs at least one point with finite "
+            f"coordinates; got {np.asarray(east).size} point(s), none finite")
     total = float(sum(p[1] for p in params))
     rng = np.random.default_rng(seed)
     # Estimate the mean OFF-DIAGONAL covariance from subsamples and combine it
@@ -682,13 +692,19 @@ def number_effective_samples(
     # it deduplicates pairs instead, which this estimator has no use for since
     # it averages whole draws rather than pooling them.)
     for _ in range(1 if m >= N else max(1, n_draws)):
+        if m < 2:
+            break
         idx = rng.choice(N, m, replace=False) if m < N else np.arange(N)
         ee, nn = e[idx], n[idx]
         d = np.hypot(ee[:, None] - ee[None, :], nn[:, None] - nn[None, :])
         C = covariance_from_variogram(d, params)
         iu = np.triu_indices(m, k=1)
         offs.append(float(np.mean(C[iu])))
-    mean_off = float(np.mean(offs))
+    # No off-diagonal pair exists below N = 2, so their mean is the sum over an
+    # empty set. Taking it as 0.0 explicitly keeps var_mean = C(0) = the sill;
+    # leaving np.mean([]) to produce NaN and trusting the (1 - 1/N) factor to
+    # cancel it instead yielded 0.0 * NaN = NaN, and n_eff = inf.
+    mean_off = float(np.mean(offs)) if offs else 0.0
     var_mean = total / N + (1.0 - 1.0 / N) * mean_off
     neff = total / var_mean if var_mean > 0 else np.inf
     return dict(n_eff=float(neff), var_mean=float(var_mean), total_sill=total,

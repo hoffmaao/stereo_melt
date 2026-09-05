@@ -14,7 +14,11 @@ G1  recovery: simulate a Gaussian field with a KNOWN correlation range and
     scale L is the gaussian model with range 2L -- the expectations below are
     stated that way, not re-tuned to whatever the fit prints.
 G2  limits: white noise -> pure nugget, n_eff ~ N; a field correlated across
-    the whole domain -> n_eff ~ 1. These bracket every real case.
+    the whole domain -> n_eff ~ 1. These bracket every real case. Also the
+    SMALL-N limits, which a block estimator hits whenever the shelf mask clips
+    a block: N = 1 must give n_eff = 1 and Var = the sill (not inf, which reads
+    as zero error for the least informative domain there is), N = 2 must give
+    the ordinary one-pair formula, and N = 0 must raise rather than divide.
 G3  robustness: Dowd resists blunders that wreck Matheron (real DEM residuals
     are heavy-tailed).
 G4  the propagation identity: n_eff computed by double sum reproduces the
@@ -54,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from stereo_melt.spatialstats import (  # noqa: E402
     covariance_from_variogram,
+    standard_error_of_mean,
     empirical_variogram,
     fit_variogram,
     infer_heteroscedasticity_from_stable,
@@ -141,6 +146,54 @@ def main() -> int:
     nc = number_effective_samples(e[sub], n[sub], huge, seed=3)
     print(f"      fully correlated: n_eff {nc['n_eff']:.2f}")
     check("fully correlated: n_eff ~ 1", nc["n_eff"] < 1.5, f"{nc['n_eff']:.2f}")
+
+    # Small-N limits. A block clipped by the shelf mask can hold one pixel, and
+    # the double sum over a single point is exactly C(0) -- so the answer is
+    # n_eff = 1 and Var(z_bar) = the sill, never inf.
+    P_SMALL = [("nugget", 1.0, 0.0), ("spherical", 2.0, 4000.0)]
+    sill = sum(p[1] for p in P_SMALL)
+    one = number_effective_samples(np.array([0.0]), np.array([0.0]), P_SMALL)
+    sem_one = standard_error_of_mean(np.array([0.0]), np.array([0.0]), P_SMALL)
+    print(f"      N=1: n_eff {one['n_eff']:.3f}  var_mean {one['var_mean']:.4f} "
+          f"(sill {sill:.4f})  mean_offdiag {one['mean_offdiag_cov']}  "
+          f"sem {sem_one:.4f}")
+    check("N=1: n_eff is 1, not inf", one["n_eff"] == 1.0, f"{one['n_eff']}")
+    check("N=1: Var(z_bar) is the sill", abs(one["var_mean"] - sill) < 1e-12,
+          f"{one['var_mean']:.6f} vs {sill:.6f}")
+    check("N=1: the standard error is finite and sqrt(sill)",
+          np.isfinite(sem_one) and abs(sem_one - np.sqrt(sill)) < 1e-12,
+          f"{sem_one:.6f} vs {np.sqrt(sill):.6f}")
+    check("N=1: no NaN leaks into the reported diagnostics",
+          np.isfinite(one["mean_offdiag_cov"]) and one["offdiag_draws"] == [],
+          f"mean_offdiag {one['mean_offdiag_cov']}  draws {one['offdiag_draws']}")
+    # N=2 must be the ordinary formula over its single pair, checked against the
+    # covariance evaluated independently at that separation.
+    h12 = 3000.0
+    two = number_effective_samples(np.array([0.0, h12]), np.array([0.0, 0.0]), P_SMALL)
+    c12 = float(covariance_from_variogram(np.array([h12]), P_SMALL)[0])
+    var2 = sill / 2.0 + 0.5 * c12
+    print(f"      N=2: n_eff {two['n_eff']:.4f}  var_mean {two['var_mean']:.4f} "
+          f"(closed form {var2:.4f}, C({h12:.0f} m) = {c12:.4f})")
+    check("N=2: Var(z_bar) matches the one-pair double sum",
+          abs(two["var_mean"] - var2) < 1e-12, f"{two['var_mean']:.6f} vs {var2:.6f}")
+    check("N=2: mean_offdiag_cov is that single pair's covariance",
+          abs(two["mean_offdiag_cov"] - c12) < 1e-12, f"{two['mean_offdiag_cov']:.6f}")
+    check("N=2: n_eff lies between 1 and 2", 1.0 <= two["n_eff"] <= 2.0,
+          f"{two['n_eff']:.4f}")
+    # No finite point at all is an error, not a division by zero.
+    for label, (ee_, nn_) in {"empty": (np.array([]), np.array([])),
+                              "all-NaN": (np.full(3, np.nan), np.full(3, np.nan))}.items():
+        try:
+            number_effective_samples(ee_, nn_, P_SMALL)
+        except ValueError as exc:
+            check(f"{label} input raises ValueError, not ZeroDivisionError",
+                  "finite" in str(exc), str(exc)[:70])
+        except Exception as exc:            # noqa: BLE001
+            check(f"{label} input raises ValueError, not ZeroDivisionError",
+                  False, f"{type(exc).__name__}: {exc}")
+        else:
+            check(f"{label} input raises ValueError, not ZeroDivisionError",
+                  False, "no error raised")
 
     print("G3  robust vs classical estimator under blunders")
     zb = z.copy()
