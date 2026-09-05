@@ -19,6 +19,10 @@ G2  limits: white noise -> pure nugget, n_eff ~ N; a field correlated across
     a block: N = 1 must give n_eff = 1 and Var = the sill (not inf, which reads
     as zero error for the least informative domain there is), N = 2 must give
     the ordinary one-pair formula, and N = 0 must raise rather than divide.
+    A region with no pair (N < 2) and a subsample too small to sample one
+    (n_subsample < 2) are different situations: the first is exact, the second
+    is a usage error and must raise rather than report the white-noise answer
+    for a correlated field.
 G3  robustness: Dowd resists blunders that wreck Matheron (real DEM residuals
     are heavy-tailed).
 G4  the propagation identity: n_eff computed by double sum reproduces the
@@ -194,6 +198,34 @@ def main() -> int:
         else:
             check(f"{label} input raises ValueError, not ZeroDivisionError",
                   False, "no error raised")
+    # A subsample too small to form a pair is a USAGE error, not a pairless
+    # region: 100 points correlated over 1000 km across a 1 km domain have
+    # n_eff ~ 1, and silently averaging zero pairs would report n_eff = 100 --
+    # the white-noise answer, understating the error 10x.
+    e_corr, n_corr = np.arange(100) * 10.0, np.zeros(100)
+    P_CORR = [("spherical", 1.0, 1e6)]
+    truth = number_effective_samples(e_corr, n_corr, P_CORR)
+    print(f"      correlated fixture: n_eff {truth['n_eff']:.4f} of 100 points "
+          f"(var_mean {truth['var_mean']:.4f})")
+    check("the fixture really is domain-wide correlated (n_eff ~ 1)",
+          truth["n_eff"] < 1.5, f"{truth['n_eff']:.4f}")
+    for bad_ns in (0, 1):
+        try:
+            got = number_effective_samples(e_corr, n_corr, P_CORR, n_subsample=bad_ns)
+        except ValueError as exc:
+            check(f"n_subsample={bad_ns} raises and names the parameter",
+                  "n_subsample" in str(exc), str(exc)[:70])
+        except Exception as exc:            # noqa: BLE001
+            check(f"n_subsample={bad_ns} raises and names the parameter",
+                  False, f"{type(exc).__name__}: {exc}")
+        else:
+            check(f"n_subsample={bad_ns} raises and names the parameter",
+                  False, f"returned n_eff={got['n_eff']:.1f} instead of raising")
+    # ...while a subsample AT the pair threshold is legitimate and must work.
+    two_s = number_effective_samples(e_corr, n_corr, P_CORR, n_subsample=2, n_draws=64)
+    check("n_subsample=2 is accepted and still reports a correlated field",
+          np.isfinite(two_s["n_eff"]) and two_s["n_eff"] < 1.5,
+          f"n_eff {two_s['n_eff']:.4f}")
 
     print("G3  robust vs classical estimator under blunders")
     zb = z.copy()

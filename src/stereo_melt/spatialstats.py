@@ -662,11 +662,20 @@ def number_effective_samples(
     diagonal is applied exactly. ``n_eff`` -> the point count for white noise,
     -> ~1 when the field is correlated across the whole area.
 
-    A single point has no off-diagonal pairs at all, so the double sum is just
-    :math:`C(0)`: ``var_mean`` is the total sill, ``n_eff`` is 1, and
-    ``mean_offdiag_cov`` is reported as ``0.0`` (the sum over an empty set),
-    with ``offdiag_draws`` empty. Raises ``ValueError`` if no point has finite
-    coordinates -- an area mean of nothing has no error bar.
+    Two boundary cases, which are NOT the same thing and do not share a path:
+
+    * ``N < 2`` -- the region genuinely has no off-diagonal pair, so the double
+      sum is exactly :math:`C(0)`. Returns ``var_mean = total_sill``,
+      ``n_eff = 1``, ``mean_offdiag_cov = 0.0`` (the sum over an empty set) and
+      an empty ``offdiag_draws``, without sampling anything.
+    * ``N >= 2`` but ``n_subsample < 2`` -- pairs exist, but the caller has
+      asked for a subsample too small to form one. That is a usage error and
+      raises: averaging no pairs would report ``mean_off = 0``, i.e. the
+      WHITE-NOISE answer, for a field that may be correlated across the whole
+      domain.
+
+    Raises ``ValueError`` if no point has finite coordinates -- an area mean of
+    nothing has no error bar.
     """
     e = np.asarray(east, float)
     n = np.asarray(north, float)
@@ -678,6 +687,24 @@ def number_effective_samples(
             "number_effective_samples needs at least one point with finite "
             f"coordinates; got {np.asarray(east).size} point(s), none finite")
     total = float(sum(p[1] for p in params))
+
+    # A one-point region has no off-diagonal pair to estimate, so the double
+    # sum is exact and trivial. Handled here, before any sampling, so that the
+    # estimator below only ever runs where pairs actually exist.
+    if N < 2:
+        return dict(n_eff=1.0, var_mean=total, total_sill=total,
+                    mean_offdiag_cov=0.0, n_points=N, offdiag_draws=[])
+
+    # Past this point pairs DO exist, so every draw must produce some. A
+    # subsample of fewer than two points cannot form one at all: that is the
+    # caller asking for the impossible, not a degenerate region, and it must
+    # not fall through to an empty average -- mean_off = 0 is the white-noise
+    # answer, which for a correlated field understates the error without limit.
+    if n_subsample < 2:
+        raise ValueError(
+            f"n_subsample must be >= 2 to estimate a pair covariance, got "
+            f"{n_subsample} for {N} points")
+
     rng = np.random.default_rng(seed)
     # Estimate the mean OFF-DIAGONAL covariance from subsamples and combine it
     # with the exact diagonal for the full N. Averaging the whole subsample
@@ -692,19 +719,13 @@ def number_effective_samples(
     # it deduplicates pairs instead, which this estimator has no use for since
     # it averages whole draws rather than pooling them.)
     for _ in range(1 if m >= N else max(1, n_draws)):
-        if m < 2:
-            break
         idx = rng.choice(N, m, replace=False) if m < N else np.arange(N)
         ee, nn = e[idx], n[idx]
         d = np.hypot(ee[:, None] - ee[None, :], nn[:, None] - nn[None, :])
         C = covariance_from_variogram(d, params)
         iu = np.triu_indices(m, k=1)
         offs.append(float(np.mean(C[iu])))
-    # No off-diagonal pair exists below N = 2, so their mean is the sum over an
-    # empty set. Taking it as 0.0 explicitly keeps var_mean = C(0) = the sill;
-    # leaving np.mean([]) to produce NaN and trusting the (1 - 1/N) factor to
-    # cancel it instead yielded 0.0 * NaN = NaN, and n_eff = inf.
-    mean_off = float(np.mean(offs)) if offs else 0.0
+    mean_off = float(np.mean(offs))
     var_mean = total / N + (1.0 - 1.0 / N) * mean_off
     neff = total / var_mean if var_mean > 0 else np.inf
     return dict(n_eff=float(neff), var_mean=float(var_mean), total_sill=total,
