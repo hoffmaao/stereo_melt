@@ -40,6 +40,7 @@ Run::
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -104,45 +105,79 @@ def make_strips(tmp, n_strips, *, tau_x, tau_y, tau_c, dem_noise, ctl_noise,
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="gate_ctl_prior_"))
 
-    print("C0  a present-but-unreadable control CSV is not an absent one")
+    print("C0  absent, unusable and valid control CSVs are three outcomes")
     rows = "\n".join(f"{-1600000.0 + i * 50},{-290000.0 - i * 50},{40.0 + i}"
                      for i in range(5))
+    # Every layout the reader documents as accepted must parse to the same
+    # coordinates, including a headerless row 0 with a GAP -- a missing cell is
+    # not evidence of a header.
+    gap_rows = ("-1600000.0,,40.0\n"
+                "-1599950.0,-290050.0,41.0\n"
+                "-1599900.0,-290100.0,42.0")
     ok_cases = {
-        "headerless": rows,
-        "expected header": "easting,northing,h_mean\n" + rows,
-        "commented header": "# easting,northing,height\n" + rows,
-        "capitalised header": "Easting,Northing,H_mean\n" + rows,
+        "headerless": (rows, 5),
+        "expected header": ("easting,northing,h_mean\n" + rows, 5),
+        "commented header": ("# easting,northing,height\n" + rows, 5),
+        "capitalised header": ("Easting,Northing,H_mean\n" + rows, 5),
+        "reordered header": ("h_mean,easting,northing\n" + "\n".join(
+            f"{40.0 + i},{-1600000.0 + i * 50},{-290000.0 - i * 50}"
+            for i in range(5)), 5),
+        "unrecognised header": ("x,y,z\n" + rows, 5),
+        "headerless, gap in row 0": (gap_rows, 2),
     }
-    for name, txt in ok_cases.items():
-        pth = tmp / f"ctl_ok_{name.replace(' ', '_')}.csv"
-        pth.write_text(txt + "\n")
-        got = _read_xyh_csv(pth)
-        check(f"{name}: parses to (5, 3)",
-              got is not None and got.shape == (5, 3)
-              and abs(got[0, 2] - 40.0) < 1e-12,
-              "None" if got is None else f"{got.shape} first h {got[0, 2]}")
-    check("an absent file is None (the strip is simply uncontrolled)",
-          _read_xyh_csv(tmp / "does_not_exist.csv") is None)
-    # The reported defect: a readable file with an unexpected header used to
-    # return None, i.e. exactly what an absent file returns.
-    bad_cases = {"x,y,z": "x,y,z\n" + rows,
-                 "two columns": "easting,northing\n" + "\n".join(
-                     f"{-1600000.0 + i * 50},{-290000.0 - i * 50}" for i in range(5))}
-    for name, txt in bad_cases.items():
-        pth = tmp / f"ctl_bad_{name.replace(',', '').replace(' ', '_')}.csv"
+    for name, (txt, n_rows) in ok_cases.items():
+        pth = tmp / f"ctl_ok_{name.replace(' ', '_').replace(',', '')}.csv"
         pth.write_text(txt + "\n")
         try:
             got = _read_xyh_csv(pth)
-        except ValueError as exc:
-            check(f"header {name!r}: raises and names the file",
-                  str(pth) in str(exc), str(exc)[:80])
         except Exception as exc:            # noqa: BLE001
-            check(f"header {name!r}: raises and names the file", False,
-                  f"{type(exc).__name__}: {exc}")
-        else:
-            check(f"header {name!r}: raises and names the file", False,
-                  f"returned {got if got is None else got.shape} "
-                  "-- indistinguishable from a missing file")
+            check(f"{name}: parses", False, f"{type(exc).__name__}: {str(exc)[:70]}")
+            continue
+        check(f"{name}: parses to ({n_rows}, 3) with easting first",
+              got is not None and got.shape == (n_rows, 3)
+              and got[0, 0] < -1e6 and got[0, 2] < 1e3,
+              "None" if got is None else f"{got.shape} first row {got[0]}")
+    check("an absent file is None -- the ONLY case that returns None",
+          _read_xyh_csv(tmp / "does_not_exist.csv") is None)
+
+    # Present but unusable must RAISE on every path, naming the file. Before
+    # this, an unreadable file failed on the probe read and came back None,
+    # i.e. exactly what an absent file returns.
+    unreadable = tmp / "ctl_unreadable.csv"
+    unreadable.write_text("easting,northing,h_mean\n" + rows + "\n")
+    os.chmod(unreadable, 0o000)
+    bad_cases = {
+        "unreadable (mode 000)": unreadable,
+        "two columns": None,
+        "header, no data rows": None,
+        "empty file": None,
+    }
+    two_col = tmp / "ctl_bad_two_columns.csv"
+    two_col.write_text("easting,northing\n" + "\n".join(
+        f"{-1600000.0 + i * 50},{-290000.0 - i * 50}" for i in range(5)) + "\n")
+    bad_cases["two columns"] = two_col
+    hdr_only = tmp / "ctl_bad_header_only.csv"
+    hdr_only.write_text("easting,northing,h_mean\n")
+    bad_cases["header, no data rows"] = hdr_only
+    empty = tmp / "ctl_bad_empty.csv"
+    empty.write_text("")
+    bad_cases["empty file"] = empty
+    try:
+        for name, pth in bad_cases.items():
+            try:
+                got = _read_xyh_csv(pth)
+            except ValueError as exc:
+                check(f"{name}: raises ValueError naming the file",
+                      str(pth) in str(exc), str(exc)[:78])
+            except Exception as exc:        # noqa: BLE001
+                check(f"{name}: raises ValueError naming the file", False,
+                      f"{type(exc).__name__}: {exc}")
+            else:
+                check(f"{name}: raises ValueError naming the file", False,
+                      f"returned {got if got is None else got.shape} "
+                      "-- indistinguishable from a missing file")
+    finally:
+        os.chmod(unreadable, 0o644)
 
     print("C1  per-strip plane recovery against control (well-spread, quiet control)")
     items, truth = make_strips(tmp, 40, tau_x=1.5e-4, tau_y=1.5e-4, tau_c=0.3,

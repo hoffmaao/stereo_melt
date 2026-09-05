@@ -10,8 +10,9 @@ Start from a flat reference DEM. Add a known per-epoch planar tilt
 Also tests the T=2 degenerate case.
 
 Runs at the library ``min_width`` default: this 10 km synthetic has
-``dist_ptp`` ~4.7 km, so the old 40 km default left ``fit_xy`` False and the
-slope assertions below ran against empty columns.
+``dist_ptp`` ~4.7 km, so the old 40 km default left ``fit_xy`` False, the
+slope columns solved to 0, and the assertions below FAILED against a solver
+that had not fitted anything.
 
 Run::
 

@@ -198,70 +198,95 @@ _XYH_COLUMNS = ("easting", "northing", "h_mean")
 
 
 def _read_xyh_csv(path: Path) -> np.ndarray | None:
-    """``(n, 3)`` easting/northing/height from a control CSV; header optional.
+    r"""``(n, 3)`` easting/northing/height from a control CSV; header optional.
 
-    Three outcomes the caller has to be able to tell apart, because a strip
-    with no control and a strip whose control failed to parse warrant opposite
-    responses:
+    Exactly three outcomes, and the caller must be able to tell them apart: a
+    strip with no control and a strip whose control failed to parse warrant
+    opposite responses, and conflating them reports a basin-wide file problem
+    as "no control anywhere" via the ``qc_unfitted`` bucket -- which is
+    documented as "normally no control, not a bad strip".
 
-    * **absent** -- returns ``None``. The strip simply has no control file.
-    * **present but unreadable** -- raises ``ValueError`` naming the file and
-      what was found. A readable file with an unexpected schema used to come
-      back as ``None`` too: the header row was re-read as data, every column
-      went object-dtype, ``select_dtypes("number")`` found nothing, and the
-      empty result was indistinguishable from a missing file. Downstream that
-      surfaced as ``qc_unfitted`` -- the bucket documented as "normally no
-      control, not a bad strip" -- so a basin-wide column-name mismatch read as
-      "no control anywhere" with nothing naming the real cause.
-    * **present and valid** -- returns the array.
+    * **path absent** -- returns ``None``. This is the ONLY case that returns
+      ``None``.
+    * **path present but unusable** -- raises ``ValueError`` naming the file and
+      the specific reason. One exception policy for every read and every schema
+      check: unreadable (permissions, I/O, encoding, malformed CSV), empty, a
+      header with no data rows, fewer than three numeric columns, or no row with
+      all three coordinates.
+    * **path present and valid** -- returns the ``(n, 3)`` float array.
 
-    The headerless branch is entered by TESTING row 0, not by inferring it from
-    a failed name match, so a capitalised or renamed header is reported rather
-    than silently consumed. Accepted layouts: the
-    :data:`_XYH_COLUMNS` names in any order and case (extra columns ignored), or
-    three or more numeric columns with no header at all.
+    Column selection is decided once, not inferred from the failure of an
+    earlier guess. Row 0 is treated as a header only on positive evidence (a
+    non-empty cell that will not coerce to a number); a missing cell is not
+    evidence. A column counts as numeric when every non-empty cell coerces,
+    so gaps are allowed but a label column is not. The
+    :data:`_XYH_COLUMNS` names are preferred when all three are present (any
+    order, any case, extra columns ignored); otherwise the first three numeric
+    columns are taken POSITIONALLY as easting, northing, height -- which is
+    what makes a headerless file work, and what an unrecognised header falls
+    back to.
     """
     path = Path(path)
     if not path.exists():
         return None
-    try:
-        head = pd.read_csv(path, comment="#", header=None, nrows=1)
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
-        return None
-    if head.empty:
-        return None
-    # Row 0 is a header iff it is not fully numeric.
-    row0_numeric = pd.to_numeric(head.iloc[0], errors="coerce").notna().all()
-    try:
-        df = (pd.read_csv(path, comment="#", header=None) if row0_numeric
-              else pd.read_csv(path, comment="#"))
-    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
-        raise ValueError(f"control CSV {path} exists but could not be parsed: {exc}")
-    if df.empty:
-        return None
 
-    if row0_numeric:
-        cols = [pd.to_numeric(df[c], errors="coerce") for c in df.columns]
-        cols = [c for c in cols if c.notna().any()]
-        if len(cols) < 3:
-            raise ValueError(
-                f"control CSV {path} has no header and only {len(cols)} numeric "
-                f"column(s); need at least 3 (easting, northing, height)")
-        arr = np.column_stack([c.to_numpy(float) for c in cols[:3]])
-    else:
-        lookup = {str(c).strip().lower(): c for c in df.columns}
-        missing = [c for c in _XYH_COLUMNS if c not in lookup]
-        if missing:
-            raise ValueError(
-                f"control CSV {path} has header {list(df.columns)}, which is "
-                f"missing {missing}; expected the columns {list(_XYH_COLUMNS)} "
-                "(any order/case) or a headerless numeric file")
-        arr = np.column_stack([
-            pd.to_numeric(df[lookup[c]], errors="coerce").to_numpy(float)
-            for c in _XYH_COLUMNS])
+    def _unusable(reason: str) -> ValueError:
+        return ValueError(f"control CSV {path} is present but unusable: {reason}")
 
+    try:
+        raw = pd.read_csv(path, comment="#", header=None, dtype=object)
+    except pd.errors.EmptyDataError as exc:
+        raise _unusable("the file is empty") from exc
+    except (OSError, UnicodeDecodeError, pd.errors.ParserError) as exc:
+        raise _unusable(f"{type(exc).__name__}: {exc}") from exc
+    if raw.empty:
+        raise _unusable("no rows")
+
+    def _nonempty(col):
+        return col[col.notna() & (col.astype(str).str.strip() != "")]
+
+    def _is_numeric(col):
+        vals = _nonempty(col)
+        return (not vals.empty
+                and bool(pd.to_numeric(vals, errors="coerce").notna().all()))
+
+    # Row 0 is a HEADER only on positive evidence: some cell in it carries a
+    # non-empty value that will not coerce to a number. A MISSING cell is not
+    # evidence -- a headerless row with a gap is an accepted layout, and keying
+    # on "row 0 is fully numeric" misread it as a header and then rejected it
+    # against column names invented from its own data.
+    row0 = raw.iloc[0]
+    present = _nonempty(row0)
+    has_header = (not present.empty
+                  and bool(pd.to_numeric(present, errors="coerce").isna().any()))
+
+    body = raw.iloc[1:].reset_index(drop=True) if has_header else raw
+    if body.empty:
+        raise _unusable("a header row and no data rows")
+
+    numeric = [c for c in body.columns if _is_numeric(body[c])]
+    if len(numeric) < 3:
+        found = list(row0) if has_header else f"{len(body.columns)} column(s)"
+        raise _unusable(
+            f"only {len(numeric)} numeric column(s); need 3 "
+            f"(easting, northing, height). Found: {found}")
+
+    picked = None
+    if has_header:
+        lookup = {str(v).strip().lower(): i for i, v in enumerate(row0)}
+        if all(c in lookup for c in _XYH_COLUMNS):
+            by_name = [lookup[c] for c in _XYH_COLUMNS]
+            if all(c in numeric for c in by_name):
+                picked = by_name
+    if picked is None:
+        picked = numeric[:3]
+
+    arr = np.column_stack([
+        pd.to_numeric(body[c], errors="coerce").to_numpy(float) for c in picked])
     arr = arr[np.isfinite(arr).all(1)]
-    return arr if arr.size else None
+    if not arr.size:
+        raise _unusable("no row has all three coordinates")
+    return arr
 
 
 def load_combined_reference(reference_dir: "Path | str", dem_id: str) -> np.ndarray | None:

@@ -530,11 +530,13 @@ def fit_tilt_stack(
         assert on slopes -- tightly, at ``atol`` 1e-9 mean-removed and
         1e-6 for the T=2 case, since slope recovery is the whole point
         of that file. Its 10 km synthetic gives ``dist_ptp`` ~4.7 km,
-        so under the old ``40000`` default ``fit_xy`` was False and the
-        slope columns came back empty: the assertions were passing
-        against a solver that had not fitted anything, which is exactly
-        the stale-test bug this default change fixed. Raising the
-        default again would break that registered gate. NOTE the gate still bites hard
+        so under the old ``40000`` default ``fit_xy`` was False for
+        every epoch and the slope columns solved to exactly 0. Those
+        assertions therefore FAILED -- ``allclose(0, 1e-4, atol=1e-6)``
+        is False -- against a solver that had not fitted anything; the
+        stale 40 km default was the cause, and finding that is what
+        prompted this change. Raising the default again would break
+        that registered gate. NOTE the gate still bites hard
         at the drivers' 10 km: 52.8 % of PIG's 513 epochs fit
         :math:`\alpha_z` only. Changing what the *drivers* pass is a
         science change that moves published melt numbers -- do it
