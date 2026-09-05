@@ -39,7 +39,6 @@ from stereo_melt.flux import grounding_buffer, integrate_basal_flux  # noqa: E40
 from stereo_melt.io.bedmachine import load_firn_on_grid  # noqa: E402
 from stereo_melt.io.smb import smb_over_window  # noqa: E402
 from stereo_melt.kinematics import clean_temporal_outliers, gaussian_smooth_nan  # noqa: E402
-from stereo_melt.dynamics.stubblefield_inverse import stubblefield_inverse_melt_rate  # noqa: E402
 from stereo_melt.melt import (  # noqa: E402
     eulerian_melt_rate,
     lagrangian_melt_rate,
@@ -514,12 +513,11 @@ def plot_inputs(stack, vx, vy, a_dot, firn, out_path: Path) -> None:
 def plot_melt_comparison(
     euler: xr.Dataset,
     lagr: xr.Dataset,
-    linv: xr.Dataset | None,
     out_path: Path,
     clim=(-60.0, 60.0),
 ) -> None:
-    """QC: side-by-side Eulerian vs Lagrangian vs linear-inverse melt."""
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
+    """QC: side-by-side Eulerian vs Lagrangian melt."""
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10), constrained_layout=True)
 
     # Melt panels share the LADDIE symmetric-log scale (black at zero, log
     # decades outward): a linear +/-60 stretch buries everything below ~5 m/yr
@@ -537,29 +535,14 @@ def plot_melt_comparison(
     axes[0, 1].set_title("Lagrangian melt_rate (m ice/yr)")
     add_melt_colorbar(fig, im1, ax=axes[0, 1], fraction=0.045)
 
-    if linv is not None:
-        im2 = _imshow_xr(axes[0, 2], linv.melt_rate, cmap=mcmap, norm=mnorm)
-        axes[0, 2].set_title("Stubblefield non-hydrostatic inverse")
-        add_melt_colorbar(fig, im2, ax=axes[0, 2], fraction=0.045)
-    else:
-        axes[0, 2].set_visible(False)
-
     diff_lag = lagr.melt_rate - euler.melt_rate
     im3 = _imshow_xr(axes[1, 0], diff_lag, cmap="PuOr", vmin=-2.0, vmax=2.0)
     axes[1, 0].set_title("Lagrangian − Eulerian")
     fig.colorbar(im3, ax=axes[1, 0], fraction=0.045)
 
-    if linv is not None:
-        diff_lin = linv.melt_rate - lagr.melt_rate
-        im4 = _imshow_xr(axes[1, 1], diff_lin, cmap="PuOr", vmin=-2.0, vmax=2.0)
-        axes[1, 1].set_title("Stubblefield − Lagrangian")
-        fig.colorbar(im4, ax=axes[1, 1], fraction=0.045)
-    else:
-        axes[1, 1].set_visible(False)
-
-    im5 = _imshow_xr(axes[1, 2], euler.flux_div, cmap="RdBu", vmin=-5.0, vmax=5.0)
-    axes[1, 2].set_title("∇·(H_f u) (m ice/yr)")
-    fig.colorbar(im5, ax=axes[1, 2], fraction=0.045)
+    im5 = _imshow_xr(axes[1, 1], euler.flux_div, cmap="RdBu", vmin=-5.0, vmax=5.0)
+    axes[1, 1].set_title("∇·(H_f u) (m ice/yr)")
+    fig.colorbar(im5, ax=axes[1, 1], fraction=0.045)
 
     for ax in axes.ravel():
         ax.set_xlabel("x (m)")
@@ -841,53 +824,21 @@ def main(
             f"m ice/yr  finite-cell-count={int(lbmr.notnull().sum())}"
         )
 
-    # Third solver: faithful Stubblefield 2023 non-hydrostatic linear inverse --
-    # the DIRECT Fourier inversion of the forward kernel (agstub/linear-shelf-melt),
-    # NOT the old broken masked-CG / Lagrangian-frame variant. Recovers the
-    # channel-scale melt the hydrostatic Eul/Lagr under-sharpen; a non-hydrostatic
-    # correction layer, not a mass-budget melt. eta_bar=1e13 for warm/fast PIG
-    # (amplitude ~1/eta_bar; pattern independent). `linv` carries it so the
-    # existing 3rd-panel plot / save plumbing (guarded on `if linv is not None`)
-    # picks it up.
-    print("Running Stubblefield non-hydrostatic linear inverse (3rd solver)...")
-    try:
-        linv = stubblefield_inverse_melt_rate(
-            stack, vx, vy, floating_mask=floating, d=firn,
-            eta_bar=1e13, sigma_hp_H=5.0, tik=1e-2,
-        )
-    except (ValueError, RuntimeError) as exc:
-        print(f"  Stubblefield inverse FAILED: {exc}")
-        linv = None
-
-    if linv is not None:
-        linv_mr = linv.melt_rate
-        print(
-            f"  H_ref={linv.attrs['H_ref_m']:.1f} m  "
-            f"gamma_dimless={linv.attrs['gamma_dimless']:.3e}  "
-            f"t_r={linv.attrs['tr_yr']:.1f} yr"
-        )
-        print(
-            f"  melt_rate: median={float(linv_mr.median()):.2f}  "
-            f"IQR=[{float(linv_mr.quantile(0.25)):.2f}, "
-            f"{float(linv_mr.quantile(0.75)):.2f}] m ice/yr"
-        )
-
-    # Fourth solver: the variational forward-fit inverse (opt-in PIG_VARIATIONAL=1).
-    # Same Stubblefield transfer as `linv` above, but placed in the FORWARD model
-    # and FITTED rather than divided out. On the Elmer/Ice twins the direct
-    # division over-lifts across-flow structure -- it double-counts the advective
-    # dynamics the surface already carries (E2a cosy 1.07 without, 1.54 with) --
-    # while the forward fit recovers along-flow, oblique and across-flow melt
-    # through one operator with no angular weight. eta_bar defaults to the same
-    # 1e13 `linv` uses above, so the A/B against the third panel isolates the
-    # METHOD, not the viscosity. Like `linv` it is DC-blind: a channel-scale
+    # Third solver: the variational forward-fit inverse (opt-in PIG_VARIATIONAL=1).
+    # The Stubblefield 2023 non-hydrostatic transfer placed in the FORWARD model
+    # and FITTED rather than divided out. On the Elmer/Ice twins a direct
+    # Fourier division of the surface over-lifts across-flow structure -- it
+    # double-counts the advective dynamics the surface already carries (E2a cosy
+    # 1.07 without, 1.54 with) -- while the forward fit recovers along-flow,
+    # oblique and across-flow melt through one operator with no angular weight.
+    # eta_bar defaults to 1e13 (warm/fast PIG). It is DC-blind: a channel-scale
     # pattern correction, NOT a mass-budget melt, and not interchangeable with
     # the Eulerian/Lagrangian products.
     varfit = None
     if os.environ.get("PIG_VARIATIONAL", "0").strip() == "1":
         from stereo_melt.dynamics.stubblefield_forward import variational_melt_rate
 
-        print("Running variational forward-fit inverse (4th solver; narrates)...")
+        print("Running variational forward-fit inverse (3rd solver; narrates)...")
         # PIG_VAR_BG_DEGREE selects HOW the reference state is removed, which is
         # a choice about the INPUT, independent of the forward fit itself:
         #   unset (default) -> legacy Gaussian high-pass of the input at
@@ -944,11 +895,9 @@ def main(
 
     euler_melt = euler.melt_rate.where(floating)
     lagr_melt = lagr.melt_rate.where(floating)
-    linv_melt = linv.melt_rate if linv is not None else None
     print(
         f"  floating-only Eulerian median={float(euler_melt.median()):.2f}  "
         f"Lagrangian median={float(lagr_melt.median()):.2f}"
-        + (f"  Stubblefield median={float(linv_melt.median()):.2f}" if linv is not None else "")
         + " m ice/yr"
     )
 
@@ -980,11 +929,6 @@ def main(
         "min_extent_mask": min_extent_src,
         "smb_source": "RACMO2.4p1 smbgl (Zenodo 19255213), window-integrated",
     }
-    if linv is not None:
-        ds_vars["melt_rate_linear_inverse"] = linv_melt
-        ds_attrs["linear_inverse_H_ref_m"] = linv.attrs["H_ref_m"]
-        ds_attrs["linear_inverse_gamma_dimless"] = linv.attrs["gamma_dimless"]
-        ds_attrs["linear_inverse_tr_yr"] = linv.attrs["tr_yr"]
     if parcel is not None:
         ds_vars["melt_rate_parcel_lsq"] = parcel.melt_rate.where(floating)
         ds_vars["parcel_lsq_stderr"] = parcel.stderr.where(floating)
@@ -1107,7 +1051,7 @@ def main(
     ds_out.to_netcdf(out_nc)
 
     melt_comparison_png = config.FIGURES_DIR / f"melt_comparison{out_suffix}{win_tag}.png"
-    plot_melt_comparison(euler, lagr, linv, melt_comparison_png)
+    plot_melt_comparison(euler, lagr, melt_comparison_png)
     print(f"  wrote {melt_comparison_png}")
 
     if varfit is not None:

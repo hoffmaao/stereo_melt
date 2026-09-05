@@ -46,13 +46,9 @@ FIGS = str(config.FIGURES_DIR)
 def replot_production(path: str) -> None:
     """`pig_melt_*.nc` -> the 6-panel melt_comparison figure."""
     ds = xr.open_dataset(path)
-    # plot_melt_comparison wants three solver Datasets; the Stubblefield panel
-    # is optional and older products predate it.
     euler = xr.Dataset({"melt_rate": ds["melt_rate_eulerian"],
                         "flux_div": ds["flux_div"]})
     lagr = xr.Dataset({"melt_rate": ds["melt_rate_lagrangian"]})
-    linv = (xr.Dataset({"melt_rate": ds["melt_rate_linear_inverse"]})
-            if "melt_rate_linear_inverse" in ds else None)
     # run_melt names the NetCDF `pig_melt<suffix>_<START>_<END>.nc` but the
     # figure `melt_comparison<suffix><win_tag>.png`, where win_tag is EMPTY
     # unless --start/--end selected an analysis sub-window. So a product on the
@@ -64,7 +60,7 @@ def replot_production(path: str) -> None:
     if stem.endswith(full_window):
         stem = stem[:-len(full_window)]
     out = os.path.join(FIGS, f"melt_comparison{stem}.png")
-    plot_melt_comparison(euler, lagr, linv, out)
+    plot_melt_comparison(euler, lagr, out)
     print(f"wrote {out}")
     ds.close()
 
