@@ -9,10 +9,10 @@ Start from a flat reference DEM. Add a known per-epoch planar tilt
 
 Also tests the T=2 degenerate case.
 
-Runs at the library ``min_width`` default: this 10 km synthetic has
-``dist_ptp`` ~4.7 km, so the old 40 km default left ``fit_xy`` False, the
-slope columns solved to 0, and the assertions below FAILED against a solver
-that had not fitted anything.
+Runs at the library ``min_width`` default: this 10 km synthetic has a
+spatial spread (``dist_ptp``) of ~4.7 km, while the basin drivers pass
+``min_width=10000``. The reasoning behind the default lives in the
+``min_width`` docstring of ``stereo_melt.coregister.tilt.fit_tilt_stack``.
 
 Run::
 
