@@ -1119,10 +1119,8 @@ def inverse_dhdt(
         :meth:`LinearPerturbation.kernel_time_integral_stationary`, whose DC
         bin is finite and non-zero, so the inverse does constrain the uniform
         offset in ``m`` -- this prefers the budget-exact level to the kernel's
-        own, and ``recover_dc=False`` keeps the kernel's. (The Tikhonov scale
-        is computed WITHOUT that bin either way, so the choice moves no other
-        wavenumber.) The mass-balance constraint (Shean convention,
-        positive = accretion)
+        own, and ``recover_dc=False`` keeps the kernel's. The mass-balance
+        constraint (Shean convention, positive = accretion)
         :math:`\overline{\dot b} = R\,\overline{\partial h/\partial t}
         - \overline{\dot a}` (with :math:`R = \rho_w/(\rho_w-\rho_i)`)
         recovers the offset directly from the spatial mean of
@@ -1189,11 +1187,7 @@ def inverse_dhdt(
     fill = float(dh_vals[finite].mean())
     dh_filled = asarray(np.where(finite, dh_vals, fill))
 
-    # k=0 contributes ZERO to the Tikhonov scale, for the reason spelled out in
-    # inverse_stationary: recover_dc replaces that level from the mass balance,
-    # so the bin the caller discards must not set the damping everywhere else.
-    dc_bin = (kx ** 2 + ky ** 2) <= 0
-    k_rms = float(to_numpy(xp.sqrt(xp.where(dc_bin, 0.0, xp.abs(K) ** 2).mean())))
+    k_rms = float(to_numpy(xp.sqrt((xp.abs(K) ** 2).mean())))
     lam2 = (reg * k_rms) ** 2
 
     if transform == "fft":
@@ -1402,14 +1396,8 @@ def inverse_stationary(
             den = den + A_i * A_i
 
     # Per-wavenumber Tikhonov: scale reg by the RMS |A| to make `reg`
-    # dimensionless and dataset-independent. The k=0 bin contributes ZERO to
-    # that scale: recover_dc overwrites the DC level afterwards from the mass
-    # balance, so the one bin whose value the caller discards must not set the
-    # damping for every other wavenumber. It is set aside, not renormalised
-    # away -- the denominator stays the full spectrum, so lam2 is what a
-    # DC-zeroing kernel would have produced.
-    dc_bin = (kx ** 2 + ky ** 2) <= 0
-    a_rms = float(to_numpy(xp.sqrt(xp.where(dc_bin, 0.0, den).mean())))
+    # dimensionless and dataset-independent.
+    a_rms = float(to_numpy(xp.sqrt(den.mean())))
     lam2 = (reg * a_rms) ** 2
 
     m_hat_si = num / (den + lam2)

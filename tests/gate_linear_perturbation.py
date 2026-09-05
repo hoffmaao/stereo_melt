@@ -9,10 +9,7 @@ Reproduces the qualitative behavior of paper Figures 7-8:
 - Adding across-channel inflow (alpha > 0): surface expression is
   damped and asymmetric.
 
-It also pins the Tikhonov normalisation against the DC convention -- the
-k=0 bin must not set the damping for every other wavenumber, or a change to
-the DC limit silently moves every AC mode of a production inverse -- and the
-k=0 (DC) behaviour of ``steady_state_kernel``, the
+It also pins the k=0 (DC) behaviour of ``steady_state_kernel``, the
 unrelaxed-mode diagnostic and its asymptote, and the agreement between
 ``forward(t -> infty)`` and ``steady_state`` including the DC mode -- for
 BOTH branches of ``forward``, since the stationary integral and the
@@ -296,63 +293,5 @@ for _t in (0.5, 2.0, 5.0):
     assert abs(_dih - _kh) < 1e-6, f"K_h(0,{_t}) != d/dt I_h(0,{_t}): {_kh} vs {_dih}"
     assert abs(_dis - _ks) < 1e-6, f"K_s(0,{_t}) != d/dt I_s(0,{_t}): {_ks} vs {_dis}"
 print("  PASS: K_h(0,t), K_s(0,t) are d/dt of the stationary DC integrals.")
-
-# ---- The DC bin must not set the AC regularisation ----
-# inverse_stationary/inverse_dhdt scale their Tikhonov weight by the RMS |A|
-# over the spectrum. If that RMS included k=0, changing the kernel's DC
-# convention would move lam2 and hence EVERY AC mode of a production inverse.
-# Drive it through the public API: inflate the kernel's DC bin and require the
-# recovered AC field to be bit-identical.
-from stereo_melt.dynamics import inverse_stationary  # noqa: E402
-import stereo_melt.dynamics.linear_perturbation as _lp  # noqa: E402
-
-_nt, _nyx = 6, 48
-_xs = np.arange(_nyx) * 500.0
-_ys = -np.arange(_nyx) * 500.0
-_Xs, _Ys = np.meshgrid(_xs, _ys)
-_m_syn = 3.0 * np.exp(-0.5 * ((_Xs - _xs.mean()) / 2000.0) ** 2)
-_t_syn = np.array([np.datetime64("2015-01-01") + np.timedelta64(365 * k, "D")
-                   for k in range(_nt)])
-_h_syn = forward(xr.DataArray(_m_syn, dims=("y", "x"), coords={"y": _ys, "x": _xs}),
-                 H=H, eta_bar=eta_bar, stationary=True,
-                 times=(_t_syn - _t_syn[0]) / np.timedelta64(1, "s"))
-_h_syn = xr.DataArray(_h_syn.values, dims=("time", "y", "x"),
-                      coords={"time": _t_syn, "y": _ys, "x": _xs})
-
-
-def _invert():
-    return inverse_stationary(_h_syn, H=H, eta_bar=eta_bar, reg=0.1,
-                              recover_dc=False).values
-
-
-_base = _invert()
-_orig = _lp.LinearPerturbation.kernel_time_integral_stationary
-
-
-def _inflated(self, kx, ky, t_ndim):
-    I_h, I_s = _orig(self, kx, ky, t_ndim)
-    zero = np.sqrt(np.asarray(kx) ** 2 + np.asarray(ky) ** 2) <= 0
-    return (np.where(zero, 1000.0 * np.asarray(I_h), I_h),
-            np.where(zero, 1000.0 * np.asarray(I_s), I_s))
-
-
-_lp.LinearPerturbation.kernel_time_integral_stationary = _inflated
-try:
-    _boosted = _invert()
-finally:
-    _lp.LinearPerturbation.kernel_time_integral_stationary = _orig
-
-_ac_base = _base - _base.mean()
-_ac_boost = _boosted - _boosted.mean()
-_ac_diff = float(np.max(np.abs(_ac_base - _ac_boost)))
-_ac_rel = _ac_diff / float(np.max(np.abs(_ac_base)))
-print(f"\nDC bin x1000 -> max|d(AC field)| = {_ac_diff:.3e} m/yr, "
-      f"{_ac_rel:.1e} of the AC amplitude")
-# Float round-off only: the two runs' DC levels differ by 1000x, so removing
-# each one's own mean cancels at the last bit. If k=0 were in the RMS this
-# boost would move lam2 by ~1800x on this grid and the AC field visibly with it.
-assert _ac_rel < 1e-12, \
-    f"the kernel's DC bin is leaking into the AC regularisation: {_ac_rel:.3e}"
-print("  PASS: the Tikhonov scale ignores k=0, so AC modes are DC-independent.")
 
 print("\nGATE PASSED: all linear-perturbation checks.")
