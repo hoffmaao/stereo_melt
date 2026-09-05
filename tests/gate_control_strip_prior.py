@@ -15,6 +15,10 @@ C2  the population tau^2 is the true across-strip variance -- INCLUDING the
     var(est) overshoots, and subtracting mean(se^2) brings it back;
 C3  the prior maps onto strip_mode_design's (strip_index, component) modes,
     per-strip and population; offset modes refuse to run without offset_var.
+C0  a control CSV that EXISTS but cannot be read must not look like one that
+    is absent: absent -> None (the strip is uncontrolled), unreadable schema
+    -> ValueError naming the file. Conflating them reports a basin-wide
+    column-name mismatch as "no control anywhere".
 C5  control points OUTSIDE a strip's footprint sample as NaN, whatever the
     raster's nodata tag says -- rasterio fills out-of-grid points with
     (nodata or 0), so an untagged or 0-nodata DEM would otherwise return a
@@ -50,6 +54,7 @@ import rasterio  # noqa: E402
 from rasterio.transform import from_origin  # noqa: E402
 
 from stereo_melt.coregister.alignment_quality import (  # noqa: E402
+    _read_xyh_csv,
     fit_residual_plane,
     residual_planes_for_strips,
     sample_dem_at_points,
@@ -98,6 +103,47 @@ def make_strips(tmp, n_strips, *, tau_x, tau_y, tau_c, dem_noise, ctl_noise,
 
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="gate_ctl_prior_"))
+
+    print("C0  a present-but-unreadable control CSV is not an absent one")
+    rows = "\n".join(f"{-1600000.0 + i * 50},{-290000.0 - i * 50},{40.0 + i}"
+                     for i in range(5))
+    ok_cases = {
+        "headerless": rows,
+        "expected header": "easting,northing,h_mean\n" + rows,
+        "commented header": "# easting,northing,height\n" + rows,
+        "capitalised header": "Easting,Northing,H_mean\n" + rows,
+    }
+    for name, txt in ok_cases.items():
+        pth = tmp / f"ctl_ok_{name.replace(' ', '_')}.csv"
+        pth.write_text(txt + "\n")
+        got = _read_xyh_csv(pth)
+        check(f"{name}: parses to (5, 3)",
+              got is not None and got.shape == (5, 3)
+              and abs(got[0, 2] - 40.0) < 1e-12,
+              "None" if got is None else f"{got.shape} first h {got[0, 2]}")
+    check("an absent file is None (the strip is simply uncontrolled)",
+          _read_xyh_csv(tmp / "does_not_exist.csv") is None)
+    # The reported defect: a readable file with an unexpected header used to
+    # return None, i.e. exactly what an absent file returns.
+    bad_cases = {"x,y,z": "x,y,z\n" + rows,
+                 "two columns": "easting,northing\n" + "\n".join(
+                     f"{-1600000.0 + i * 50},{-290000.0 - i * 50}" for i in range(5))}
+    for name, txt in bad_cases.items():
+        pth = tmp / f"ctl_bad_{name.replace(',', '').replace(' ', '_')}.csv"
+        pth.write_text(txt + "\n")
+        try:
+            got = _read_xyh_csv(pth)
+        except ValueError as exc:
+            check(f"header {name!r}: raises and names the file",
+                  str(pth) in str(exc), str(exc)[:80])
+        except Exception as exc:            # noqa: BLE001
+            check(f"header {name!r}: raises and names the file", False,
+                  f"{type(exc).__name__}: {exc}")
+        else:
+            check(f"header {name!r}: raises and names the file", False,
+                  f"returned {got if got is None else got.shape} "
+                  "-- indistinguishable from a missing file")
+
     print("C1  per-strip plane recovery against control (well-spread, quiet control)")
     items, truth = make_strips(tmp, 40, tau_x=1.5e-4, tau_y=1.5e-4, tau_c=0.3,
                                dem_noise=0.4, ctl_noise=0.1, ctl_spread_y=5000.0,
