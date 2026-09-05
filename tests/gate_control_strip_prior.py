@@ -41,6 +41,7 @@ Run::
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -104,7 +105,13 @@ def make_strips(tmp, n_strips, *, tau_x, tau_y, tau_c, dem_noise, ctl_noise,
 
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="gate_ctl_prior_"))
+    try:
+        return _run(tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
+
+def _run(tmp: Path) -> int:
     print("C0  absent, unusable and valid control CSVs are three outcomes")
     rows = "\n".join(f"{-1600000.0 + i * 50},{-290000.0 - i * 50},{40.0 + i}"
                      for i in range(5))

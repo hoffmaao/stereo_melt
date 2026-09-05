@@ -131,8 +131,9 @@ from ..kinematics import dh_dt, flux_divergence
 
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
-__all__ = ["budget_bridging_melt_rate", "bridging_transfer_multiplier",
-           "normalized_bridging_multiplier", "strip_mode_design"]
+__all__ = ["LAM_SIGMA2_COEF", "budget_bridging_melt_rate",
+           "bridging_transfer_multiplier", "normalized_bridging_multiplier",
+           "strip_mode_design", "strip_prior_from_residual_planes"]
 
 
 def bridging_transfer_multiplier(
@@ -514,6 +515,10 @@ def strip_prior_from_residual_planes(
     """
     strip_index = np.asarray(strip_index, int)
     component = np.asarray(component)
+    if strip_index.size != component.size:
+        raise ValueError(
+            "strip_index and component must describe the same modes, got "
+            f"{strip_index.size} and {component.size}")
     dem_ids = np.asarray([str(d) for d in np.asarray(dem_ids)])
     pl = planes.set_index("dem_id") if "dem_id" in getattr(planes, "columns", ()) else planes
     est = {"tilt_x": ("ax", "se_ax"), "tilt_y": ("ay", "se_ay")}

@@ -8,10 +8,12 @@ from .bridging_restoration import (
     restored_budget_melt_rate,
 )
 from .budget_bridging import (
+    LAM_SIGMA2_COEF,
     bridging_transfer_multiplier,
     budget_bridging_melt_rate,
     normalized_bridging_multiplier,
     strip_mode_design,
+    strip_prior_from_residual_planes,
 )
 from .budget_linear_inverse import (
     linear_inverse_budget_melt_rate,
@@ -49,6 +51,7 @@ from .pseudospectral_lagrangian_variable_H import (
 )
 
 __all__ = [
+    "LAM_SIGMA2_COEF",
     "LinearPerturbation",
     "LinearizedHForwardOp",
     "bridging_inverse",
@@ -79,5 +82,6 @@ __all__ = [
     "stationary_pseudospectral_lagrangian_inverse",
     "steady_state",
     "strip_mode_design",
+    "strip_prior_from_residual_planes",
     "variable_H_pseudospectral_lagrangian_inverse",
 ]
