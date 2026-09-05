@@ -32,6 +32,12 @@ C6  the QC classes are reported separately AND reconcile: sd > max_sd is an
     epoch gets discarded; leaving the third out of every list is how a
     missing-control strip becomes invisible. The four classes must partition
     the input table exactly.
+C7  a strip_index / component length mismatch raises, naming both lengths.
+    The two arrays are one description of the same mode list, so a caller that
+    drops an epoch from one and not the other has a bug. Zipping them instead
+    would stop at the shorter and return the tail of an uninitialised
+    `np.empty` as if it were mode variances -- arbitrary floats the solve
+    would use to damp real strip modes, with no exception raised.
 
 Run::
 
@@ -457,6 +463,18 @@ def _run(tmp: Path) -> int:
           set(s_u["qc_dropped"]) == set().union(*buckets)
           and s_u["n_qc_dropped"] == s_u["n_strips"] - s_u["n_population"],
           f"{s_u['n_qc_dropped']} vs {s_u['n_strips'] - s_u['n_population']}")
+
+    print("C7  a strip_index / component length mismatch is an error, not a truncation")
+    short = sidx[:-2]
+    try:
+        strip_prior_from_residual_planes(df2, df2.dem_id.values, short, comp)
+        check("mismatched strip_index / component lengths raise", False,
+              "returned a value; the short array was silently zipped away")
+    except ValueError as exc:
+        msg = str(exc)
+        check("mismatched strip_index / component lengths raise ValueError "
+              "naming both lengths",
+              str(short.size) in msg and str(comp.size) in msg, msg)
 
     print("\nGATE " + ("PASSED" if not FAILS else f"FAILED: {FAILS}"))
     return 0 if not FAILS else 1

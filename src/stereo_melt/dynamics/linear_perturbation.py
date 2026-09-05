@@ -498,8 +498,7 @@ class LinearPerturbation:
         zero_mask = kmag <= 0
         if bool(xp.any(zero_mask)):
             delta = self.delta
-            c0 = delta / (2.0 * (delta + 1.0))
-            lam0 = xp.asarray(self.gamma - c0, dtype=xp.float64)
+            lam0 = xp.asarray(self.dc_eigenvalue(), dtype=xp.float64)
             I0 = _expm1_over(lam0, t_ndim)
             I_h_zero = -(delta / (delta + 1.0)) * I0
             I_s_zero = I0 / (delta + 1.0)
