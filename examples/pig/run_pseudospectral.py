@@ -5,9 +5,9 @@ time-dependent Lagrangian and Eulerian linear-perturbation inverses,
 writes per-time-slice melt-rate fields to NetCDF, and produces a
 comparison figure with time-means and selected epochs.
 
-Separate from :mod:`pig.run_melt` (which runs the three existing
-classic solvers) so the pseudo-spectral pipeline can be iterated
-without disturbing the existing driver.
+Separate from :mod:`pig.run_melt` (which runs the two classic
+solvers, Eulerian and Lagrangian) so the pseudo-spectral pipeline
+can be iterated without disturbing the existing driver.
 
 Run:
 
