@@ -14,7 +14,7 @@ stereo_melt/                ← workspace root (pip-installable from here)
 ├── src/stereo_melt/        ← THE library (no study-specific code)
 │   ├── coregister/         ← ASP align driver, control caches (IS2/CS2/ATM/GLAS),
 │   │                         per-epoch Ez, tilt LSQ + QC, per-strip control
-│   │                         residual planes, Nuth & Kääb refinement
+│   │                         residual planes, Nuth & Kääb shift (diagnostic)
 │   ├── corrections/        ← geoid, tides, IBE, MDT, post-coreg pipeline
 │   ├── dynamics/           ← budget linear inverses, pseudospectral solvers,
 │   │                         velocity fusion

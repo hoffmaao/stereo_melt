@@ -505,6 +505,9 @@ def strip_prior_from_residual_planes(
 
     ``dem_ids`` is the stack's per-epoch ``dem_id`` coordinate, so
     ``strip_index`` (into the stack's time axis) resolves to a row of ``planes``.
+    ``strip_index`` and ``component`` are two descriptions of the SAME mode
+    list -- the pair :func:`strip_mode_design` returns -- so unequal lengths
+    raise rather than pairing off the shorter one.
 
     The planes are the residual AFTER ALIGNMENT; the stack the inverse sees is
     the one after the tilt fit, which removes only a little of them (twin: 17 %
