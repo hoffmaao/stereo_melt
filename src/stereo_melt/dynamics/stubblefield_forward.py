@@ -200,6 +200,23 @@ def stubblefield_forward_multiplier(
     the **padded** shape (e.g. ``2*ny, 2*nx``) when the field will be
     mirror-padded before transforming, as :class:`StubblefieldForward` does.
     ``alpha_{x,y} = alpha_scale * u_{x,y} * t_r / H`` (E1b advection calibration).
+
+    ``M_h[0, 0] = 0`` — this operator is deliberately **DC-blind**, which is a
+    policy of this consumer and not the kernel's own :math:`k=0` value.
+    :meth:`~stereo_melt.dynamics.linear_perturbation.LinearPerturbation.steady_state_kernel`
+    carries the physical long-wavelength limit :math:`G_h(0) = -2` (at
+    :math:`\gamma = 0`), i.e. the full hydrostatic plateau, and that is right
+    for a mass-budget operator. It is wrong here: the variational inverse this
+    multiplier feeds is fitted against a **high-passed** target
+    (:func:`variational_melt_rate` subtracts a Gaussian background, or projects
+    a fitted background out of the residual), so the domain mean has been
+    removed from the data by construction. A live DC bin would let the
+    optimiser fit a uniform melt level to whatever edge and NaN residual the
+    high-pass leaves — an artefact with nothing to constrain it. Zeroing the
+    bin instead keeps the mask-mean an exact null direction, which is what
+    :func:`variational_melt_inverse`'s mean pin and the "channel correction,
+    not a mass-budget melt" contract both assume. The recovered level therefore
+    comes from a prior (``m_prior``/``bg_degree``) or not at all.
     """
     model = LinearPerturbation(H=H, eta_bar=eta_bar, rho_i=rho_i, rho_w=rho_w,
                                g=g, gamma=gamma, theta=theta)
@@ -208,7 +225,9 @@ def stubblefield_forward_multiplier(
     model.alpha_y = float(uy_myr) * a_fac
     kx, ky = _wavenumber_grids(nx, ny, dx, dy)
     G_h, _ = model.steady_state_kernel(kx, ky)
-    return model.tr * np.asarray(G_h) / SECONDS_PER_YEAR
+    M = model.tr * np.asarray(G_h) / SECONDS_PER_YEAR
+    M[0, 0] = 0.0
+    return M
 
 
 def _pad2x(m: torch.Tensor) -> torch.Tensor:
@@ -666,8 +685,9 @@ def variational_melt_inverse(
     # 0) and reg pulls dm toward 0, so where the DC-blind operator sees nothing
     # the melt equals the prior. A plain ||m - m_prior||^2 penalty has the same
     # minimum but converges far too slowly in the flat null-space direction.
-    # The mask-mean of dm is the exact null direction (the operator zeros a
-    # constant): Adam's per-pixel normalization drifts it even though the data
+    # The mask-mean of dm is the exact null direction (the operator's k=0 bin
+    # is pinned to zero in stubblefield_forward_multiplier, so it maps a
+    # constant to nothing): Adam's per-pixel normalization drifts it even though the data
     # gradient is mean-zero, so we pin it -- the melt's unobservable level then
     # comes from the prior, not the optimizer. m_prior=None => dm=m (legacy).
     # anchor_lp_sigma_px generalizes the pin from the mean to the whole
@@ -821,9 +841,10 @@ def variational_melt_rate(
     ``(u0x, u0y)``, which is a synthetic-twin assumption -- on a real shelf
     spanning a large velocity range it is wrong nearly everywhere, so ``n_bins``
     is the appropriate setting for production. Either way the operator is
-    DC-blind (it zeros ``k=0``): the recovered field is a channel-scale pattern
-    correction, **not** a mass-budget melt, and is not interchangeable with the
-    Eulerian/Lagrangian solvers.
+    DC-blind (:func:`stubblefield_forward_multiplier` pins ``k=0`` to zero, by
+    policy rather than by accident -- see there): the recovered field is a
+    channel-scale pattern correction, **not** a mass-budget melt, and is not
+    interchangeable with the Eulerian/Lagrangian solvers.
 
     Parameters
     ----------

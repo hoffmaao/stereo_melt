@@ -448,7 +448,7 @@ def fit_tilt_stack(
     Ex: float = 2e-6,
     Ey: float = 2e-6 / 3.0,
     Ez: float | np.ndarray = 0.1,
-    min_width: float = 40000.0,
+    min_width: float = 0.0,
     offset_only_epochs: np.ndarray | None = None,
     dhdt_smoothness: float | None = None,
     solver: str = "lsmr",
@@ -513,8 +513,34 @@ def fit_tilt_stack(
     min_width : float
         Minimum spatial spread (meters) required to fit the slope
         components :math:`\alpha_x, \alpha_y` at an epoch. Narrower
-        epochs fit :math:`\alpha_z` only. Default ``40000`` (Shean
-        PIG).
+        epochs fit :math:`\alpha_z` only. Default ``0`` — no spread
+        gate; every epoch fits slopes unless ``offset_only_epochs``
+        says otherwise, and ill-conditioned slopes are damped
+        continuously by the ``Ex``/``Ey`` Tikhonov prior rather than by
+        a cliff. The old default was ``40000`` (inherited from Shean
+        PIG), which all seven basin drivers already overrode with
+        ``10000`` because 40 km disabled slope fitting almost
+        everywhere; it was never a value production ran at, which is why
+        the default change leaves PIG's published numbers untouched.
+        Three call sites, in two non-production files, do NOT pass
+        ``min_width`` and so take the new default.
+        ``scripts/test_gpu_tilt_fit.py`` is a GPU segfault/timing smoke
+        script that asserts nothing. ``tests/gate_tilt_stack.py``
+        (both of its fits) takes the new default DELIBERATELY and DOES
+        assert on slopes -- tightly, at ``atol`` 1e-9 mean-removed and
+        1e-6 for the T=2 case, since slope recovery is the whole point
+        of that file. Its 10 km synthetic gives ``dist_ptp`` ~4.7 km,
+        so under the old ``40000`` default ``fit_xy`` was False for
+        every epoch and the slope columns solved to exactly 0. Those
+        assertions therefore FAILED -- ``allclose(0, 1e-4, atol=1e-6)``
+        is False -- against a solver that had not fitted anything; the
+        stale 40 km default was the cause, and finding that is what
+        prompted this change. Raising the default again would break
+        that registered gate. NOTE the gate still bites hard
+        at the drivers' 10 km: 52.8 % of PIG's 513 epochs fit
+        :math:`\alpha_z` only. Changing what the *drivers* pass is a
+        science change that moves published melt numbers -- do it
+        deliberately, with a re-run, not by editing this default.
     dhdt_smoothness : float, optional
         Weight of the Shean ``ndinterp.py`` spatial-smoothness
         constraint on the per-pixel trend field (his L574+ "Smoothness

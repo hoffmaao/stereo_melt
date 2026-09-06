@@ -14,3 +14,9 @@ test:
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_budget_bridging_identity.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_common_epoch_mean.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python examples/pig/test_noise_floor_reporting.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_control_strip_prior.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_nuth_kaab.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_variogram.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_stubblefield_forward.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_linear_perturbation.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_tilt_stack.py

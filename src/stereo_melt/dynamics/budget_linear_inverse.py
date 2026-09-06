@@ -420,8 +420,10 @@ def _irls_ensemble_kernel_solve(
     (flat Tikhonov lets the deconvolution amplify per-fan slope noise at
     high k where the masked data cannot vote it down).
 
-    ``K[0] = 0`` (membrane response degenerate at k=0), so the returned
-    field has exactly zero mean — the caller owns the DC splice.
+    ``K`` comes from ``kernel_time_integral_stationary``, so its ``k = 0``
+    bin is finite and non-zero -- the kernel is NOT degenerate there. The
+    caller owns the DC level anyway: every path here splices it from the
+    hydrostatic budget rather than trusting the kernel's DC response.
 
     Returns ``(m, diag)`` with ``m`` in the INTERNAL Stubblefield
     convention (m ice/s, positive = melt), numpy (ny, nx).
@@ -733,9 +735,10 @@ def linear_inverse_budget_melt_rate(
         median is the L1 fit of a per-pixel constant, and Tukey-IRLS is
         its iterated-reweighting analog, so in the identity-kernel limit
         the mode reproduces the median exactly. Fan footprints enter as
-        weights (no gap infill anywhere). k=0 is degenerate in the kernel,
-        so the DC is spliced from the hydrostatic two-level median
-        (budget-exact). Requires ``transform="dct"``.
+        weights (no gap infill anywhere). The DC is spliced from the
+        hydrostatic two-level median (budget-exact) in preference to the
+        kernel's own k=0 response, which is finite but not budget-constrained.
+        Requires ``transform="dct"``.
     corr_aggregate : {"pooled", "fan-median"}
         (``estimator="split"`` only.) ``"pooled"``: one kernel correction
         from the aggregated slope field (fill artefacts quarantined to the
@@ -1167,8 +1170,9 @@ def linear_inverse_budget_melt_rate(
             tukey_c=irls_tukey_c, n_irls=irls_iters, progress=progress,
         )
         melt_irls = -m_int * SECONDS_PER_YEAR  # Shean convention, zero-mean
-        # k=0 is degenerate in the membrane kernel; the hydrostatic
-        # two-level median owns the (budget-exact) level.
+        # The kernel's k=0 bin is finite (kernel_time_integral_stationary),
+        # but the hydrostatic two-level median is budget-exact, so it owns
+        # the level here.
         dc_splice = float(
             np.nanmedian(m_hydro[finite_s]) - np.nanmedian(melt_irls[finite_s])
         )

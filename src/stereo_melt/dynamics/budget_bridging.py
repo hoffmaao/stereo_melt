@@ -120,6 +120,8 @@ Consequences worth stating
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import xarray as xr
 
@@ -129,8 +131,9 @@ from ..kinematics import dh_dt, flux_divergence
 
 SECONDS_PER_YEAR = 86400.0 * 365.25
 
-__all__ = ["budget_bridging_melt_rate", "bridging_transfer_multiplier",
-           "normalized_bridging_multiplier", "strip_mode_design"]
+__all__ = ["LAM_SIGMA2_COEF", "budget_bridging_melt_rate",
+           "bridging_transfer_multiplier", "normalized_bridging_multiplier",
+           "strip_mode_design", "strip_prior_from_residual_planes"]
 
 
 def bridging_transfer_multiplier(
@@ -160,10 +163,14 @@ def bridging_transfer_multiplier(
 
     ``T[0, 0]`` is set to **1**, which is the analytic limit rather than a
     convention: :math:`G_h \to -2` and :math:`G_s \to 2/\delta` as
-    :math:`k \to 0`, so :math:`T \to \delta/(f_b(\delta+1)) = 1` exactly. The
-    :math:`k=0` bin only needs setting because
+    :math:`k \to 0`, so :math:`T \to \delta/(f_b(\delta+1)) = 1` exactly.
     :meth:`~stereo_melt.dynamics.linear_perturbation.LinearPerturbation.steady_state_kernel`
-    hard-zeros DC to keep perturbation operators mean-free.
+    now carries that limit itself, so the pin is a redundant defensive
+    assertion: a finite DC bin that disagrees with 1 raises rather than being
+    silently overwritten. It stays non-optional because the kernel's DC value
+    is :math:`\pm\infty` at the single degenerate :math:`\lambda_0 = 0`,
+    where the ratio is undefined even though its limit is still 1
+    (:math:`\lambda_0` cancels).
 
     With ``alpha_scale=0`` the result is real, isotropic and depends on nothing
     but :math:`\lambda/H` and :math:`\rho_i/\rho_w` — no viscosity, no velocity.
@@ -182,6 +189,12 @@ def bridging_transfer_multiplier(
     T = np.ascontiguousarray(to_numpy(T)).astype(np.complex128)
     if not np.isfinite(T[1:, 1:]).any():
         raise ValueError("bridging transfer is entirely non-finite")
+    dc = complex(T[0, 0])
+    if np.isfinite(dc) and abs(dc - 1.0) > 1e-8:
+        raise ValueError(
+            f"steady_state_kernel's DC flotation departure is {dc!r}, not the "
+            "analytic 1: the k=0 limit of G_h/(f_b (G_h - G_s)) disagrees with "
+            "the transfer this operator is built from")
     T[0, 0] = 1.0 + 0.0j
     return T
 
@@ -213,10 +226,12 @@ def normalized_bridging_multiplier(
     maximum, not the modulus itself — see the inline note; using ``max|M_h|``
     inverted the sign of every non-zero wavenumber.
 
-    The ``k = 0`` bin is set to **1**, overriding the hand-zeroing in
-    :mod:`.linear_perturbation` — appropriate for an anomaly operator, wrong for
-    a relative damping, and the difference is exactly what makes the melt mean
-    identifiable here.
+    The ``k = 0`` bin is set to **1**: a relative damping is unity where the
+    shelf floats hydrostatically, and pinning it is what makes the melt mean
+    identifiable here. The plateau it is normalised against is measured over
+    the **resolved** (non-DC) bins, so this stays a statement about what the
+    grid can actually see rather than about
+    :mod:`.linear_perturbation`'s analytic :math:`k=0` limit.
 
     That pin is only self-consistent if :math:`|M_h|` actually plateaus at
     the longest resolved wavelengths. Whether it does depends on ``eta_bar``
@@ -240,7 +255,8 @@ def normalized_bridging_multiplier(
     # the domain mean and the rest of the spectrum in opposite signs. Taking
     # the plateau bin's complex value instead leaves |D| untouched and sends
     # D -> +1 in the hydrostatic limit, which is what D[0, 0] = 1 asserts.
-    flat = np.abs(M).ravel()
+    flat = np.abs(M).ravel().copy()
+    flat[0] = np.nan                     # DC is pinned below, not a resolved bin
     if not np.isfinite(flat).any():
         raise ValueError("bridging multiplier is entirely non-finite")
     plateau = M.ravel()[int(np.nanargmax(flat))]
@@ -341,6 +357,249 @@ def strip_mode_design(
     return np.stack(G), np.array(sidx), np.array(cname)
 
 
+#: Coefficient in the truth-free rule ``lam = LAM_SIGMA2_COEF * sigma2_est``.
+#:
+#: **lam IS DIMENSIONLESS, and this rule is an EMPIRICAL calibration, not a
+#: dimensional identity.** An earlier version of this note claimed lam "carries
+#: the same units as the noise variance" so that "the natural scale is sigma^2
+#: itself". That was wrong. The loss is
+#: ``mean_w(resid^2) + lam*(mean(gx^2) + mean(gy^2))``; the residual is a
+#: thickness rate in m/yr, and gx/gy are differences of the melt field, also in
+#: m/yr. Both terms are (m/yr)^2, so lam is a pure number and cannot carry the
+#: units of a variance. What the 2026-08-22 oracle study actually established is
+#: that ``lam = sigma2_est`` landed within 6 % of the oracle lam on the
+#: mixed-field rungs AT THAT STUDY'S POSTING AND NOISE LEVEL -- a fit, not a
+#: derivation. The 08-29 pigreal tier is consistent with a scaling but not with
+#: THIS one: raising the noise variance ~25x moved the optimal lam by ~30-300x,
+#: which is not the linear relation the rule assumes.
+#:
+#: **lam is POSTING-SPECIFIC, and this matters in practice.** gx/gy are bare
+#: per-pixel differences with no dx or dy, so the regulariser penalises
+#: curvature PER PIXEL, not per metre. The same physical melt field differenced
+#: on a 500 m posting gives gx twice the 250 m value, so the regularisation term
+#: scales as res^2 while sigma2_est does not track it (its slope part
+#: rmse^2/S_tt is posting-independent; only the divergence part
+#: u^2 rmse^2/(2 n dx^2) carries 1/dx^2). A lam tuned at 250 m therefore does
+#: NOT transfer to 125 m or 500 m, and every published lam on this project is
+#: specific to the posting it was tuned at. Re-tune when you change resolution.
+#:
+#: The posting-invariant form would divide the differences by dx and dy, making
+#: the regulariser a true squared gradient in (m/yr)/m and lam carry m^2. That
+#: is deliberately NOT done here: it would change every solved field and
+#: invalidate every calibrated lam on record. Kept as a named constant so the
+#: calibration is one edit, not a magic number scattered across drivers.
+LAM_SIGMA2_COEF = 1.0
+
+#: Sentinel for the REQUIRED ``lam`` argument of
+#: :func:`budget_bridging_melt_rate`. There is no defensible universal default:
+#: a fixed lam is not safe across noise levels, and the ``"auto"`` rule above is
+#: near-oracle only under WHITE noise -- which PIG's ~4 km correlated strip
+#: error is not. Omitting lam must therefore be an error, not a silent choice.
+_LAM_REQUIRED = object()
+
+
+def _estimate_sigma2_white(reg, w, weight, H_f_stack, vxm, vym, dx, wv, fit):
+    r"""Truth-free white-noise variance of the thickness-rate observation.
+
+    Two independent contributions at a unit-weight pixel, both built from the
+    per-pixel regression rmse so no truth is used:
+
+    * the slope variance ``rmse^2 / S_tt`` (temporal leverage of the fit), and
+    * the divergence of the mean-thickness noise,
+      ``|u|^2 rmse^2 / (2 n dx^2)``, which is what the flux term propagates.
+
+    Returned in (thickness-rate)^2, averaged over the fit cells with the
+    solver's own weights -- i.e. directly comparable to the ``lam`` that
+    multiplies ``mean(|grad m|^2)`` in the same loss.
+    """
+    rm = np.nan_to_num(reg["rmse"].values)
+    cnt = np.nan_to_num(reg["count"].values).astype(float)
+    stt = np.nan_to_num((w if weight == "leverage"
+                         else _temporal_leverage(H_f_stack)).values)
+    u2 = np.nan_to_num(vxm.values ** 2 + vym.values ** 2)
+    var_i = np.where(stt > 0, rm ** 2 / np.maximum(stt, 1e-30), 0.0) \
+        + u2 * rm ** 2 / (2.0 * np.maximum(cnt, 1) * dx ** 2)
+    return float(np.mean((wv * var_i)[fit]))
+
+
+def strip_prior_from_residual_planes(
+    planes,
+    dem_ids,
+    strip_index: np.ndarray,
+    component: np.ndarray,
+    *,
+    offset_var=None,
+    per_strip: bool = False,
+    floor_frac: float = 0.05,
+    robust: bool = True,
+    max_sd: float | None = 5.0,
+    min_n: int = 100,
+    return_summary: bool = False,
+):
+    r"""``tau^2`` per strip mode from per-strip control residual planes.
+
+    The truth-free source of the coloured-noise prior :math:`\Sigma` that
+    :func:`strip_mode_design` needs. ``planes`` is the table from
+    :func:`stereo_melt.coregister.alignment_quality.residual_planes_for_strips`
+    (``dem_id, ax, ay, se_ax, se_ay, ...``): each strip's signed
+    ``aligned DEM - control`` plane, fitted against the altimetry pc_align was
+    fed. Against the processing twin these planes recover the true residual
+    tilt per strip at corr 0.93 / 0.75 and its across-strip variance to
+    1.08x / 1.6x, where every estimator built on the DEM stack alone is 2x-167x
+    low or diverges (the per-strip tilt is not identifiable from the stack:
+    loosening the tilt prior grows the estimates without bound while their
+    correlation with truth falls). Independent control has no such degeneracy.
+
+    Population rule per tilt component (default, ``robust=True``)::
+
+        tau2_c = max( scale(est_c)^2 - median(se_c^2),  floor_frac * scale^2 )
+
+    with ``scale = 1.4826 * MAD`` -- the method-of-moments variance component
+    with the fit's own estimator variance removed, well-posed here precisely
+    because ``est`` is a genuine ML fit against independent data.
+    ``robust=False`` uses ``var`` and ``mean(se^2)`` (identical on Gaussian
+    strips, e.g. the twin). Robust is the default because real ASP roots
+    contain ALIGNMENT FAILURES: on PIG's 513-strip canon ~15 % of strips carry
+    residual offsets of 60-207 m and fit scatter of 68-175 m, none of them in
+    ``BAD_STRIPS``, and they carried 100 % of the non-robust variance (rms
+    2.3e-3 m/m against a robust 2.0e-6). Strips failing either QC gate are
+    excluded from the tau^2 population and get the population value, but the
+    two gates mean DIFFERENT THINGS and the summary keeps them apart:
+
+    ``qc_alignment_failures`` / ``n_qc_alignment_failures``
+        ``sd > max_sd``: a residual scatter against control of metres means
+        the alignment did not converge. **This is the only list that is a
+        ``BAD_STRIPS`` candidate** -- a genuinely broken strip the stack-side
+        screens do not catch.
+    ``qc_low_control`` / ``n_qc_low_control``
+        ``n < min_n`` and NOT an alignment failure: a well-aligned strip whose
+        control cloud merely clips its footprint. Its plane is too weakly
+        determined to vote in the population, but the STRIP is fine. Do NOT
+        put these in ``BAD_STRIPS``; dropping them discards good epochs. On
+        PIG's canon the two sets were 15 and 15 -- the 15 failures were added
+        to ``BAD_STRIPS``, the 15 low-control strips (scatter 0.36 m, pc_align
+        ``end_p50`` 0.25 m) were deliberately KEPT.
+    ``qc_unfitted`` / ``n_qc_unfitted``
+        No usable plane at all: ``ax``/``ay``/``se_ax``/``se_ay`` not all
+        finite. :func:`~stereo_melt.coregister.alignment_quality.residual_planes_for_strips`
+        emits a NaN row with ``n=0`` when the control file is missing, so this
+        is normally "no control", not "bad strip"; the degenerate-design
+        ``LinAlgError`` path (finite slopes, NaN standard errors) lands here
+        too. Also NOT a ``BAD_STRIPS`` candidate -- a missing control FILE and
+        a broken ALIGNMENT are different problems.
+
+    The four classes -- population, alignment failure, low control, unfitted --
+    are disjoint and exhaustive: ``n_population + n_qc_alignment_failures +
+    n_qc_low_control + n_qc_unfitted == n_strips``, the row count of
+    ``planes``. ``qc_dropped`` remains as the pooled "excluded from the tau^2
+    population" view (the last three classes) and is NOT a bad-strip list.
+    ``per_strip=True`` instead uses ``max(est_k^2 - se_k^2, floor)`` for each
+    QC-passing strip (noisier).
+
+    ``offset`` modes are NOT filled from control: the control lives on the
+    static apron where pc_align pins the offset, while the shelf carries
+    datum-stage residual (tide / IBE / MDT) the control never sees -- on the
+    twin the control-derived offset variance is 0.07x the true one. Pass
+    ``offset_var`` (a float, or one value per epoch of ``dem_ids``) from the
+    datum error budget; it is an error to request offset modes without it.
+
+    ``dem_ids`` is the stack's per-epoch ``dem_id`` coordinate, so
+    ``strip_index`` (into the stack's time axis) resolves to a row of ``planes``.
+    ``strip_index`` and ``component`` are two descriptions of the SAME mode
+    list -- the pair :func:`strip_mode_design` returns -- so unequal lengths
+    raise rather than pairing off the shorter one.
+
+    The planes are the residual AFTER ALIGNMENT; the stack the inverse sees is
+    the one after the tilt fit, which removes only a little of them (twin: 17 %
+    of the x-plane variance, 3 % of y, 93 % of the offset), so ``tau2`` is
+    conservative by that margin. Validated end-to-end on the twin's
+    tilt-corrected stack: the control-derived prior tracks the oracle
+    (true-residual) prior within ~2 % on every melt metric at every ``lam``.
+    """
+    strip_index = np.asarray(strip_index, int)
+    component = np.asarray(component)
+    if strip_index.size != component.size:
+        raise ValueError(
+            "strip_index and component must describe the same modes, got "
+            f"{strip_index.size} and {component.size}")
+    dem_ids = np.asarray([str(d) for d in np.asarray(dem_ids)])
+    pl = planes.set_index("dem_id") if "dem_id" in getattr(planes, "columns", ()) else planes
+    est = {"tilt_x": ("ax", "se_ax"), "tilt_y": ("ay", "se_ay")}
+    # QC: a plane fitted through metres of scatter, or through too few
+    # control points, is an alignment failure, not a survey error statistic.
+    usable = np.ones(len(pl.index), bool)
+    for c in ("ax", "ay", "se_ax", "se_ay"):
+        if c in pl.columns:
+            usable &= np.isfinite(pl[c].to_numpy(float))
+        else:
+            usable &= False
+    failed_align = np.zeros(usable.shape, bool)
+    if max_sd is not None and "sd" in pl.columns:
+        failed_align = pl["sd"].to_numpy(float) > max_sd
+    low_ctl = np.zeros(usable.shape, bool)
+    if min_n and "n" in pl.columns:
+        low_ctl = pl["n"].to_numpy(float) < min_n
+    # Four buckets, disjoint and exhaustive over every row of `planes`, so the
+    # counts reconcile: no plane at all, then (of those with one) an alignment
+    # failure, then merely thin control, then the tau^2 population. "Unfitted"
+    # is its own class rather than folded into low-control because a missing
+    # control FILE and a thin control CLOUD are different operational problems.
+    unfitted = ~usable
+    align = usable & failed_align
+    lowctl = usable & ~failed_align & low_ctl
+    qc = usable & ~failed_align & ~low_ctl
+    ids = pl.index
+    unfitted_ids = [str(d) for d in ids[unfitted]]
+    align_ids = [str(d) for d in ids[align]]
+    lowctl_ids = [str(d) for d in ids[lowctl]]
+    dropped = [str(d) for d in ids[~qc]]
+    pop, summary = {}, {}
+    for comp, (col, secol) in est.items():
+        v = pl[col].to_numpy(float)
+        se2 = pl[secol].to_numpy(float) ** 2
+        ok = qc & np.isfinite(v) & np.isfinite(se2)
+        if ok.sum() < 3:
+            raise ValueError(f"need >=3 QC-passing strips with a fitted {col} plane, got {int(ok.sum())}")
+        if robust:
+            scale = 1.4826 * float(np.median(np.abs(v[ok] - np.median(v[ok]))))
+            raw, corr = scale ** 2, float(np.median(se2[ok]))
+        else:
+            raw, corr = float(np.var(v[ok])), float(np.mean(se2[ok]))
+        pop[comp] = max(raw - corr, floor_frac * raw)
+        summary[comp] = dict(var_raw=raw, mean_se2=corr, tau2=pop[comp], n=int(ok.sum()),
+                             var_nonrobust=float(np.var(v[ok])))
+    summary["n_qc_dropped"] = len(dropped)
+    summary["qc_dropped"] = dropped
+    summary["n_qc_alignment_failures"] = len(align_ids)
+    summary["qc_alignment_failures"] = align_ids
+    summary["n_qc_low_control"] = len(lowctl_ids)
+    summary["qc_low_control"] = lowctl_ids
+    summary["n_qc_unfitted"] = len(unfitted_ids)
+    summary["qc_unfitted"] = unfitted_ids
+    summary["n_population"] = int(qc.sum())
+    summary["n_strips"] = int(len(ids))
+    tau2 = np.empty(component.size, float)
+    for m, (k, comp) in enumerate(zip(strip_index, component)):
+        if comp == "offset":
+            if offset_var is None:
+                raise ValueError(
+                    "offset strip modes need offset_var: control cannot see the shelf "
+                    "datum residual (twin: control-derived offset variance = 0.07x true). "
+                    "Pass the datum error budget, or use modes=('tilt',).")
+            ov = np.broadcast_to(np.asarray(offset_var, float), (dem_ids.size,))
+            tau2[m] = float(ov[k])
+            continue
+        col, secol = est[comp]
+        val = pop[comp]
+        if per_strip and dem_ids[k] in pl.index and dem_ids[k] not in dropped:
+            e = float(pl.at[dem_ids[k], col])
+            s2 = float(pl.at[dem_ids[k], secol]) ** 2
+            if np.isfinite(e) and np.isfinite(s2):
+                val = max(e * e - s2, floor_frac * pop[comp])
+        tau2[m] = val
+    return (tau2, summary) if return_summary else tau2
+
+
 def _temporal_leverage(stack: xr.DataArray) -> xr.DataArray:
     r"""Per-pixel :math:`S_{tt} = \sum_i (t_i - \bar t)^2` over finite samples.
 
@@ -386,7 +645,7 @@ def budget_bridging_melt_rate(
     strip_modes: np.ndarray | None = None,
     strip_prior: np.ndarray | float | None = None,
     sigma2: float | str = "auto",
-    lam: float = 1e-3,
+    lam: float | str = _LAM_REQUIRED,
     ridge: float = 0.0,
     iters: int = 300,
     weight: str = "leverage",
@@ -481,7 +740,31 @@ def budget_bridging_melt_rate(
         Viscosity for the bridging operator; ``eta_field`` (a map, e.g. from the
         momentum-balance inversion) overrides the scalar via its masked median.
     lam
-        Tikhonov weight on :math:`\\lVert\\nabla \\dot m\\rVert^2`.
+        Tikhonov weight on :math:`\\lVert\\nabla \\dot m\\rVert^2`. **Required**
+        -- there is no safe default, so omitting it raises rather than
+        silently picking one. Two valid choices: a float, to reproduce a
+        specific published run, or ``"auto"``, which sets it from the data as
+        ``LAM_SIGMA2_COEF * sigma2_est`` using the truth-free noise estimate in
+        :func:`_estimate_sigma2_white` (the resolved float comes back as the
+        ``lam`` attr and the estimate as ``sigma2_est``). Neither is
+        universally right. A fixed lam is NOT safe across noise levels: on the
+        08-29 pigreal (correlated-error) tier the same operator scores nrmse
+        3.76 at lam 1e-3 -- worse than Eulerian, flux x2.58 -- and 0.95-1.09 at
+        lam 0.032-0.32, which beats Eulerian on every metric. ``"auto"`` is
+        near-oracle under WHITE noise only: it is built on a white variance
+        estimate, so spatially correlated error (PIG's strip residual is
+        coherent at ~4 km) inflates it and over-damps the melt by 300-3000x on
+        that same tier. It warns when it can detect that, but the check is
+        one-sided. And ``"auto"`` is an EMPIRICAL calibration, not a
+        dimensional identity -- lam is dimensionless (see
+        :data:`LAM_SIGMA2_COEF`).
+
+        **Any lam, fixed or auto, is specific to the POSTING it was tuned at.**
+        The smoothness term differences the melt field per pixel with no
+        ``dx``, so it measures curvature per pixel: the same physical field on
+        a 500 m grid produces twice the gradient it does on 250 m, and the
+        regularisation term scales as ``res^2``. A lam carried across a
+        resolution change silently changes how much the melt is smoothed.
     ridge
         Wiener weight on :math:`\\lVert\\dot m\\rVert^2`. With uniform weights the
         minimiser is :math:`D^*/(|D|^2 + \\text{ridge})`, so the deconvolution
@@ -509,6 +792,16 @@ def budget_bridging_melt_rate(
         against real observations** — not a contract-dependent kept-band score.
     """
     import torch
+
+    if lam is _LAM_REQUIRED:
+        raise TypeError(
+            "budget_bridging_melt_rate() requires an explicit lam: there is no "
+            "safe default. Pass a float (to reproduce a published run -- a "
+            "fixed lam is not transferable across noise levels), or "
+            '"auto" to derive it as LAM_SIGMA2_COEF * sigma2_est, which is '
+            "near-oracle under WHITE noise but over-damps the melt when the "
+            "observation error is spatially correlated (PIG: ~4 km). See the "
+            "lam entry in the docstring.")
 
     # ---- observed side: identical construction to eulerian_melt_rate, so the
     # bridging=False identity gate holds for the right reason, not by luck.
@@ -549,6 +842,45 @@ def budget_bridging_melt_rate(
     wv = np.where(fit, w.values, 0.0)
     wv = wv / max(float(wv.max()), 1e-30)
 
+    # Truth-free noise variance of the observation. Computed unconditionally
+    # (it used to live inside the strip-mode branch, so it was unavailable to
+    # anything else) because it is what both the coloured-noise prior AND the
+    # data-driven lam are scaled by.
+    sigma2_est = _estimate_sigma2_white(reg, w, weight, H_f_stack,
+                                        vxm, vym, dx, wv, fit)
+
+    lam_auto = isinstance(lam, str)
+    if lam_auto:
+        if lam != "auto":
+            raise ValueError(f'lam must be a float or "auto", got {lam!r}')
+        lam_val = LAM_SIGMA2_COEF * sigma2_est
+    else:
+        lam_val = float(lam)
+    # Self-consistency guard on the WHITE estimate. sigma2_est is built from
+    # the per-pixel regression rmse, so spatially CORRELATED strip error (real
+    # DEM stacks: coherent at 1-4 km) inflates it without inflating the part of
+    # the misfit a smoothness prior should suppress. If the claimed noise
+    # variance reaches the variance of the observation itself, the white model
+    # is self-evidently wrong -- and an auto lam built on it nulls the melt.
+    # Measured on the pigreal twin: sigma2_est 97.0 on the correlated-error
+    # tier vs 3.2e-6 on the clean tier (7 decades) while the useful lam moves
+    # only ~4, so auto over-damps there by ~300-3000x (gain 0.002 vs 0.311).
+    obs_var = float(np.var(obs[fit])) if fit.any() else float("nan")
+    sigma2_inflated = np.isfinite(obs_var) and sigma2_est > obs_var
+    if log_every:
+        _how = f"auto = {LAM_SIGMA2_COEF:g}*sigma2_est" if lam_auto else "fixed"
+        print(f"    lam {lam_val:.4g} ({_how})  sigma2_est {sigma2_est:.4g}"
+              f"  var(obs) {obs_var:.4g}", flush=True)
+    if lam_auto and sigma2_inflated:
+        warnings.warn(
+            f"auto lam: white sigma2_est ({sigma2_est:.3g}) exceeds the "
+            f"observation variance ({obs_var:.3g}), which means the noise is "
+            "spatially correlated rather than white and the estimate is "
+            "inflated. The resulting lam will over-damp the melt (on the "
+            "pigreal twin: gain 0.002 vs 0.311 at a hand-picked lam). Pass an "
+            "explicit lam until a coloured-noise estimate is available.",
+            RuntimeWarning, stacklevel=2)
+
     # ---- coloured noise model: per-strip mode columns + their prior
     n_modes = 0 if strip_modes is None else int(strip_modes.shape[0])
     sigma2_val = float("nan")
@@ -556,20 +888,7 @@ def budget_bridging_melt_rate(
         if strip_prior is None:
             raise ValueError("strip_modes needs strip_prior (variances per mode)")
         tau2 = np.broadcast_to(np.asarray(strip_prior, float), (n_modes,)).copy()
-        if sigma2 == "auto":
-            # white variance at a unit-weight pixel: sigma^2 = w_i * var_i with
-            # var_i = rmse_i^2/S_tt,i (slope) + u_i^2 rmse_i^2/(2 n_i dx^2)
-            # (divergence of the mean-thickness noise), averaged over fit cells
-            rm = np.nan_to_num(reg["rmse"].values)
-            cnt = np.nan_to_num(reg["count"].values).astype(float)
-            stt = np.nan_to_num((w if weight == "leverage"
-                                 else _temporal_leverage(H_f_stack)).values)
-            u2 = np.nan_to_num(vxm.values ** 2 + vym.values ** 2)
-            var_i = np.where(stt > 0, rm ** 2 / np.maximum(stt, 1e-30), 0.0) \
-                + u2 * rm ** 2 / (2.0 * np.maximum(cnt, 1) * dx ** 2)
-            sigma2_val = float(np.mean((wv * var_i)[fit]))
-        else:
-            sigma2_val = float(sigma2)
+        sigma2_val = sigma2_est if sigma2 == "auto" else float(sigma2)
         # standardise the amplitudes (theta' = theta / tau, G' = G tau): the
         # tilt modes carry (x - x_c) ~ 1e4 m against theta ~ 1e-4 m/m, and
         # without this the theta block of the Hessian is ~1e8 worse
@@ -785,10 +1104,10 @@ def budget_bridging_melt_rate(
             resid = resid + (th[:, None] * t_G).sum(0).reshape(ny, nx)
         resid = torch.where(t_fit, resid, torch.zeros_like(mv))
         loss = (t_w * resid ** 2).sum() / wsum
-        if lam:
+        if lam_val:
             gx = mv[:, 1:] - mv[:, :-1]
             gy = mv[1:, :] - mv[:-1, :]
-            loss = loss + lam * ((gx ** 2).mean() + (gy ** 2).mean())
+            loss = loss + lam_val * ((gx ** 2).mean() + (gy ** 2).mean())
         if ridge:
             loss = loss + ridge * (mv ** 2).mean()
         if n_modes:
@@ -883,7 +1202,9 @@ def budget_bridging_melt_rate(
             "sigma2_white": sigma2_val,
             "bin_geometry": ";".join(f"{Hb:.1f},{uxb:.1f},{uyb:.1f},{etab:.3e}"
                                      for Hb, uxb, uyb, etab in bin_geom),
-            "lam": lam,
+            "lam": lam_val,
+            "lam_mode": "auto" if lam_auto else "fixed",
+            "sigma2_est": sigma2_est,
             "ridge": ridge,
             "cg_iters": n_cg,
             "cg_rel_resid": hist[-1] if hist else np.nan,

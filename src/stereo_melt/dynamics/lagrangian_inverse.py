@@ -893,9 +893,10 @@ def linear_inverse_lagrangian_melt_rate(
 
     fd = flux_divergence(H_f_mean, vx_mean, vy_mean)
 
-    # Mass-balance DC mode (k=0). The Stubblefield kernel zeros R, B at
-    # k=0 by construction, so inverse_stationary loses the spatial-mean
-    # melt rate. The recovery uses the *Eulerian* mass-balance, in the
+    # Mass-balance DC mode (k=0). inverse_stationary's kernel does carry a
+    # finite k=0 bin (it comes from kernel_time_integral_stationary), so it is
+    # not blind to the mean; we pass recover_dc=False and set the spatial-mean
+    # melt rate here instead. The recovery uses the *Eulerian* mass-balance, in the
     # Shean public convention (positive = accretion):
     #     ⟨ḃ⟩ = R·⟨∂h/∂t⟩ + ⟨∇·(Hu)⟩ - ⟨ȧ⟩      (R = ρ_w/(ρ_w-ρ_i))
     # ⟨∂h/∂t⟩ is the basin-mean of *per-pixel* OLS slopes (with robust

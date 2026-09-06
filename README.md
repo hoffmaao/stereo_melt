@@ -13,7 +13,8 @@ local decision record (untracked).
 stereo_melt/                ← workspace root (pip-installable from here)
 ├── src/stereo_melt/        ← THE library (no study-specific code)
 │   ├── coregister/         ← ASP align driver, control caches (IS2/CS2/ATM/GLAS),
-│   │                         per-epoch Ez, tilt LSQ + QC
+│   │                         per-epoch Ez, tilt LSQ + QC, per-strip control
+│   │                         residual planes, Nuth & Kääb shift (diagnostic)
 │   ├── corrections/        ← geoid, tides, IBE, MDT, post-coreg pipeline
 │   ├── dynamics/           ← budget linear inverses, pseudospectral solvers,
 │   │                         velocity fusion
@@ -22,7 +23,8 @@ stereo_melt/                ← workspace root (pip-installable from here)
 │   ├── melt.py             ← production solvers: eulerian_melt_rate +
 │   │                         lagrangian_melt_rate (path solver)
 │   ├── stack.py            ← common grid, save/load, BAD_STRIPS filter
-│   └── flux.py, freeboard.py, kinematics.py, melt_qc.py, …
+│   ├── spatialstats.py     ← variograms, n_eff, correlated-error propagation
+│   └── flux.py, freeboard.py, kinematics.py, melt_qc.py, spectra.py, …
 ├── tests/                  ← synthetic gates (gate_*.py) + sanity checks
 ├── examples/<shelf>/       ← one driver per ice-shelf application
 │                             (pig/, beardmore_shelf/, venable/, beardmore/,
