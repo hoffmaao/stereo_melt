@@ -68,7 +68,7 @@ h_wide, s_wide = steady_state(m_wide, H=H, eta_bar=eta_bar, alpha=0.0, gamma=0.0
 center = (len(y) // 2, len(x) // 2)
 h_c = float(h_wide.values[center])
 s_c = float(s_wide.values[center])
-print(f"\nWide channel (sigma = 10/3 H):")
+print("\nWide channel (sigma = 10/3 H):")
 print(f"  h_center  = {h_c:.3e} m")
 print(f"  s_center  = {s_c:.3e} m")
 print(f"  -delta*s  = {-delta * s_c:.3e} m")
@@ -89,7 +89,7 @@ h_n = float(h_narrow.values[center])
 s_n = float(s_narrow.values[center])
 hyd_n = -delta * s_n
 rel_dev = abs(h_n - hyd_n) / abs(hyd_n)
-print(f"\nNarrow channel (sigma = 1/3 H):")
+print("\nNarrow channel (sigma = 1/3 H):")
 print(f"  h_center = {h_n:.3e} m")
 print(f"  s_center = {s_n:.3e} m")
 print(f"  -delta*s = {hyd_n:.3e} m")
@@ -105,7 +105,7 @@ print(f"  PASS: narrow channel breaks hydrostatic flotation ({rel_dev * 100:.1f}
 h_no_inflow = float(steady_state(m_narrow, H=H, eta_bar=eta_bar, alpha=0.0).values[center])
 # alpha = 1/2 in Stubblefield corresponds to ubar_0 ~ 193 m/yr
 h_inflow = float(steady_state(m_narrow, H=H, eta_bar=eta_bar, alpha=0.5).values[center])
-print(f"\nNarrow channel + inflow:")
+print("\nNarrow channel + inflow:")
 print(f"  |h_center| (alpha=0)   = {abs(h_no_inflow):.3e} m")
 print(f"  |h_center| (alpha=0.5) = {abs(h_inflow):.3e} m")
 print(f"  damping factor = {abs(h_inflow) / abs(h_no_inflow):.3f}")
@@ -117,7 +117,7 @@ print("  PASS: inflow mutes narrow-channel surface topography.")
 # ---- The k = 0 (DC) mode of the steady kernel ----
 # A spatially uniform melt has no gradients, so it thins the shelf in exact
 # hydrostatic flotation: h/s = -delta, and the flotation departure T = 1.
-from stereo_melt.dynamics.linear_perturbation import LinearPerturbation
+from stereo_melt.dynamics.linear_perturbation import LinearPerturbation  # noqa: E402
 
 fb = 1.0 - rhoi / rhow
 _zero = np.array([[0.0]])
@@ -132,7 +132,7 @@ for gam in (0.0, -0.02, 0.03):
     assert abs(T0.real - 1.0) < 1e-12 and abs(T0.imag) < 1e-12, "T(0) must be exactly 1"
     if gam == 0.0:
         assert abs(Gh0.real + 2.0) < 1e-12, f"G_h(0) at gamma=0 must be -2, got {Gh0.real}"
-        assert abs(Gs0.real - 2.0 / delta) < 1e-9, f"G_s(0) at gamma=0 must be 2/delta"
+        assert abs(Gs0.real - 2.0 / delta) < 1e-9, "G_s(0) at gamma=0 must be 2/delta"
 print("  PASS: DC kernel is exact flotation, T(0) = 1, G_h(0) = -2 at gamma = 0.")
 
 # ---- Which modes have no steady state (Re lambda_+ >= 0) ----
@@ -217,7 +217,7 @@ assert not [x for x in _w2 if "no steady state" in str(x.message)], \
 print("  PASS: steady_state warns iff some mode has no steady state.")
 
 # ---- Stationary forward at large t should match the steady state ----
-from stereo_melt.dynamics import forward
+from stereo_melt.dynamics import forward  # noqa: E402
 
 # Long-wavelength relaxation time scale t_e = 2 tr (1 + 1/delta) ≈ 19 tr
 # for delta ≈ 0.11, so a wide-channel steady state needs many t_e. The
