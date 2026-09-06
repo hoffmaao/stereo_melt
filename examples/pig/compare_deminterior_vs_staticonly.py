@@ -45,7 +45,6 @@ FIELDS = [
     ("dHdt", 0.5, 50.0),
     ("melt_rate_eulerian", 1.0, 100.0),
     ("melt_rate_lagrangian", 1.0, 100.0),
-    ("melt_rate_linear_inverse", 1.0, 100.0),  # known-collapsed on PIG; reported for completeness
 ]
 
 

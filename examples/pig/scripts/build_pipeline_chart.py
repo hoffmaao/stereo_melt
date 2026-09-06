@@ -81,8 +81,7 @@ STEPS = [
      "median. Parcel-following differencing removes advecting-topography "
      "aliasing physically, which is why its map is smooth at ±60 m/yr. "
      "Integrated basal flux: 90.9 Gt/yr, inside Shean 2019's 82–93. Negative "
-     "= melt everywhere. (Third panel: legacy spectral inverse, retired from "
-     "products, diagnostic only.)"),
+     "= melt everywhere."),
     ("9 · Diagnostics branch — fused inverse (not production)",
      "pig_fused_melt_map.png",
      "The twin-validated budget ⊕ variational fused inverse under the "

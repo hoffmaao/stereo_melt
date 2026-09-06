@@ -1,9 +1,9 @@
 """Quick two-solver preview: Eulerian + path-integrated Lagrangian only.
 
-A stripped-down :mod:`pig.run_melt` that drops the linear-inverse stage and
-plots a 2-panel comparison. Intended for fast iteration on the wider
-2010-2024 stack; uses ``pairs="consecutive"`` by default so the
-Lagrangian loop runs in tens of minutes instead of hours.
+A stripped-down :mod:`pig.run_melt` that skips its opt-in inverse stages
+and flux integration and plots a 2-panel comparison. Intended for fast
+iteration on the wider 2010-2024 stack; uses ``pairs="consecutive"`` by
+default so the Lagrangian loop runs in tens of minutes instead of hours.
 
 Run:
 

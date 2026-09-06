@@ -828,11 +828,10 @@ def variational_melt_rate(
     Stubblefield forward operator on the floating bbox, optionally anchored to a
     budget field via ``m_prior`` -> Shean sign (negative = melt).
 
-    Unlike
-    :func:`~stereo_melt.dynamics.stubblefield_inverse.stubblefield_inverse_melt_rate`
-    (a direct Fourier division that over-lifts across-flow ridges), this puts the
-    bridging transfer in the *forward* model and fits, so along-flow, oblique, and
-    across-flow melt come through one operator with no angular weight.
+    Unlike a direct Fourier division of the surface by the transfer (which
+    over-lifts across-flow ridges), this puts the bridging transfer in the
+    *forward* model and fits, so along-flow, oblique, and across-flow melt come
+    through one operator with no angular weight.
 
     Set ``n_bins`` to run the spatially varying
     :class:`BlendedStubblefieldForward`, which clusters the shelf into that many
