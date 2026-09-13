@@ -57,6 +57,14 @@ ASP_CS2ATMLVIS_ROOT = BASIN_DIR / "data" / "ASP_cs2atmlvis"
 # DEMs on disk (verified 2026-06-20).
 ASP_IS2CTEMPOATMLVIS_ROOT = BASIN_DIR / "data" / "ASP_is2ctempoatmlvis"
 ASP_CTEMPOATMLVIS_ROOT = BASIN_DIR / "data" / "ASP_ctempoatmlvis"
+# Shean-style "nocorr" root (2026-09-06 test, see pig.ingest_nocorr): strips no
+# control polygon touches, so the align chain never attempted them. Ingested at
+# a-priori geolocation plus ONE per-era class-mean vertical bias (Shean
+# stack_nocorr_adjust.py) with a sources=["nocorr"] sidecar (Ez 1.0 m tier).
+# Opt-in via PIG_SOURCES=nocorr, which appends the root LAST to STRIP_SOURCES so
+# any granule that also has a real alignment keeps the aligned version.
+ASP_NOCORR_ROOT = BASIN_DIR / "data" / "ASP_nocorr"
+ASP_NOCORR_ALIGNED_DIR = ASP_NOCORR_ROOT / "asp_aligned"
 # Production STRIP_SOURCES = the CryoTEMPO baseline alignment. Drives build_stack
 # AND the per-DEM screen's aggregate_basin_quality(STRIP_SOURCES), so both read the
 # same alignment. The is2cs2/cs2 roots above are the older raw-CS2 A/B baseline
@@ -66,6 +74,8 @@ STRIP_SOURCES: list[tuple["Path", str]] = [
     (ASP_IS2CTEMPOATMLVIS_ROOT / "asp_aligned", "is2ctempoatmlvis"),  # IS2 era 2018-10 → 2023-12
     (ASP_CTEMPOATMLVIS_ROOT / "asp_aligned", "ctempoatmlvis"),        # pre-IS2 2010-12 → 2018-04
 ]
+if os.environ.get("PIG_SOURCES", "").lower() == "nocorr":
+    STRIP_SOURCES.append((ASP_NOCORR_ALIGNED_DIR, "nocorr"))
 # Dense-tie (Option-B two-stage) re-alignment root — step 5 of
 # literature/plan_alignment.md. Every production-aligned strip in STRIP_SOURCES
 # re-aligned to the static-masked REMA reference (REMA_STATIC_REFERENCE_TIF) via

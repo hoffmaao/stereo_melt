@@ -44,6 +44,7 @@ import xarray as xr
 
 from stereo_melt.coregister.control_source import build_per_epoch_ez
 from stereo_melt.coregister.tilt import (
+    build_ice_domain_mask,
     build_static_area_polygon_mask,
     build_static_control_mask,
     fit_tilt_stack,
@@ -246,11 +247,45 @@ def main(
     # every epoch contributes its control-overlap pixels, and strips with
     # too little static overlap degrade to offset-only via min_width + the
     # Ez/Ex/Ey priors -- none are dropped.
-    obs_domain = control
-    print(
-        f"  tilt-fit observation domain = static control (shelf excluded): "
-        f"{int(control.sum())}/{control.size} ({100*float(control.mean()):.1f}%)"
-    )
+    #
+    # PIG_TILT_DOMAIN=full (2026-09-06 nocorr test; mirrors beardmore_shelf)
+    # switches to Shean's actual production system (vendor ndinterp.py
+    # clip_to_shelfmask=False, both=True): ALL valid ice pixels including the
+    # floating shelf. It MUST be paired with the dh/dt smoothness rows
+    # (PIG_TILT_DHDT_SMOOTH, Shean L574+ unit weight = 1.0), which is what
+    # closes the aliasing nullspace above and lets cross-epoch self-consistency
+    # set the datum of control-free (nocorr) epochs, which the static domain
+    # gives ZERO observation rows. Default remains static.
+    tilt_domain = os.environ.get("PIG_TILT_DOMAIN", "static").lower()
+    dhdt_smooth = float(os.environ.get("PIG_TILT_DHDT_SMOOTH", "0"))
+    irls_max = int(os.environ.get("PIG_TILT_IRLS_MAX", "8"))
+    if irls_max != 8:
+        print(f"  IRLS max iterations: {irls_max} (PIG_TILT_IRLS_MAX)")
+    if tilt_domain == "full":
+        obs_domain = build_ice_domain_mask(stack, config.BEDMACHINE_NC)
+        print(
+            f"  tilt-fit observation domain = full ice incl. shelf (Shean "
+            f"ndinterp both-mode): {int(obs_domain.values.sum())}/{obs_domain.size} "
+            f"({100*float(obs_domain.values.mean()):.1f}%)"
+        )
+        if not dhdt_smooth:
+            print(
+                "  ⚠ full domain WITHOUT dh/dt smoothness reproduces the "
+                "2026-06-07 aliasing nullspace — set PIG_TILT_DHDT_SMOOTH=1.0 "
+                "unless deliberately reproducing it."
+            )
+    elif tilt_domain == "static":
+        obs_domain = control
+        print(
+            f"  tilt-fit observation domain = static control (shelf excluded): "
+            f"{int(control.sum())}/{control.size} ({100*float(control.mean()):.1f}%)"
+        )
+    else:
+        raise SystemExit(
+            f"PIG_TILT_DOMAIN must be 'static' or 'full', got {tilt_domain!r}"
+        )
+    if dhdt_smooth:
+        print(f"  dh/dt smoothness weight: {dhdt_smooth:g} (Shean ndinterp L574+)")
 
     # 4/4: per-epoch tilt LSQ on the geoid+MDT-corrected stack.
     # PIG stack is ~23 km × 54 km; Shean's 40 km PIG default would
@@ -307,6 +342,8 @@ def main(
         Ey=config.TILT_EY,
         Ez=Ez_per_epoch,
         offset_only_epochs=offset_only,
+        dhdt_smoothness=dhdt_smooth or None,
+        robust_max_iter=irls_max,
     )
     n_xy = int(params["fit_xy"].sum())
     print(
