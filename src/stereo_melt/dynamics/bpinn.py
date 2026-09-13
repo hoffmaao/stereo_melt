@@ -102,14 +102,19 @@ antisymmetric only away from its Nyquist bin): an outside reference is needed
 because flipping the y sign in both the operator and a probe leaves :math:`|T|`
 unchanged for any flow within 22.5° of a grid axis or diagonal — the PIG trunk
 azimuth among them — so probes sharing the operator's convention cannot detect a
-mirror error at all. The second is a physical sanity check, asserted only above
-1000 m/yr where advection dominates lattice rounding: a unit plane wave laid out
-on the real grid coordinates must come through no stronger along flow than
-across it. Both probe at :math:`2H`, or at four pixels of the coarser axis when
-:math:`2H` is finer than that — a shelf thinner than its own pixel cannot carry
-a resolvable 2H probe, and there the physics check only logs. Below
-that speed the two amplitudes are logged and nothing is asserted, because the
-anisotropy falls under the few-percent spread of :math:`|T|` across one FFT bin.
+mirror error at all. The second is a physical sanity check: a unit plane wave
+laid out on the real grid coordinates must come through no stronger along flow
+than across it. It is asserted only where the operator is anisotropic enough for
+the comparison to mean anything — the transfer with advection is divided by the
+same transfer with ``alpha_scale = 0`` at one shared lattice point, and the
+assertion stands down below a 5 % contrast. Gating on speed instead would be
+wrong: the anisotropy is set by ``alpha_scale * u_ref * t_r / H``, so a fast
+shelf with ``alpha_scale = 0`` (or a low ``eta_bar``) has an exactly isotropic
+transfer, and the two probes then differ only by lattice snapping and
+reflect-pad leakage — which used to raise on a perfectly oriented operator.
+Both probe at :math:`2H`, or at four pixels of the coarser axis when :math:`2H`
+is finer than that — a shelf thinner than its own pixel cannot carry a
+resolvable 2H probe, and there the physics check only logs.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -386,6 +391,10 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         p = residual_parts(theta, phi, x, y, t)
         return p["Ht"] + p["H"] * p["divu"] + p["u"] * p["Hx"] + p["v"] * p["Hy"] - p["a"] - p["b"]
 
+    Xg, Yg = np.meshgrid(data.x_km, data.y_km)
+    Xg_j, Yg_j = jnp.asarray(Xg), jnp.asarray(Yg)
+    gx, gy = Xg_j.ravel(), Yg_j.ravel()
+
     # ---- bridging transfer as the observation operator (optional) ----
     if cfg.transfer:
         from .bridging_restoration import _bridging_transfer
@@ -423,7 +432,6 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         L_np = np.exp(-0.5 * K2 * sig_bg ** 2)
         M_np = 1.0 + (T_np - 1.0) * (1.0 - L_np)
         M_op = jnp.asarray(M_np)
-        Xg, Yg = np.meshgrid(data.x_km, data.y_km)
         Xd = np.stack([np.ones(ny * nx), (Xg.ravel() - xc), (Yg.ravel() - yc)], 1)
         P_pinv = jnp.asarray(np.linalg.pinv(Xd))          # (3, ny*nx)
         Xd_j = jnp.asarray(Xd)
@@ -461,31 +469,51 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
             out = np.real(np.fft.ifft2(np.fft.fft2(ap) * M_np))[:ny, :nx]
             return float(abs(np.sum(out * f) / np.sum(f * f)))
 
+        # Reference transfers on the PHYSICAL lattice: one with the real advection, one with
+        # it switched off. The first is the orientation guard's independent reference. The
+        # ratio of the two AT THE SAME LATTICE POINT is how much anisotropy the operator
+        # actually carries at the probe wavelength, which is what the physics assertion needs
+        # to be gated on -- the anisotropy is set by alpha_scale * u_ref * t_r / H, not by
+        # u_ref, so at alpha_scale = 0 the transfer is exactly isotropic at any speed and the
+        # two probes then differ only by lattice snapping and reflect-pad leakage. Reading
+        # both at one index is what makes this exact: an along/across pair snapped separately
+        # sits at different |k| and reports up to 187 % anisotropy on a small grid at
+        # alpha_scale = 0, which would re-enable the assertion in precisely the isotropic case
+        # it has to stand down for.
+        def _phys_transfer(alpha_scale):
+            return _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref,
+                                      cfg.eta_bar, alpha_scale, data.extras.get("rho_i", 917.0),
+                                      data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
+
+        T_phys = _phys_transfer(cfg.alpha_scale)
+        idx_along = _lattice_idx(along_hat, lam_probe)
+        t_iso = abs(_phys_transfer(0.0)[idx_along])
+        aniso = abs(1.0 - abs(T_phys[idx_along]) / t_iso) if t_iso > 0 else 0.0
+        aniso_margin = 0.05
+
         a_along, a_across = _probe_gain(along_hat, lam_probe), _probe_gain(across_hat, lam_probe)
-        speed_gate = 1000.0
+        assert_aniso = not aliased and aniso > aniso_margin
         if aliased:
             gate_note = (f" (2H = {2 * H_ref:.0f} m is under this grid's {lam_min:.0f} m probe "
                          f"floor: logged, not asserted)")
-        elif u_ref <= speed_gate:
-            gate_note = f" (below {speed_gate:.0f} m/yr: logged, not asserted)"
+        elif not assert_aniso:
+            gate_note = (f" (predicted anisotropy {aniso * 100:.1f}% is under the "
+                         f"{aniso_margin * 100:.0f}% margin: logged, not asserted)")
         else:
             gate_note = ""
         print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
               f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
               f"|T| along-flow at {lam_probe:.0f}/{1.5 * lam_probe:.0f} m = "
               f"{_T_along_flow(lam_probe):.2f}/{_T_along_flow(1.5 * lam_probe):.2f}; "
+              f"predicted anisotropy {aniso * 100:.0f}%; "
               f"{lam_probe:.0f} m gain along/across flow = {a_along:.3f}/{a_across:.3f}{gate_note}; "
               f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
-        # Orientation guard, against an INDEPENDENT reference: rebuild the transfer from the
-        # PHYSICAL components on the physical lattice and require the operator actually built
-        # (physical flow, y-mirrored into the lattice) to agree with it at the same physical
-        # wavevectors. Comparing the two probes to each other cannot establish this -- flipping
-        # the y sign in both the operator and the probe leaves |T| untouched for any flow
-        # within 22.5 deg of a grid axis or diagonal, the PIG trunk azimuth among them -- so a
-        # shared-convention error is only caught by a value computed outside that convention.
-        T_phys = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref, cfg.eta_bar,
-                                    cfg.alpha_scale, data.extras.get("rho_i", 917.0),
-                                    data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
+        # Orientation guard, against an INDEPENDENT reference: require the operator actually
+        # built (physical flow, y-mirrored into the lattice) to agree with T_phys at the same
+        # physical wavevectors. Comparing the two probes to each other cannot establish this
+        # -- flipping the y sign in both the operator and the probe leaves |T| untouched for
+        # any flow within 22.5 deg of a grid axis or diagonal, the PIG trunk azimuth among
+        # them -- so a shared-convention error is only caught outside that convention.
         for name, khat in (("along-flow", along_hat), ("across-flow", across_hat)):
             idx = _lattice_idx(khat, lam_probe)
             built = abs(T_np[_mirror_idx(idx)])
@@ -496,20 +524,19 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                     f"it applies |T| {built:.4f}, but the transfer built from the physical flow "
                     f"({ux_ref:+.0f}, {uy_ref:+.0f}) m/yr gives {want:.4f}. y_km descends, so "
                     f"the flow's y component must be mirrored into the FFT lattice.")
-        if u_ref > speed_gate and not aliased and a_along > a_across:
+        if assert_aniso and a_along > a_across:
             raise ValueError(
-                f"bridging operator does not damp along-flow structure: at {u_ref:.0f} m/yr a "
-                f"{lam_probe:.0f} m plane wave along the flow ({flow_deg:+.0f}°) comes through at "
-                f"{a_along:.3f} but across-flow at {a_across:.3f}. Check the reference velocity "
-                f"components.")
+                f"bridging operator does not damp along-flow structure: a {lam_probe:.0f} m plane "
+                f"wave along the flow ({flow_deg:+.0f}°) comes through at {a_along:.3f} but "
+                f"across-flow at {a_across:.3f}, where the transfer predicts {aniso * 100:.0f}% "
+                f"anisotropy. Check the reference velocity components.")
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
         M_dense = jnp.asarray(np.isfinite(data.H_obs) & data.domain[None])
-        gxj, gyj = jnp.asarray(Xg.ravel()), jnp.asarray(Yg.ravel())
         t_epochs = jnp.asarray(data.t_yr)
 
         def apparent_epoch(theta, tk):
             """Surrogate on the grid at epoch time tk → hydrostatic-apparent thickness (ny, nx)."""
-            h = H_net(theta, gxj, gyj, jnp.full_like(gxj, tk))          # (ny*nx,)
+            h = H_net(theta, gx, gy, jnp.full_like(gx, tk))          # (ny*nx,)
             coef = P_pinv @ h
             pl = Xd_j @ coef
             a = (h - pl).reshape(ny, nx)
@@ -533,7 +560,6 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                 per = 0.5 * (cfg.nu + 1.0) * jnp.log1p(z ** 2 / cfg.nu)
             return jnp.sum(jnp.where(M_dense[ks], per, 0.0), axis=(1, 2))   # (B,) per-epoch sums
 
-        Xg_j, Yg_j = jnp.asarray(Xg), jnp.asarray(Yg)
         n_fin_k = jnp.asarray((np.isfinite(data.H_obs) & data.domain[None]).sum(axis=(1, 2)), float)
 
         def nll_obs_epochs_seq(theta, pl=None):
@@ -629,8 +655,6 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                 print(f"    step {it:6d}  loss {float(loss):.4e}  obs {float(parts[0]):.4e}  phys {float(parts[1]):.4e}", flush=True)
         return params, np.array(hist)
 
-    X, Y = np.meshgrid(data.x_km, data.y_km)
-    gx, gy = jnp.asarray(X.ravel()), jnp.asarray(Y.ravel())
     eval_b = jax.jit(lambda phi: b_net(phi, gx, gy).reshape(ny, nx))
     eval_H = jax.jit(lambda theta, xyt: H_net(theta, xyt[:, 0], xyt[:, 1], xyt[:, 2]))
 
