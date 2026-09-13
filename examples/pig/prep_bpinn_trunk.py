@@ -36,6 +36,21 @@ from stereo_melt.freeboard import freeboard_to_thickness  # noqa: E402
 from stereo_melt.io.bedmachine import load_firn_on_grid  # noqa: E402
 
 
+def _check_grid(name, ds, stack, tag, W) -> None:
+    """Raise unless ``ds`` sits on exactly ``stack``'s x/y grid.
+
+    The trunk window is sliced by positional index, so a product on any other grid
+    would come out mis-registered by whole pixels with no other symptom.
+    """
+    if not (np.array_equal(np.asarray(ds.x.values), np.asarray(stack.x.values))
+            and np.array_equal(np.asarray(ds.y.values), np.asarray(stack.y.values))):
+        raise SystemExit(
+            f"grid mismatch: {name} is on a different x/y grid than the stack "
+            f"({ds.sizes.get('y')}x{ds.sizes.get('x')} vs {stack.sizes['y']}x{stack.sizes['x']}); "
+            f"the trunk window is sliced by position, so its fields would be mis-registered. "
+            f"Rebuild it for tag {tag} window {W}.")
+
+
 def _decimal_year(times) -> np.ndarray:
     t = pd.to_datetime(np.asarray(times))
     return np.asarray(t.year + (t.dayofyear - 1) / 365.25, float)
@@ -61,6 +76,7 @@ def main() -> int:
 
     # window: largest connected strong-melt patch of the canon Eulerian product
     prod = xr.open_dataset(config.RESULTS_DIR / f"pig_melt_250m_{tag}_{W}.nc")
+    _check_grid(f"run_melt product pig_melt_250m_{tag}_{W}.nc", prod, stack, tag, W)
     e = prod.melt_rate_eulerian.values
     v = np.where(np.isfinite(e), e, 0.0)
     w = np.isfinite(e).astype(float)
@@ -92,6 +108,7 @@ def main() -> int:
           f"|v| mean {float(np.hypot(vxw, vyw).mean()):.0f} m/yr; a_dot mean {float(a_dot.isel(y=slice(r0, r1), x=slice(c0, c1)).mean()):.2f} m/yr")
     bench = {}
     brid = xr.open_dataset(config.PROCESSED_DIR / f"pig_melt_bridging_250m_{tag}_{W}.nc")
+    _check_grid(f"bridging product pig_melt_bridging_250m_{tag}_{W}.nc", brid, stack, tag, W)
     for k in ("eulerian", "monolithic_v2", "restored_local_helm"):
         bench[f"bench_{k}"] = brid[k].values[r0:r1, c0:c1]
     bench["bench_lagrangian"] = prod.melt_rate_lagrangian.values[r0:r1, c0:c1]

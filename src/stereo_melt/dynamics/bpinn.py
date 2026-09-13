@@ -94,8 +94,17 @@ restored-budget and inverse call sites pass the physical :math:`u_y` with a
 positive ``dy`` and so carry that mirror; this module does not, because
 ``prepare_bpinn_data`` differences ``divu`` with a negative ``dy`` and ``_pix``
 and ``residual`` are in physical y, so the operator must be too. Building it
-runs a self-check: a unit 2H plane wave along the flow must come through no
-stronger than one across it, else :func:`fit_bpinn` raises.
+runs two guards. The binding one rebuilds the transfer from the PHYSICAL
+components and requires the mirrored operator to agree with it at the 2H along-
+and across-flow wavevectors: an outside reference is needed because flipping the
+y sign in both the operator and a probe leaves :math:`|T|` unchanged for any flow
+within 22.5° of a grid axis or diagonal — the PIG trunk azimuth among them — so
+probes sharing the operator's convention cannot detect a mirror error at all.
+The second is a physical sanity check, asserted only above 1000 m/yr where
+advection dominates lattice rounding: a unit 2H plane wave laid out on the real
+grid coordinates must come through no stronger along flow than across it. Below
+that speed the two amplitudes are logged and nothing is asserted, because the
+anisotropy falls under the few-percent spread of :math:`|T|` across one FFT bin.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -396,6 +405,9 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         uy_lat = -uy_ref
         flow_hat = (np.array([1.0, 0.0]) if u_ref <= 0
                     else np.array([ux_ref, uy_lat]) / u_ref)
+        along_hat = (np.array([1.0, 0.0]) if u_ref <= 0
+                     else np.array([ux_ref, uy_ref]) / u_ref)
+        across_hat = np.array([-along_hat[1], along_hat[0]])
         Py, Px = 2 * ny, 2 * nx
         T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_lat, cfg.eta_bar, cfg.alpha_scale,
                                   data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
@@ -419,25 +431,50 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
             """|T| at the padded-lattice point nearest the along-flow wavevector of wavelength lam."""
             return abs(T_np[_lattice_idx(flow_hat, lam)])
 
-        def _wave_amp(khat):
-            """Amplitude of a unit plane wave of wavelength 2H on direction khat after M_op."""
-            m, n = _lattice_idx(khat, 2 * H_ref)
-            f = np.cos(2 * np.pi * (n * np.arange(Px)[None, :] / Px + m * np.arange(Py)[:, None] / Py))
-            return float(np.abs(np.real(np.fft.ifft2(np.fft.fft2(f) * M_np))).max())
+        def _probe_gain(khat):
+            """Gain the built operator applies to a unit 2H plane wave on PHYSICAL direction
+            khat: laid out on the real (x_km, y_km) coordinates, pushed through the same path
+            apparent_epoch uses, then projected back onto itself so that the reflect-pad's
+            spectral leakage (which swamps a peak-amplitude estimate) does not bias it."""
+            k = (2 * np.pi / (2 * H_ref)) * np.asarray(khat)
+            f = np.cos(k[0] * Xg * 1e3 + k[1] * Yg * 1e3)
+            ap = np.pad(f, ((0, ny), (0, nx)), mode="reflect")
+            out = np.real(np.fft.ifft2(np.fft.fft2(ap) * M_np))[:ny, :nx]
+            return float(abs(np.sum(out * f) / np.sum(f * f)))
 
-        a_along = _wave_amp(flow_hat)
-        a_across = _wave_amp(np.array([-flow_hat[1], flow_hat[0]]))
+        a_along, a_across = _probe_gain(along_hat), _probe_gain(across_hat)
+        speed_gate = 1000.0
+        gate_note = ("" if u_ref > speed_gate else
+                     f" (below {speed_gate:.0f} m/yr: logged, not asserted)")
         print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
               f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
               f"|T| along-flow at 2H/3H = {_T_along_flow(2 * H_ref):.2f}/{_T_along_flow(3 * H_ref):.2f}; "
-              f"2H plane wave along/across flow = {a_along:.3f}/{a_across:.3f}; "
+              f"2H gain along/across flow = {a_along:.3f}/{a_across:.3f}{gate_note}; "
               f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
-        if a_along > a_across + 1e-6:
+        # Orientation guard, against an INDEPENDENT reference: rebuild the transfer from the
+        # PHYSICAL components on the physical lattice and require the operator actually built
+        # (physical flow, y-mirrored into the lattice) to agree with it at the same physical
+        # wavevectors. Comparing the two probes to each other cannot establish this -- flipping
+        # the y sign in both the operator and the probe leaves |T| untouched for any flow
+        # within 22.5 deg of a grid axis or diagonal, the PIG trunk azimuth among them -- so a
+        # shared-convention error is only caught by a value computed outside that convention.
+        T_phys = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref, cfg.eta_bar,
+                                    cfg.alpha_scale, data.extras.get("rho_i", 917.0),
+                                    data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
+        for name, khat in (("along-flow", along_hat), ("across-flow", across_hat)):
+            built = abs(T_np[_lattice_idx(np.array([khat[0], -khat[1]]), 2 * H_ref)])
+            want = abs(T_phys[_lattice_idx(khat, 2 * H_ref)])
+            if not np.isclose(built, want, rtol=1e-6, atol=1e-12):
+                raise ValueError(
+                    f"bridging operator is misoriented: at the 2H {name} wavevector it applies "
+                    f"|T| {built:.4f}, but the transfer built from the physical flow "
+                    f"({ux_ref:+.0f}, {uy_ref:+.0f}) m/yr gives {want:.4f}. y_km descends, so "
+                    f"the flow's y component must be mirrored into the FFT lattice.")
+        if u_ref > speed_gate and a_along > a_across:
             raise ValueError(
-                f"bridging operator is misoriented: a 2H plane wave ALONG the flow "
-                f"({flow_deg:+.0f}°) survives at {a_along:.3f} but ACROSS-flow only at "
-                f"{a_across:.3f}; advection must damp along-flow structure at least as "
-                f"much. Check the reference velocity components and the grid orientation.")
+                f"bridging operator does not damp along-flow structure: at {u_ref:.0f} m/yr a 2H "
+                f"plane wave along the flow ({flow_deg:+.0f}°) comes through at {a_along:.3f} but "
+                f"across-flow at {a_across:.3f}. Check the reference velocity components.")
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
         M_dense = jnp.asarray(np.isfinite(data.H_obs) & data.domain[None])
         gxj, gyj = jnp.asarray(Xg.ravel()), jnp.asarray(Yg.ravel())

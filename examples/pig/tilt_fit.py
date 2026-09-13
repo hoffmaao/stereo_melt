@@ -312,14 +312,20 @@ def main(
     # (beardmore_shelf 2026-07-11: 35 of 99 nocorr layers leaked that way).
     ez_by_dem_id = (os.environ.get("PIG_TILT_EZ_BY_DEM_ID", "") == "1"
                     or any(variant == "nocorr" for _d, variant in config.STRIP_SOURCES))
+    ez_dem_ids = (stack["dem_id"].values
+                  if ez_by_dem_id and "dem_id" in stack.coords else None)
+    if ez_by_dem_id and ez_dem_ids is None:
+        print("WARNING: by-dem_id Ez resolution requested but this stack carries no dem_id "
+              "coord, so Ez falls back to date union -- a nocorr layer sharing a REMA date "
+              "with an aligned strip will inherit that strip's tighter Ez. Rebuild the stack "
+              "with build_stack to close the leak.")
     Ez_per_epoch, ez_summary = build_per_epoch_ez(
         stack["time"].values,
         [(p.parent, suf) for p, suf in config.STRIP_SOURCES],
-        epoch_dem_ids=(stack["dem_id"].values
-                       if ez_by_dem_id and "dem_id" in stack.coords else None),
+        epoch_dem_ids=ez_dem_ids,
     )
     print(f"Per-epoch Ez (best-source breakdown, resolved by "
-          f"{'dem_id' if ez_by_dem_id else 'date'}): {dict(ez_summary)}")
+          f"{'dem_id' if ez_dem_ids is not None else 'date'}): {dict(ez_summary)}")
 
     # P3: demote poorly-coregistered strips (high pc_align end_p50) to an
     # offset-only (alpha_z) tilt fit rather than dropping them -- a full x/y
