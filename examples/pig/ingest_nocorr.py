@@ -45,6 +45,7 @@ import stereo_melt.envsetup  # noqa: F401  (PROJ_DATA fix, before geo imports)
 import argparse
 import os
 import time
+import traceback
 from pathlib import Path
 
 import geopandas as gpd
@@ -203,15 +204,25 @@ def main() -> int:
         return 0
 
     t0 = time.time()
-    done = 0
-    for i, r in sel.iterrows():
+    counts = {"ok": 0, "skip": 0, "fail": 0}
+    for i, r in enumerate(sel.itertuples(), start=1):
         z = args.z_offset_is2 if r.is2era else args.z_offset_pre_is2
-        ingest_strip_nocorr(r.raw_path, str(config.ASP_NOCORR_ROOT), z, overwrite=args.overwrite)
-        done += 1
-        if done % 10 == 0:
-            print(f"   {done}/{len(sel)}  {time.time() - t0:.0f} s", flush=True)
-    print(f"ingested {done} strips into {config.ASP_NOCORR_ALIGNED_DIR} in {time.time() - t0:.0f} s")
-    return 0
+        try:
+            before = (config.ASP_NOCORR_ALIGNED_DIR
+                      / f"{Path(r.raw_path).stem}-trans_reference-DEM.tif").exists()
+            ingest_strip_nocorr(r.raw_path, str(config.ASP_NOCORR_ROOT), z, overwrite=args.overwrite)
+            counts["skip" if (before and not args.overwrite) else "ok"] += 1
+        except Exception as exc:
+            print(f"!! FAILED for {r.dem_id}: {exc}", flush=True)
+            traceback.print_exc()
+            counts["fail"] += 1
+        if i % 10 == 0:
+            print(f"   {i}/{len(sel)}  (ok={counts['ok']} skip={counts['skip']} "
+                  f"fail={counts['fail']})  {time.time() - t0:.0f} s", flush=True)
+    print(f"\n=== nocorr ingest summary: {counts['ok']} new, {counts['skip']} cached, "
+          f"{counts['fail']} failed (of {len(sel)}) into {config.ASP_NOCORR_ALIGNED_DIR} "
+          f"in {time.time() - t0:.0f} s ===")
+    return 1 if counts["fail"] else 0
 
 
 if __name__ == "__main__":

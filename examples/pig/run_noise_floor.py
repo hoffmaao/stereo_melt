@@ -77,9 +77,8 @@ from stereo_melt.melt import eulerian_melt_rate  # noqa: E402
 RHO_I = 918.0
 
 
-def out_path(suffix):
-    return (config.PROCESSED_DIR /
-            f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc")
+def out_path(tag, suffix):
+    return config.PROCESSED_DIR / f"pig_noise_floor_250m_{tag}{suffix}.nc"
 
 
 def main() -> int:
@@ -161,8 +160,9 @@ def main() -> int:
                         n_epochs_b=sb.sizes["time"], n_bins=args.n_bins,
                         lift_umax_myr=args.lift_umax_myr,
                         common_epoch=int(bool(args.common_epoch)),
+                        tag=args.tag,
                         split="alternating epochs in time (disjoint strips)")
-    nc = out_path(args.out_suffix)
+    nc = out_path(args.tag, args.out_suffix)
     ds_out.to_netcdf(nc, encoding={k: {"zlib": True, "complevel": 4} for k in out})
     print(f"wrote {nc}", flush=True)
     print(f"[done] total {time.time() - t00:.0f}s", flush=True)

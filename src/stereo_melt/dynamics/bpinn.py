@@ -65,7 +65,11 @@ the field is reflect-padded to twice its size and multiplied in the FFT domain
 by :math:`M(k) = 1 + (T(k) - 1)\,(1 - L(k))` — ``T`` from
 :func:`~stereo_melt.dynamics.bridging_restoration._bridging_transfer` (the
 same advected Newtonian transfer the monolithic and restored-budget solvers
-use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``u_ref_myr``) and ``L`` a
+use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``u_ref_myr``, the last
+defaulting to the mean speed over ``data.domain`` — time-averaged first for a
+time-varying velocity — because a whole-grid mean of the gap-filled velocity
+biases it low, and with it the along-flow asymmetry of ``M``, on any window
+with velocity gaps) and ``L`` a
 Gaussian low-pass at ``transfer_bg_sigma_H`` ice thicknesses that keeps the
 operator at unity on the long wavelengths where ``T`` is unity anyway — then
 cropped and compared to the hydrostatic thickness observations. Data
@@ -169,7 +173,10 @@ def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
     ``x``/``y`` in metres (y descending, north-up); ``t_yr`` decimal years;
     ``vx``/``vy`` in m/yr, 2-D (static) or 3-D (K, ny, nx, time-varying);
     ``a_dot`` surface mass balance in m ice/yr (default 0); ``domain`` bool
-    (ny, nx) where the physics is enforced (default: any finite observation);
+    (ny, nx) where the physics is enforced (default: any finite observation),
+    intersected either way with the pixels where the velocity and its centred
+    divergence stencil are finite, so a pixel next to a velocity gap does not
+    carry the one-sided difference against a filled zero;
     ``vt_yr`` the decimal-year axis of a time-varying velocity (else the
     velocity epochs are assumed to span the stack window uniformly).
     """
@@ -184,14 +191,13 @@ def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
         vx, vy = vx[None], vy[None]
     dx = float(x_km[1] - x_km[0])
     dy = float(y_km[1] - y_km[0])          # negative for a north-up grid
-    dvx = np.gradient(np.where(np.isfinite(vx), vx, 0.0), dx, axis=2)
-    dvy = np.gradient(np.where(np.isfinite(vy), vy, 0.0), dy, axis=1)
-    divu = dvx + dvy
+    divu = np.gradient(vx, dx, axis=2) + np.gradient(vy, dy, axis=1)
     a_dot = np.zeros((ny, nx)) if a_dot is None else np.asarray(a_dot, float)
     fin = np.isfinite(H_obs)
     if domain is None:
         domain = fin.any(axis=0)
-    domain = np.asarray(domain, bool) & np.isfinite(vx).all(axis=0) & np.isfinite(vy).all(axis=0)
+    domain = (np.asarray(domain, bool) & np.isfinite(vx).all(axis=0)
+              & np.isfinite(vy).all(axis=0) & np.isfinite(divu).all(axis=0))
     k, j, i = np.nonzero(fin & domain[None])
     obs_xyt = np.stack([x_km[i], y_km[j], t_yr[k]], axis=1)
     H0 = float(np.nanmedian(H_obs))
@@ -346,12 +352,19 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     if cfg.transfer:
         from .bridging_restoration import _bridging_transfer
         H_ref = cfg.H_ref_m if cfg.H_ref_m is not None else float(data.H0)
-        u_ref = cfg.u_ref_myr if cfg.u_ref_myr is not None else float(np.hypot(data.vx, data.vy).mean() * 1e3)
+        if cfg.u_ref_myr is not None:
+            u_ref = float(cfg.u_ref_myr)
+        else:
+            spd = np.hypot(data.vx, data.vy).mean(axis=0)[data.domain]
+            if spd.size == 0:
+                raise ValueError("empty domain: cannot default u_ref_myr, pass BPINNConfig(u_ref_myr=...)")
+            u_ref = float(spd.mean() * 1e3)
+            print(f"  [bpinn] u_ref default: mean speed over {spd.size} domain px = {u_ref:.0f} m/yr", flush=True)
         Py, Px = 2 * ny, 2 * nx
-        T_np = _bridging_transfer(Py, Px, dx * 1e3, dx * 1e3, H_ref, u_ref, 0.0, cfg.eta_bar, cfg.alpha_scale,
+        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, u_ref, 0.0, cfg.eta_bar, cfg.alpha_scale,
                                   data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
         kxp = 2 * np.pi * np.fft.fftfreq(Px, dx * 1e3)
-        kyp = 2 * np.pi * np.fft.fftfreq(Py, dx * 1e3)
+        kyp = 2 * np.pi * np.fft.fftfreq(Py, dy * 1e3)
         K2 = kxp[None, :] ** 2 + kyp[:, None] ** 2
         sig_bg = cfg.transfer_bg_sigma_H * H_ref
         L_np = np.exp(-0.5 * K2 * sig_bg ** 2)
@@ -534,7 +547,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
 
         def logdens_phi(phi):
             # full-batch physics likelihood on a fixed collocation design + prior
-            return -(nll_col(theta_map, phi, col_xy_fixed, col_t_fixed) * (N_col / col_xy_fixed.shape[0])) + log_prior(phi)
+            return -(nll_col(theta_map, phi, col_xy_fixed, col_t_fixed) * (N_col / col_xy_fixed.shape[0])) + log_prior({"phi": phi})
 
         def logdens_joint(params):
             lo = (nll_obs_epochs_seq(params["theta"], params.get("planes")) if cfg.transfer
@@ -549,8 +562,8 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         col_t_fixed = jax.random.uniform(kc3, (n_fix,), minval=t0, maxval=t1)
         logdens, init = (logdens_joint, map_params) if cfg.hmc_joint else (logdens_phi, map_params["phi"])
         print(f"  [bpinn] NUTS {'joint' if cfg.hmc_joint else 'melt-net'}: warmup {cfg.hmc_warmup}, samples {cfg.hmc_samples}", flush=True)
-        warm = blackjax.window_adaptation(blackjax.nuts, logdens, num_steps=cfg.hmc_warmup)
-        (state, tuned), _ = warm.run(jax.random.PRNGKey(cfg.seed + 2000), init)
+        warm = blackjax.window_adaptation(blackjax.nuts, logdens)
+        (state, tuned), _ = warm.run(jax.random.PRNGKey(cfg.seed + 2000), init, num_steps=cfg.hmc_warmup)
         kernel = jax.jit(blackjax.nuts(logdens, **tuned).step)
         kk = jax.random.PRNGKey(cfg.seed + 3000)
         for s in range(cfg.hmc_samples):
