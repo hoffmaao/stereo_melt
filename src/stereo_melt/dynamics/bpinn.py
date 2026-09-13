@@ -76,12 +76,26 @@ mini-batches are then whole epochs (``batch_epochs``).
 passed as COMPONENTS, defaulting to the tile mean of ``data.vx``/``data.vy``
 over ``data.domain`` (time-averaged first for a time-varying velocity) — the
 same ``_mean_component`` convention, and the same positive ``dx``/``dy``
-spacings on this y-descending grid, that the restored-budget and inverse call
-sites use. An earlier default took only the mean SPEED and placed the flow
-along +x; on a basin whose flow is not along the grid x axis that mis-orients
-the operator by the flow angle, which on the PIG trunk (about -107°) swaps the
-along- and across-flow damping at :math:`\lambda = 2H` (|M| 0.31 vs 0.14 along
-flow, 0.15 vs 0.37 across), converging to within 3 % only by :math:`4H`.
+spacings, that the restored-budget and inverse call sites use. An earlier
+default took only the mean SPEED and placed the flow along +x; on a basin whose
+flow is not along the grid x axis that mis-orients the operator by the flow
+angle, which on the PIG trunk (about -107°) swaps the along- and across-flow
+damping at :math:`\lambda = 2H` (|M| 0.31 vs 0.14 along flow, 0.15 vs 0.37
+across), converging to within 3 % only by :math:`4H`.
+
+The y component is mirrored on the way in. ``y_km`` descends, so ``fft2`` of the
+row-indexed grid places a physical :math:`(k_x, k_y)` at lattice
+:math:`(k_x, -k_y)`; since :math:`|T|` depends on :math:`\mathbf k` through
+:math:`|\mathbf k|` and :math:`(\boldsymbol\alpha\!\cdot\!\mathbf k)^2`, feeding
+the operator the PHYSICAL :math:`u_y` on that lattice would reflect its
+anisotropy axis to :math:`-\theta` — 33° of misorientation on the PIG trunk,
+leaving across-flow 2H structure 1.6x over-amplified. The production
+restored-budget and inverse call sites pass the physical :math:`u_y` with a
+positive ``dy`` and so carry that mirror; this module does not, because
+``prepare_bpinn_data`` differences ``divu`` with a negative ``dy`` and ``_pix``
+and ``residual`` are in physical y, so the operator must be too. Building it
+runs a self-check: a unit 2H plane wave along the flow must come through no
+stronger than one across it, else :func:`fit_bpinn` raises.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -202,6 +216,9 @@ def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
         vx, vy = vx[None], vy[None]
     dx = float(x_km[1] - x_km[0])
     dy = float(y_km[1] - y_km[0])          # negative for a north-up grid
+    if dy >= 0:
+        raise ValueError("y must be descending (north-up); the collocation sampler and the "
+                         "bridging observation operator both assume that orientation")
     divu = np.gradient(vx, dx, axis=2) + np.gradient(vy, dy, axis=1)
     a_dot = np.zeros((ny, nx)) if a_dot is None else np.asarray(a_dot, float)
     fin = np.isfinite(H_obs)
@@ -341,23 +358,19 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         return cfg.b_scale_myr * _mlp(phi, f)[..., 0]
 
     def residual_parts(theta, phi, x, y, t):
-        H_scalar = lambda xx, yy, tt: H_net(theta, xx, yy, tt)  # noqa: E731
-        H = H_scalar(x, y, t)
-        Hx = jax.vmap(jax.grad(H_scalar, 0))(x, y, t)
-        Hy = jax.vmap(jax.grad(H_scalar, 1))(x, y, t)
-        Ht = jax.vmap(jax.grad(H_scalar, 2))(x, y, t)
-        u, v = _sample3(vx_g, x, y, t), _sample3(vy_g, x, y, t)
-        return dict(H=H, Hx=Hx, Hy=Hy, Ht=Ht, u=u, v=v, divu=_sample3(divu_g, x, y, t), a=_sample2(a_g, x, y), b=b_net(phi, x, y))
-
-    def residual(theta, phi, x, y, t):
-        """Thickness-equation residual at points (km, km, yr) → m/yr."""
+        """Every term of the thickness equation at points (km, km, yr), unsummed."""
         H_scalar = lambda xx, yy, tt: H_net(theta, xx, yy, tt)  # noqa: E731
         H = H_scalar(x, y, t)
         Hx = jax.vmap(jax.grad(H_scalar, 0))(x, y, t)          # m/km
         Hy = jax.vmap(jax.grad(H_scalar, 1))(x, y, t)
         Ht = jax.vmap(jax.grad(H_scalar, 2))(x, y, t)          # m/yr
         u, v = _sample3(vx_g, x, y, t), _sample3(vy_g, x, y, t)
-        return Ht + H * _sample3(divu_g, x, y, t) + u * Hx + v * Hy - _sample2(a_g, x, y) - b_net(phi, x, y)
+        return dict(H=H, Hx=Hx, Hy=Hy, Ht=Ht, u=u, v=v, divu=_sample3(divu_g, x, y, t), a=_sample2(a_g, x, y), b=b_net(phi, x, y))
+
+    def residual(theta, phi, x, y, t):
+        """Thickness-equation residual at points (km, km, yr) → m/yr."""
+        p = residual_parts(theta, phi, x, y, t)
+        return p["Ht"] + p["H"] * p["divu"] + p["u"] * p["Hx"] + p["v"] * p["Hy"] - p["a"] - p["b"]
 
     # ---- bridging transfer as the observation operator (optional) ----
     if cfg.transfer:
@@ -377,29 +390,54 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         uy_ref = float(cfg.uy_ref_myr) if cfg.uy_ref_myr is not None else uy_d
         u_ref = float(np.hypot(ux_ref, uy_ref))
         flow_deg = float(np.degrees(np.arctan2(uy_ref, ux_ref)))
+        # y_km descends, so fft2 of the row-indexed grid puts a physical (kx, ky)
+        # at lattice (kx, -ky): the flow must enter the operator y-mirrored for its
+        # anisotropy axis to land on the physical flow axis.
+        uy_lat = -uy_ref
+        flow_hat = (np.array([1.0, 0.0]) if u_ref <= 0
+                    else np.array([ux_ref, uy_lat]) / u_ref)
         Py, Px = 2 * ny, 2 * nx
-        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref, cfg.eta_bar, cfg.alpha_scale,
+        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_lat, cfg.eta_bar, cfg.alpha_scale,
                                   data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
         kxp = 2 * np.pi * np.fft.fftfreq(Px, dx * 1e3)
         kyp = 2 * np.pi * np.fft.fftfreq(Py, dy * 1e3)
         K2 = kxp[None, :] ** 2 + kyp[:, None] ** 2
         sig_bg = cfg.transfer_bg_sigma_H * H_ref
         L_np = np.exp(-0.5 * K2 * sig_bg ** 2)
-        M_op = jnp.asarray(1.0 + (T_np - 1.0) * (1.0 - L_np))
+        M_np = 1.0 + (T_np - 1.0) * (1.0 - L_np)
+        M_op = jnp.asarray(M_np)
         Xg, Yg = np.meshgrid(data.x_km, data.y_km)
         Xd = np.stack([np.ones(ny * nx), (Xg.ravel() - xc), (Yg.ravel() - yc)], 1)
         P_pinv = jnp.asarray(np.linalg.pinv(Xd))          # (3, ny*nx)
         Xd_j = jnp.asarray(Xd)
+
+        def _lattice_idx(khat, lam):
+            kx_w, ky_w = (2 * np.pi / lam) * np.asarray(khat)
+            return (int(np.argmin(np.abs(kyp - ky_w))), int(np.argmin(np.abs(kxp - kx_w))))
+
         def _T_along_flow(lam):
             """|T| at the padded-lattice point nearest the along-flow wavevector of wavelength lam."""
-            kx_w, ky_w = (2 * np.pi / lam) * np.array([1.0, 0.0] if u_ref <= 0 else
-                                                      [ux_ref / u_ref, uy_ref / u_ref])
-            return abs(T_np[int(np.argmin(np.abs(kyp - ky_w))), int(np.argmin(np.abs(kxp - kx_w)))])
+            return abs(T_np[_lattice_idx(flow_hat, lam)])
 
+        def _wave_amp(khat):
+            """Amplitude of a unit plane wave of wavelength 2H on direction khat after M_op."""
+            m, n = _lattice_idx(khat, 2 * H_ref)
+            f = np.cos(2 * np.pi * (n * np.arange(Px)[None, :] / Px + m * np.arange(Py)[:, None] / Py))
+            return float(np.abs(np.real(np.fft.ifft2(np.fft.fft2(f) * M_np))).max())
+
+        a_along = _wave_amp(flow_hat)
+        a_across = _wave_amp(np.array([-flow_hat[1], flow_hat[0]]))
         print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
               f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
               f"|T| along-flow at 2H/3H = {_T_along_flow(2 * H_ref):.2f}/{_T_along_flow(3 * H_ref):.2f}; "
+              f"2H plane wave along/across flow = {a_along:.3f}/{a_across:.3f}; "
               f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
+        if a_along > a_across + 1e-6:
+            raise ValueError(
+                f"bridging operator is misoriented: a 2H plane wave ALONG the flow "
+                f"({flow_deg:+.0f}°) survives at {a_along:.3f} but ACROSS-flow only at "
+                f"{a_across:.3f}; advection must damp along-flow structure at least as "
+                f"much. Check the reference velocity components and the grid orientation.")
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
         M_dense = jnp.asarray(np.isfinite(data.H_obs) & data.domain[None])
         gxj, gyj = jnp.asarray(Xg.ravel()), jnp.asarray(Yg.ravel())
@@ -536,7 +574,8 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         kd = jax.random.PRNGKey(0)
         params = {"theta": _init_mlp(kd, in_H, cfg.hidden, cfg.layers, 1), "phi": _init_mlp(kd, in_b, cfg.melt_hidden, cfg.melt_layers, 1)}
         xy = dom_xy[:512]
-        parts = residual_parts(params["theta"], params["phi"], xy[:, 0], xy[:, 1], jnp.full((512,), tc))
+        parts = residual_parts(params["theta"], params["phi"], xy[:, 0], xy[:, 1],
+                               jnp.full((xy.shape[0],), tc))
         return {k: np.asarray(v) for k, v in parts.items()}
 
     samples, hists = [], []

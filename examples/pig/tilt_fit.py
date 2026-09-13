@@ -302,11 +302,24 @@ def main(
     # Multi-root form: walk every ASP root in STRIP_SOURCES so the pre-IS2
     # IS2+ATM+LVIS era (ASP_is2atmlvis/) and the post-Oct 2018 IS2+CS2 era
     # (ASP/) both contribute sources.json sidecars.
+    # Layers resolve by DATE UNION by default -- every strip sharing a timestamp
+    # contributes, min Ez wins -- which is how the canon PIG products were built,
+    # so that stays the default and they remain byte-identical. Resolve by dem_id
+    # instead when a nocorr root is active (or PIG_TILT_EZ_BY_DEM_ID=1): REMA
+    # filenames carry no time-of-day, so a control-free nocorr layer sharing a date
+    # with an aligned strip would otherwise inherit its Ez 0.1 prior instead of the
+    # nocorr 1.0 tier, pinning the one datum the recipe needs the LSQ to estimate
+    # (beardmore_shelf 2026-07-11: 35 of 99 nocorr layers leaked that way).
+    ez_by_dem_id = (os.environ.get("PIG_TILT_EZ_BY_DEM_ID", "") == "1"
+                    or any(variant == "nocorr" for _d, variant in config.STRIP_SOURCES))
     Ez_per_epoch, ez_summary = build_per_epoch_ez(
         stack["time"].values,
         [(p.parent, suf) for p, suf in config.STRIP_SOURCES],
+        epoch_dem_ids=(stack["dem_id"].values
+                       if ez_by_dem_id and "dem_id" in stack.coords else None),
     )
-    print(f"Per-epoch Ez (best-source breakdown): {dict(ez_summary)}")
+    print(f"Per-epoch Ez (best-source breakdown, resolved by "
+          f"{'dem_id' if ez_by_dem_id else 'date'}): {dict(ez_summary)}")
 
     # P3: demote poorly-coregistered strips (high pc_align end_p50) to an
     # offset-only (alpha_z) tilt fit rather than dropping them -- a full x/y
