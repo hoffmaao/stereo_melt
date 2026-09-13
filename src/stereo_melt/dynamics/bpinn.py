@@ -65,15 +65,25 @@ the field is reflect-padded to twice its size and multiplied in the FFT domain
 by :math:`M(k) = 1 + (T(k) - 1)\,(1 - L(k))` — ``T`` from
 :func:`~stereo_melt.dynamics.bridging_restoration._bridging_transfer` (the
 same advected Newtonian transfer the monolithic and restored-budget solvers
-use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``u_ref_myr``, the last
-defaulting to the mean speed over ``data.domain`` — time-averaged first for a
-time-varying velocity — because a whole-grid mean of the gap-filled velocity
-biases it low, and with it the along-flow asymmetry of ``M``, on any window
-with velocity gaps) and ``L`` a
+use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``ux_ref_myr``/``uy_ref_myr``)
+and ``L`` a
 Gaussian low-pass at ``transfer_bg_sigma_H`` ice thicknesses that keeps the
 operator at unity on the long wavelengths where ``T`` is unity anyway — then
 cropped and compared to the hydrostatic thickness observations. Data
-mini-batches are then whole epochs (``batch_epochs``). Without the transfer
+mini-batches are then whole epochs (``batch_epochs``).
+
+``T`` is strongly anisotropic about the flow axis, so the reference velocity is
+passed as COMPONENTS, defaulting to the tile mean of ``data.vx``/``data.vy``
+over ``data.domain`` (time-averaged first for a time-varying velocity) — the
+same ``_mean_component`` convention, and the same positive ``dx``/``dy``
+spacings on this y-descending grid, that the restored-budget and inverse call
+sites use. An earlier default took only the mean SPEED and placed the flow
+along +x; on a basin whose flow is not along the grid x axis that mis-orients
+the operator by the flow angle, which on the PIG trunk (about -107°) swaps the
+along- and across-flow damping at :math:`\lambda = 2H` (|M| 0.31 vs 0.14 along
+flow, 0.15 vs 0.37 across), converging to within 3 % only by :math:`4H`.
+
+Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
 melt (0.06 at 2H, 0.34 at 3H on the PIGREAL twin, 2026-09-12), which is why
 it matched the Eulerian ceiling there.
@@ -131,7 +141,8 @@ class BPINNConfig:
     transfer_bg_sigma_H: float = 3.0
     batch_epochs: int = 16
     H_ref_m: float | None = None
-    u_ref_myr: float | None = None
+    ux_ref_myr: float | None = None
+    uy_ref_myr: float | None = None
 
 
 @dataclass
@@ -352,16 +363,22 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     if cfg.transfer:
         from .bridging_restoration import _bridging_transfer
         H_ref = cfg.H_ref_m if cfg.H_ref_m is not None else float(data.H0)
-        if cfg.u_ref_myr is not None:
-            u_ref = float(cfg.u_ref_myr)
+        if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
+            if not data.domain.any():
+                raise ValueError("empty domain: cannot default the reference velocity, "
+                                 "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
+            ux_d = float(data.vx.mean(axis=0)[data.domain].mean() * 1e3)
+            uy_d = float(data.vy.mean(axis=0)[data.domain].mean() * 1e3)
+            print(f"  [bpinn] reference velocity default: tile mean over {int(data.domain.sum())} "
+                  f"domain px = ({ux_d:+.0f}, {uy_d:+.0f}) m/yr", flush=True)
         else:
-            spd = np.hypot(data.vx, data.vy).mean(axis=0)[data.domain]
-            if spd.size == 0:
-                raise ValueError("empty domain: cannot default u_ref_myr, pass BPINNConfig(u_ref_myr=...)")
-            u_ref = float(spd.mean() * 1e3)
-            print(f"  [bpinn] u_ref default: mean speed over {spd.size} domain px = {u_ref:.0f} m/yr", flush=True)
+            ux_d = uy_d = 0.0
+        ux_ref = float(cfg.ux_ref_myr) if cfg.ux_ref_myr is not None else ux_d
+        uy_ref = float(cfg.uy_ref_myr) if cfg.uy_ref_myr is not None else uy_d
+        u_ref = float(np.hypot(ux_ref, uy_ref))
+        flow_deg = float(np.degrees(np.arctan2(uy_ref, ux_ref)))
         Py, Px = 2 * ny, 2 * nx
-        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, u_ref, 0.0, cfg.eta_bar, cfg.alpha_scale,
+        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref, cfg.eta_bar, cfg.alpha_scale,
                                   data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
         kxp = 2 * np.pi * np.fft.fftfreq(Px, dx * 1e3)
         kyp = 2 * np.pi * np.fft.fftfreq(Py, dy * 1e3)
@@ -373,10 +390,15 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         Xd = np.stack([np.ones(ny * nx), (Xg.ravel() - xc), (Yg.ravel() - yc)], 1)
         P_pinv = jnp.asarray(np.linalg.pinv(Xd))          # (3, ny*nx)
         Xd_j = jnp.asarray(Xd)
-        i_t2 = np.argmin(np.abs(kxp - 2 * np.pi / (2 * H_ref)))
-        i_t3 = np.argmin(np.abs(kxp - 2 * np.pi / (3 * H_ref)))
-        print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, u_ref {u_ref:.0f} m/yr, eta {cfg.eta_bar:.1e}, "
-              f"alpha {cfg.alpha_scale}; |T| along-flow at 2H/3H = {abs(T_np[0, i_t2]):.2f}/{abs(T_np[0, i_t3]):.2f}; "
+        def _T_along_flow(lam):
+            """|T| at the padded-lattice point nearest the along-flow wavevector of wavelength lam."""
+            kx_w, ky_w = (2 * np.pi / lam) * np.array([1.0, 0.0] if u_ref <= 0 else
+                                                      [ux_ref / u_ref, uy_ref / u_ref])
+            return abs(T_np[int(np.argmin(np.abs(kyp - ky_w))), int(np.argmin(np.abs(kxp - kx_w)))])
+
+        print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
+              f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
+              f"|T| along-flow at 2H/3H = {_T_along_flow(2 * H_ref):.2f}/{_T_along_flow(3 * H_ref):.2f}; "
               f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
         M_dense = jnp.asarray(np.isfinite(data.H_obs) & data.domain[None])

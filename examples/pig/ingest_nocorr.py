@@ -81,7 +81,11 @@ def _raw_dem_index() -> dict[str, Path]:
 
 def _aligned_stems() -> set[str]:
     stems: set[str] = set()
-    for aligned_dir, _variant in config.STRIP_SOURCES:
+    for aligned_dir, variant in config.STRIP_SOURCES:
+        # PIG_SOURCES=nocorr appends our own output root to STRIP_SOURCES, so skip
+        # it here or a re-run (e.g. --overwrite with a revised bias) selects nothing.
+        if variant == "nocorr" or Path(aligned_dir) == config.ASP_NOCORR_ALIGNED_DIR:
+            continue
         for p in Path(aligned_dir).glob("*-trans_reference-DEM.tif"):
             stems.add(p.name.replace("-trans_reference-DEM.tif", ""))
     return stems

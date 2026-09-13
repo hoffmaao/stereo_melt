@@ -29,11 +29,11 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from stereo_melt.dynamics.bpinn import BPINNConfig, fit_bpinn, prepare_bpinn_data  # noqa: E402
 
 RHO_I_FLUX = 918.0
-R = Path("/wd2/projects/stereo_melt/examples/pig/results/bpinn")
+R = Path(__file__).resolve().parent / "results" / "bpinn"
 
 
 def main() -> int:
@@ -103,7 +103,7 @@ def main() -> int:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
     try:
         from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm
         cmap, norm = melt_cmap(), melt_norm(vmax=300)
