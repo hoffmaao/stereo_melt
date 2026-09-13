@@ -25,28 +25,30 @@ Eras: IS2 (acqdate ≥ 2018-10-14, the ATL06 start) and pre-IS2.
 
 Ingest (``--z-offset-pre-is2 X --z-offset-is2 Y``): each selected strip is
 copied into ``data/ASP_nocorr/asp_aligned/<dem_id>-trans_reference-DEM.tif``
-with the era offset ADDED, the strip's PGC ``<dem_id>_bitmask.tif`` applied as
-nodata (edge / water / cloud), and a ``sources=["nocorr"]`` sidecar
-(:func:`stereo_melt.coregister.asp.ingest_strip_nocorr`). Idempotent. A strip
-with no bitmask beside its raw DEM is SKIPPED, not ingested raw: the 2026-09-12
-run that ingested these strips unscreened collapsed the Eulerian product.
+with the era offset ADDED and a ``sources=["nocorr"]`` sidecar
+(:func:`stereo_melt.coregister.asp.ingest_strip_nocorr`). Idempotent.
 
 Downstream: ``PIG_SOURCES=nocorr pig.build_stack --res 250 --tag <tag>`` fuses
 the root (last in precedence), then ``PIG_SOURCES=nocorr PIG_TILT_DOMAIN=full
 PIG_TILT_DHDT_SMOOTH=1.0 pig.tilt_fit`` — the static-domain tilt gives
 control-free epochs zero observation rows (beardmore_shelf 2026-07-11 A/B).
-Two caveats before trusting that chain:
+The PGC quality screen (matchtag 1, bitmask keep {0, 2}) needs nothing here:
+``build_stack`` resolves ``<dem_id>_matchtag.tif``/``_bitmask.tif`` from
+``STRIPS_DIR`` for EVERY root in ``STRIP_SOURCES``, this one included, and
+applies it at fuse time.
 
-* The bitmask screen above is applied at ingest as of this change; it was not
-  applied in the 2026-09-12 test.
-* The POST-fit screen — dropping epochs the tilt LSQ could not adjust (residual
-  NMAD > 5 m, or more than 10 % of pixels off by > 20 m against the stack's
-  temporal median) — is a separate step and is NOT shipped here. Without it the
-  fused stack still carries strips the LSQ left unconstrained.
+What actually went wrong on 2026-09-12, so a follow-up does not chase the wrong
+cause: the joint tilt LSQ could not adjust a large minority of the nocorr
+epochs — about 24 of 124 came out with residual NMAD > 5 m against the stack's
+temporal median, the worst 60–200 m — and they stayed in the fuse. Shean's
+recipe drops exactly those (``stack_filter.py remove_nocorr``); that post-fit
+screen is NOT shipped here, and without it the stack carries epochs the LSQ
+left unconstrained. Compounding it, the class bias is one constant per era, and
+the 2010–2013 strips are under-corrected by several metres against it.
 
-The 2026-09-12 outcome was negative and the path is NOT adopted: the screened
-variant came out about 6 % noisier than the production stack on common pixels.
-It stays opt-in behind ``PIG_SOURCES=nocorr`` for follow-up work only.
+The outcome was negative and the path is NOT adopted: the screened variant came
+out about 6 % noisier than the production stack on common pixels. It stays
+opt-in behind ``PIG_SOURCES=nocorr`` for follow-up work only.
 
 Run (from ``examples/``)::
 
@@ -223,20 +225,13 @@ def main() -> int:
         return 0
 
     t0 = time.time()
-    counts = {"ok": 0, "skip": 0, "fail": 0, "nomask": 0}
+    counts = {"ok": 0, "skip": 0, "fail": 0}
     for i, r in enumerate(sel.itertuples(), start=1):
         z = args.z_offset_is2 if r.is2era else args.z_offset_pre_is2
-        bitmask = Path(r.raw_path).with_name(f"{r.dem_id}_bitmask.tif")
-        if not bitmask.exists():
-            print(f"!! SKIP {r.dem_id}: no {bitmask.name} beside the raw DEM; ingesting it "
-                  f"unscreened is what collapsed the 2026-09-12 Eulerian product", flush=True)
-            counts["nomask"] += 1
-            continue
         try:
             before = (config.ASP_NOCORR_ALIGNED_DIR
                       / f"{Path(r.raw_path).stem}-trans_reference-DEM.tif").exists()
-            ingest_strip_nocorr(r.raw_path, str(config.ASP_NOCORR_ROOT), z,
-                                overwrite=args.overwrite, bitmask_path=str(bitmask))
+            ingest_strip_nocorr(r.raw_path, str(config.ASP_NOCORR_ROOT), z, overwrite=args.overwrite)
             counts["skip" if (before and not args.overwrite) else "ok"] += 1
         except Exception as exc:
             print(f"!! FAILED for {r.dem_id}: {exc}", flush=True)
@@ -244,11 +239,9 @@ def main() -> int:
             counts["fail"] += 1
         if i % 10 == 0:
             print(f"   {i}/{len(sel)}  (ok={counts['ok']} skip={counts['skip']} "
-                  f"nomask={counts['nomask']} fail={counts['fail']})  "
-                  f"{time.time() - t0:.0f} s", flush=True)
+                  f"fail={counts['fail']})  {time.time() - t0:.0f} s", flush=True)
     print(f"\n=== nocorr ingest summary: {counts['ok']} new, {counts['skip']} cached, "
-          f"{counts['nomask']} skipped for no bitmask, {counts['fail']} failed "
-          f"(of {len(sel)}) into {config.ASP_NOCORR_ALIGNED_DIR} "
+          f"{counts['fail']} failed (of {len(sel)}) into {config.ASP_NOCORR_ALIGNED_DIR} "
           f"in {time.time() - t0:.0f} s ===")
     return 1 if counts["fail"] else 0
 

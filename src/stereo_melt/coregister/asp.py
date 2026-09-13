@@ -906,7 +906,7 @@ def align_strip(
 
 
 
-def ingest_strip_nocorr(dem_path, asp_root, z_offset_m, overwrite=False, bitmask_path=None):
+def ingest_strip_nocorr(dem_path, asp_root, z_offset_m, overwrite=False):
     r"""Shean-style ingestion of a strip with NO static-control overlap.
 
     Shean 2019 kept DEMs without control-surface coverage ("nocorr") at
@@ -940,11 +940,6 @@ def ingest_strip_nocorr(dem_path, asp_root, z_offset_m, overwrite=False, bitmask
         co-registered strips of the same sensor class/era.
     overwrite : bool
         Re-ingest even if the output DEM already exists.
-    bitmask_path : str or None
-        Optional PGC ``*_bitmask.tif`` on the DEM's own grid. Where it is
-        nonzero (edge / water / cloud) the output is written as nodata, in
-        the same block-windowed pass. ``None`` (default) copies the raw DEM
-        untouched, which is what a strip with no bitmask on disk gets.
     """
     import rasterio
 
@@ -957,46 +952,27 @@ def ingest_strip_nocorr(dem_path, asp_root, z_offset_m, overwrite=False, bitmask
         return out_path
 
     tmp_path = out_path + ".part"
-    n_masked = 0
-    bm = rasterio.open(bitmask_path) if bitmask_path is not None else None
-    try:
-        with rasterio.open(dem_path) as src:
-            profile = src.profile.copy()
-            is_float = np.issubdtype(np.dtype(profile["dtype"]), np.floating)
-            profile.update(
-                compress="lzw",
-                predictor=3 if is_float else 2,
-                bigtiff="if_safer",
-            )
-            nodata = src.nodata
-            if bm is not None:
-                if (bm.width, bm.height) != (src.width, src.height):
-                    raise ValueError(
-                        f"{dem_id}: bitmask is {bm.width}x{bm.height} but the DEM is "
-                        f"{src.width}x{src.height}; they must share a grid")
-                if nodata is None:
-                    nodata = -9999.0 if is_float else 0
-                    profile.update(nodata=nodata)
-            with rasterio.open(tmp_path, "w", **profile) as dst:
-                for _, window in src.block_windows(1):
-                    data = src.read(1, window=window)
-                    if nodata is not None:
-                        data[data != nodata] += z_offset_m
-                    else:
-                        data += z_offset_m
-                    if bm is not None:
-                        bad = bm.read(1, window=window) != 0
-                        n_masked += int(bad.sum())
-                        data[bad] = nodata
-                    dst.write(data, 1, window=window)
-    finally:
-        if bm is not None:
-            bm.close()
+    with rasterio.open(dem_path) as src:
+        profile = src.profile.copy()
+        is_float = np.issubdtype(np.dtype(profile["dtype"]), np.floating)
+        profile.update(
+            compress="lzw",
+            predictor=3 if is_float else 2,
+            bigtiff="if_safer",
+        )
+        nodata = src.nodata
+        with rasterio.open(tmp_path, "w", **profile) as dst:
+            for _, window in src.block_windows(1):
+                data = src.read(1, window=window)
+                if nodata is not None:
+                    data[data != nodata] += z_offset_m
+                else:
+                    data += z_offset_m
+                dst.write(data, 1, window=window)
     os.replace(tmp_path, out_path)
 
     write_sources_sidecar(asp_root, dem_id, ["nocorr"])
     with open(os.path.join(aligned_dir, f"{dem_id}-nocorr-offset.txt"), "w") as fh:
         fh.write(f"{z_offset_m:+.3f}\n")
-    masked_note = f", {n_masked} px masked" if bm is not None else ""
-    print(f"✅ nocorr ingest {dem_id}: z {z_offset_m:+.2f} m{masked_note} -> {out_path}")
+    print(f"✅ nocorr ingest {dem_id}: z {z_offset_m:+.2f} m -> {out_path}")
     return out_path

@@ -114,7 +114,10 @@ transfer, and the two probes then differ only by lattice snapping and
 reflect-pad leakage — which used to raise on a perfectly oriented operator.
 Both probe at :math:`2H`, or at four pixels of the coarser axis when :math:`2H`
 is finer than that — a shelf thinner than its own pixel cannot carry a
-resolvable 2H probe, and there the physics check only logs.
+resolvable 2H probe. The probe must also stay under a quarter of the shorter
+domain side, above which reflect-pad leakage swamps the projected gain and the
+ordering is decided by the window rather than by the flow. Outside that band the
+physics check only logs; the PIG trunk sits 27x under the ceiling.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -440,9 +443,14 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         # the operator: snapping wraps, and the +ky/-ky bins stop being mirrors. Four pixels
         # of the coarser axis is the floor; a shelf thinner than its own pixel is probed
         # there instead of at 2H, and the physics assertion downgrades to a log line.
+        # There is an upper bound too: once the probe is an appreciable fraction of the tile,
+        # reflect-pad leakage swamps the projected gain and the along/across ordering is
+        # decided by the window rather than by the flow. A quarter of the shorter domain side
+        # is the ceiling (the PIG trunk sits 27x under it).
         lam_min = 4.0 * max(dx, dy) * 1e3
+        lam_max = 0.25 * min(nx * dx, ny * dy) * 1e3
         lam_probe = max(2.0 * H_ref, lam_min)
-        aliased = 2.0 * H_ref < lam_min
+        unresolved = 2.0 * H_ref < lam_min or lam_probe > lam_max
 
         def _lattice_idx(khat, lam):
             kx_w, ky_w = (2 * np.pi / lam) * np.asarray(khat)
@@ -492,10 +500,10 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         aniso_margin = 0.05
 
         a_along, a_across = _probe_gain(along_hat, lam_probe), _probe_gain(across_hat, lam_probe)
-        assert_aniso = not aliased and aniso > aniso_margin
-        if aliased:
-            gate_note = (f" (2H = {2 * H_ref:.0f} m is under this grid's {lam_min:.0f} m probe "
-                         f"floor: logged, not asserted)")
+        assert_aniso = not unresolved and aniso > aniso_margin
+        if unresolved:
+            gate_note = (f" ({lam_probe:.0f} m probe is outside this grid's usable "
+                         f"{lam_min:.0f}-{lam_max:.0f} m band: logged, not asserted)")
         elif not assert_aniso:
             gate_note = (f" (predicted anisotropy {aniso * 100:.1f}% is under the "
                          f"{aniso_margin * 100:.0f}% margin: logged, not asserted)")
