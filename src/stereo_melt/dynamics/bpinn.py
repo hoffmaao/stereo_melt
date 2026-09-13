@@ -117,7 +117,9 @@ is finer than that — a shelf thinner than its own pixel cannot carry a
 resolvable 2H probe. The probe must also stay under a quarter of the shorter
 domain side, above which reflect-pad leakage swamps the projected gain and the
 ordering is decided by the window rather than by the flow. Outside that band the
-physics check only logs; the PIG trunk sits 27x under the ceiling.
+physics check only logs. On the PIG trunk (120x160 at 250 m, :math:`H` 560 m)
+the usable band is 1000-7500 m and the probe sits at 1120 m, 6.7x under the
+ceiling -- the ceiling is a quarter of the 30 km domain, not the domain itself.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -130,6 +132,7 @@ Validate on the DEM-stack twins (truth known) before any real basin:
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -139,6 +142,24 @@ __all__ = ["BPINNConfig", "BPINNData", "BPINNResult", "prepare_bpinn_data", "fit
 
 @dataclass
 class BPINNConfig:
+    """Model, optimiser and observation-operator settings for :func:`fit_bpinn`.
+
+    ``sigma_r_myr`` and ``n_col_slices`` set how hard the physics residual pulls
+    against the data. The defaults (20 m/yr, 4 slices) are the pair validated on
+    the PIG trunk. A steady twin tolerates far more physics weight -- 1 m/yr and
+    24 slices fit it well -- but on a real stack that pair silently collapses the
+    surrogate to a static field: the fit still returns a plausible-looking melt
+    map, which is just the steady budget of the median base field. Two checks
+    catch it, and :func:`fit_bpinn` runs the first for you:
+
+    1. the fitted surrogate ``dH/dt`` must be of the order of the observed
+       thinning (about -3 to -6 m/yr on the PIG trunk; near 0 means collapse).
+       ``fit_bpinn`` prints both trends and raises a ``RuntimeWarning`` when the
+       fitted one falls under 20 % of the observed one;
+    2. ``transfer=False`` must change the answer. If it does not, the observation
+       operator is not informing the fit.
+    """
+
     hidden: int = 128
     layers: int = 4
     n_fourier: int = 32
@@ -153,8 +174,8 @@ class BPINNConfig:
     b_scale_myr: float = 10.0
     sigma_h_m: float = 2.0
     nu: float | None = 4.0
-    sigma_r_myr: float = 1.0
-    n_col_slices: int = 24
+    sigma_r_myr: float = 20.0
+    n_col_slices: int = 4
     weight_prior_sd: float = 1.0
     n_steps: int = 20000
     batch_obs: int = 8192
@@ -256,6 +277,26 @@ def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
                      np.nan_to_num(a_dot), domain, H0,
                      {"rho_i": float(rho_i), "rho_w": float(rho_w), "dx_km": dx,
                       "vt_yr": None if vt_yr is None else np.asarray(vt_yr, float)})
+
+
+def _observed_trend(data: BPINNData, min_epochs: int = 5) -> np.ndarray:
+    """Per-pixel least-squares dH/dt (m/yr) of the observations themselves.
+
+    The independent yardstick for the surrogate's fitted trend: a collapsed
+    surrogate reports a trend near zero while the stack it was fitted to is
+    thinning. NaN where a pixel carries fewer than ``min_epochs`` finite epochs
+    or sits outside ``data.domain``.
+    """
+    fin = np.isfinite(data.H_obs) & data.domain[None]
+    t = np.asarray(data.t_yr, float)[:, None, None]
+    w = fin.astype(float)
+    Hf = np.where(fin, data.H_obs, 0.0)
+    n = w.sum(axis=0)
+    st, stt = (w * t).sum(axis=0), (w * t * t).sum(axis=0)
+    sh, sth = Hf.sum(axis=0), (Hf * t).sum(axis=0)
+    den = n * stt - st ** 2
+    ok = (fin.sum(axis=0) >= min_epochs) & (den > 0)
+    return np.where(ok, (n * sth - st * sh) / np.where(ok, den, 1.0), np.nan)
 
 
 # ----------------------------------------------------------------------
@@ -446,7 +487,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         # There is an upper bound too: once the probe is an appreciable fraction of the tile,
         # reflect-pad leakage swamps the projected gain and the along/across ordering is
         # decided by the window rather than by the flow. A quarter of the shorter domain side
-        # is the ceiling (the PIG trunk sits 27x under it).
+        # is the ceiling; the PIG trunk probes 1120 m in a 1000-7500 m band, 6.7x under it.
         lam_min = 4.0 * max(dx, dy) * 1e3
         lam_max = 0.25 * min(nx * dx, ny * dy) * 1e3
         lam_probe = max(2.0 * H_ref, lam_min)
@@ -734,8 +775,21 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     Hg0 = np.asarray(eval_H(map_params["theta"], jnp.stack([gx, gy, jnp.full_like(gx, t0)], 1))).reshape(ny, nx)
     Hg1 = np.asarray(eval_H(map_params["theta"], jnp.stack([gx, gy, jnp.full_like(gx, t1)], 1))).reshape(ny, nx)
     trend = (Hg1 - Hg0) / max(t1 - t0, 1e-9)
-    print(f"  [bpinn] surrogate time trend dH/dt on the domain: median {np.nanmedian(trend[data.domain]):+.2f} m/yr, "
-          f"p10/p90 {np.nanpercentile(trend[data.domain], 10):+.1f}/{np.nanpercentile(trend[data.domain], 90):+.1f}", flush=True)
+    obs_trend = _observed_trend(data)
+    fit_med = float(np.nanmedian(trend[data.domain]))
+    obs_dom = obs_trend[data.domain]
+    obs_med = float(np.nanmedian(obs_dom)) if np.isfinite(obs_dom).any() else float("nan")
+    print(f"  [bpinn] surrogate time trend dH/dt on the domain: median {fit_med:+.2f} m/yr, "
+          f"p10/p90 {np.nanpercentile(trend[data.domain], 10):+.1f}/{np.nanpercentile(trend[data.domain], 90):+.1f}"
+          f"; observed per-pixel median {obs_med:+.2f} m/yr", flush=True)
+    if np.isfinite(obs_med) and abs(obs_med) > 0 and abs(fit_med) < 0.2 * abs(obs_med):
+        warnings.warn(
+            f"B-PINN surrogate may have collapsed to a static field: fitted dH/dt median "
+            f"{fit_med:+.3f} m/yr is under 20% of the observed {obs_med:+.3f} m/yr. The physics "
+            f"residual is probably over-weighted -- raise sigma_r_myr (currently "
+            f"{cfg.sigma_r_myr:g}) or lower n_col_slices (currently {cfg.n_col_slices}). The melt "
+            f"map returned is then just the steady budget of the base field.",
+            RuntimeWarning, stacklevel=2)
     S = np.stack(samples)
     if cfg.transfer:
         pk = np.asarray(jax.jit(apparent_many)(map_params["theta"], t_epochs))   # (K, ny, nx), sequential
@@ -751,4 +805,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     obs_rms = float(np.sqrt(np.mean((pred - np.asarray(obs_H)) ** 2)))
     print(f"  [bpinn] MAP surrogate fits the observations at rms {obs_rms:.2f} m; {S.shape[0]} posterior samples", flush=True)
     return BPINNResult(S.mean(0), S.std(0) if S.shape[0] > 1 else np.zeros_like(map_melt), S, map_melt,
-                       obs_rms, map_hist, cfg, {"n_obs": int(N_obs), "n_col_nominal": int(N_col), "trend": trend})
+                       obs_rms, map_hist, cfg,
+                       {"n_obs": int(N_obs), "n_col_nominal": int(N_col), "trend": trend,
+                        "obs_trend": obs_trend, "trend_median_myr": fit_med,
+                        "obs_trend_median_myr": obs_med})
