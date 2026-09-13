@@ -94,11 +94,13 @@ def main() -> int:
                     help="refer the mean thickness feeding the divergence to one epoch")
     ap.add_argument("--epoch-rate-sigma-px", type=float, default=2.0)
     ap.add_argument("--out-suffix", default="")
+    ap.add_argument("--tag", default="is2ctempo_sheltilt",
+                    help="stack/mask tag (pig_stack_250m_<tag>, pig_min_extent_250m_<tag>)")
     args = ap.parse_args()
 
     t00 = time.time()
-    stack = load_stack("pig_stack_250m_is2ctempo_sheltilt")
-    floating = apply_min_extent(load_floating_mask(stack), "_250m_is2ctempo_sheltilt",
+    stack = load_stack(f"pig_stack_250m_{args.tag}")
+    floating = apply_min_extent(load_floating_mask(stack), f"_250m_{args.tag}",
                                 str(config.START_TIME), str(config.END_TIME))
     stack = stack.where(floating)
     vx, vy, vel_source = load_velocity_on_grid(stack)
