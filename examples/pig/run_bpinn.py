@@ -126,11 +126,15 @@ def main() -> int:
             ax.set_title(f"{name}\n{flux(m):.1f} Gt/yr like-for-like, accretion {(m[common] > 2).mean()*100:.0f}%", fontsize=10)
         ax.set_xticks([])
         ax.set_yticks([])
+    # 4 melt panels + 2 difference panels do not partition by row: monolithic v2 sits at
+    # axs[1, 0], so each colorbar spans its own panels rather than a whole row.
+    melt_axes = axs[0].tolist() + [axs[1, 0]]
+    diff_axes = [axs[1, 1], axs[1, 2]]
     try:
-        add_melt_colorbar(fig, im, ax=axs[0].tolist(), shrink=0.8, pad=0.01, label="ḃ (m ice a⁻¹), negative = melt")
+        add_melt_colorbar(fig, im, ax=melt_axes, shrink=0.8, pad=0.01, label="ḃ (m ice a⁻¹), negative = melt")
     except Exception:
-        fig.colorbar(im, ax=axs[0].tolist(), shrink=0.8)
-    fig.colorbar(imd, ax=axs[1].tolist(), shrink=0.8, pad=0.01, label="Δ (m a⁻¹, ±100)")
+        fig.colorbar(im, ax=melt_axes, shrink=0.8)
+    fig.colorbar(imd, ax=diff_axes, shrink=0.8, pad=0.01, label="Δ (m a⁻¹, ±100)")
     fig.suptitle(f"PIG trunk {args.tag} ({args.half}): B-PINN {'with' if not args.no_transfer else 'without'} bridging transfer "
                  f"(η {args.eta:.0e}), {res.samples.shape[0]} sample(s), surrogate obs rms {res.obs_rms_m:.1f} m", fontsize=11)
     fig.savefig(str(stem) + ".png", dpi=150)

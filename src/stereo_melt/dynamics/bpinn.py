@@ -127,8 +127,9 @@ melt (0.06 at 2H, 0.34 at 3H on the PIGREAL twin, 2026-09-12), which is why
 it matched the Eulerian ceiling there.
 
 JAX, optax and blackjax are imported lazily; the module imports without them.
-Validate on the DEM-stack twins (truth known) before any real basin:
-``examples/elmer_synth/scripts/run_bpinn_twin.py``.
+Validate on the DEM-stack twins (truth known) before any real basin: see
+``examples/elmer_synth/scripts/run_bpinn_twin.py``, the twin validation driver
+committed alongside this module.
 """
 from __future__ import annotations
 
@@ -138,6 +139,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 __all__ = ["BPINNConfig", "BPINNData", "BPINNResult", "prepare_bpinn_data", "fit_bpinn"]
+
+# Epochs a pixel needs before its observed dH/dt is trusted as a collapse yardstick.
+MIN_TREND_EPOCHS = 5
 
 
 @dataclass
@@ -279,7 +283,7 @@ def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
                       "vt_yr": None if vt_yr is None else np.asarray(vt_yr, float)})
 
 
-def _observed_trend(data: BPINNData, min_epochs: int = 5) -> np.ndarray:
+def _observed_trend(data: BPINNData, min_epochs: int = MIN_TREND_EPOCHS) -> np.ndarray:
     """Per-pixel least-squares dH/dt (m/yr) of the observations themselves.
 
     The independent yardstick for the surrogate's fitted trend: a collapsed
@@ -542,9 +546,12 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
 
         a_along, a_across = _probe_gain(along_hat, lam_probe), _probe_gain(across_hat, lam_probe)
         assert_aniso = not unresolved and aniso > aniso_margin
-        if unresolved:
-            gate_note = (f" ({lam_probe:.0f} m probe is outside this grid's usable "
-                         f"{lam_min:.0f}-{lam_max:.0f} m band: logged, not asserted)")
+        if unresolved and 2.0 * H_ref < lam_min:
+            gate_note = (f" (2H = {2 * H_ref:.0f} m is below this grid's {lam_min:.0f} m probe "
+                         f"floor, so the probe was raised to it: logged, not asserted)")
+        elif unresolved:
+            gate_note = (f" ({lam_probe:.0f} m probe is above this grid's {lam_max:.0f} m "
+                         f"ceiling: logged, not asserted)")
         elif not assert_aniso:
             gate_note = (f" (predicted anisotropy {aniso * 100:.1f}% is under the "
                          f"{aniso_margin * 100:.0f}% margin: logged, not asserted)")
@@ -776,19 +783,28 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     Hg1 = np.asarray(eval_H(map_params["theta"], jnp.stack([gx, gy, jnp.full_like(gx, t1)], 1))).reshape(ny, nx)
     trend = (Hg1 - Hg0) / max(t1 - t0, 1e-9)
     obs_trend = _observed_trend(data)
-    fit_med = float(np.nanmedian(trend[data.domain]))
-    obs_dom = obs_trend[data.domain]
-    obs_med = float(np.nanmedian(obs_dom)) if np.isfinite(obs_dom).any() else float("nan")
-    print(f"  [bpinn] surrogate time trend dH/dt on the domain: median {fit_med:+.2f} m/yr, "
+    # The observed trend only exists where a pixel has enough epochs, and those pixels are
+    # not a random sample of the domain -- they cluster where strips repeatedly overlap, which
+    # on a trunk is also where thinning is fastest. Comparing a domain-wide fitted median
+    # against that subset's observed median would flag healthy fits as collapsed, so the
+    # ratio is taken over the subset on both sides.
+    cmp_px = data.domain & np.isfinite(obs_trend)
+    n_cmp = int(cmp_px.sum())
+    dom_med = float(np.nanmedian(trend[data.domain]))
+    fit_med = float(np.nanmedian(trend[cmp_px])) if n_cmp else float("nan")
+    obs_med = float(np.nanmedian(obs_trend[cmp_px])) if n_cmp else float("nan")
+    print(f"  [bpinn] surrogate time trend dH/dt on the domain: median {dom_med:+.2f} m/yr, "
           f"p10/p90 {np.nanpercentile(trend[data.domain], 10):+.1f}/{np.nanpercentile(trend[data.domain], 90):+.1f}"
-          f"; observed per-pixel median {obs_med:+.2f} m/yr", flush=True)
-    if np.isfinite(obs_med) and abs(obs_med) > 0 and abs(fit_med) < 0.2 * abs(obs_med):
+          f"; over the {n_cmp} px with >= {MIN_TREND_EPOCHS} epochs: fitted {fit_med:+.2f} vs "
+          f"observed {obs_med:+.2f} m/yr", flush=True)
+    if np.isfinite(obs_med) and np.isfinite(fit_med) and abs(obs_med) > 0 and abs(fit_med) < 0.2 * abs(obs_med):
         warnings.warn(
-            f"B-PINN surrogate may have collapsed to a static field: fitted dH/dt median "
-            f"{fit_med:+.3f} m/yr is under 20% of the observed {obs_med:+.3f} m/yr. The physics "
-            f"residual is probably over-weighted -- raise sigma_r_myr (currently "
-            f"{cfg.sigma_r_myr:g}) or lower n_col_slices (currently {cfg.n_col_slices}). The melt "
-            f"map returned is then just the steady budget of the base field.",
+            f"B-PINN surrogate may have collapsed to a static field: over the {n_cmp} domain px "
+            f"with >= {MIN_TREND_EPOCHS} epochs, the fitted dH/dt median {fit_med:+.3f} m/yr is "
+            f"under 20% of the observed {obs_med:+.3f} m/yr. The physics residual is probably "
+            f"over-weighted -- raise sigma_r_myr (currently {cfg.sigma_r_myr:g}) or lower "
+            f"n_col_slices (currently {cfg.n_col_slices}). The melt map returned is then just "
+            f"the steady budget of the base field.",
             RuntimeWarning, stacklevel=2)
     S = np.stack(samples)
     if cfg.transfer:
@@ -808,4 +824,5 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                        obs_rms, map_hist, cfg,
                        {"n_obs": int(N_obs), "n_col_nominal": int(N_col), "trend": trend,
                         "obs_trend": obs_trend, "trend_median_myr": fit_med,
-                        "obs_trend_median_myr": obs_med})
+                        "obs_trend_median_myr": obs_med,
+                        "trend_median_domain_myr": dom_med, "n_trend_cmp_px": n_cmp})
