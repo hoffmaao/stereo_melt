@@ -126,53 +126,32 @@ def provenance(ds, var):
     return int(ce), (None if vel is None else str(vel))
 
 
-_BRIDGING_NAME = re.compile(
-    r"^pig_melt_bridging_\d+m_(.+)_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.nc$")
-_NOISE_FLOOR_NAME = re.compile(r"^pig_noise_floor_\d+m_(.+)\.nc$")
+_PRODUCT_NAME = re.compile(r"^pig_(?:melt_bridging|noise_floor)_\d+m_(.+)\.nc$")
 
 
-def _undouble(tag):
-    """Collapse the ``<t>_<t>...`` a run whose out-suffix repeated the tag wrote."""
-    parts = tag.split("_")
-    for i in range(1, len(parts)):
-        head, rest = "_".join(parts[:i]), "_".join(parts[i:])
-        if rest == head or rest.startswith(head + "_"):
-            return rest
-    return tag
+def product_tag(ds):
+    """The stack/mask tag a product was solved from, or ``None`` if unknowable.
 
-
-def product_tag(ds, suffix=""):
-    """``(tag, authoritative)``: the stack/mask a product was solved from.
-
-    A stamped ``tag`` attr is authoritative, and so is a bridging product's
-    name, where the date range delimits the tag. A noise-floor file written
-    before that attr existed is read from the name it was opened under --
-    never from the tag the caller asked for, which would only compare a
-    request against itself -- and that reading is NOT authoritative: the name
-    concatenates the tag and the run's ``--out-suffix`` with no separator, so
-    ``suffix`` (the variant the caller composed the name with) is stripped and
-    what remains is an inference. Returns ``(None, False)`` when the product
-    is unnamed, e.g. built in memory.
+    A stamped ``tag`` attr settles it, and every product written since the
+    stack became selectable carries one. A file from before that could only
+    have come from the canon stack -- ``run_noise_floor`` loaded it by name --
+    so a name that starts with ``CANON_TAG`` is canon, whatever the run's
+    ``--out-suffix`` appended after it. The name is never parsed for any other
+    tag: it concatenates the tag and the out-suffix with no separator, so
+    ``..._q`` (a quarters run of the canon stack) and ``..._qcey`` (were it a
+    different stack) are indistinguishable, and guessing would refuse matched
+    pairs as readily as it accepted mismatched ones.
     """
     tag = ds.attrs.get("tag")
     if tag is not None:
-        return str(tag), True
+        return str(tag)
     src = ds.encoding.get("source")
-    name = str(src).rsplit("/", 1)[-1] if src else ""
-    m = _BRIDGING_NAME.match(name)
-    if m:
-        return m.group(1), True
-    m = _NOISE_FLOOR_NAME.match(name)
-    if m is None:
-        return None, False
-    tag = _undouble(m.group(1))
-    if suffix and tag.endswith(suffix) and len(tag) > len(suffix):
-        tag = tag[:-len(suffix)]
-    return tag, False
+    m = _PRODUCT_NAME.match(str(src).rsplit("/", 1)[-1] if src else "")
+    return CANON_TAG if m and m.group(1).startswith(CANON_TAG) else None
 
 
 def check_provenance(full, half, pairs, *, full_name="full product",
-                     purpose="the noise floor", full_suffix="", half_suffix="",
+                     purpose="the noise floor",
                      hint="re-solve the full product with the halves' settings (or "
                           "pick a --half-suffix / --full-var-suffix pair that match)"):
     """Refuse to compare halves and a full product solved with different instruments.
@@ -186,10 +165,8 @@ def check_provenance(full, half, pairs, *, full_name="full product",
     The stack/mask ``tag`` is the same kind of divergence and is checked the
     same way: two tags can share a velocity string and still be different
     stacks, so halves from one tag say nothing about a product from another.
-    ``full_suffix``/``half_suffix`` are the ``--out-suffix`` variants the
-    caller composed each filename with, needed only to read the tag off a file
-    that predates the attr; when neither side can state its tag authoritatively
-    the check says so rather than passing quietly. Returns the agreed
+    A side whose tag :func:`product_tag` cannot establish is reported as
+    unverified rather than passed over quietly. Returns the agreed
     ``(common_epoch, velocity)`` for labelling the output.
 
     ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
@@ -212,8 +189,8 @@ def check_provenance(full, half, pairs, *, full_name="full product",
                 problems.append(f"{label}: halves {hk} velocity={hvel!r} "
                                 f"vs {full_name} {fk} velocity={fvel!r}")
             agreed.add((fce, fvel))
-    (ftag, fauth), (htag, hauth) = product_tag(full, full_suffix), product_tag(half, half_suffix)
-    if ftag is None or htag is None or not (fauth or hauth):
+    ftag, htag = product_tag(full), product_tag(half)
+    if ftag is None or htag is None:
         print(f"  WARNING tag provenance missing (halves {htag!r}, {full_name} {ftag!r}); "
               "cannot verify the stack/mask tag", flush=True)
     elif ftag != htag:
@@ -270,7 +247,7 @@ def main() -> int:
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
-    prov = check_provenance(full, half, pairs, half_suffix=args.half_suffix)
+    prov = check_provenance(full, half, pairs)
     prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
     print(f"  provenance (halves == full): {prov_label}", flush=True)
     suffix = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
@@ -388,7 +365,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, su
     u = xr.DataArray(np.hypot(z["u_model_x"], z["u_model_y"]), dims=("y", "x"),
                      coords={"y": z["y"], "x": z["x"]})
     u = u.reindex_like(full.eulerian, method="nearest").values[r0:r1, c0:c1]
-    st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
+    st = load_stack(f"pig_stack_250m_{args.tag}")
     H = freeboard_to_thickness(st.mean("time", skipna=True)).values[r0:r1, c0:c1]
 
     regions = [("fast trunk (|u| ≥ 1 km/yr)", mask & np.isfinite(u) & (u >= 1000.0), "#d62728"),

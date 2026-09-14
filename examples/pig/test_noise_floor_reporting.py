@@ -20,10 +20,10 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     passed; matching provenance is returned for labelling; a velocity
     mismatch is refused; a missing velocity attr only warns. Halves solved
     from another stack/mask ``tag`` are refused even when the velocity
-    string is identical; halves predating that attr are judged by the name
-    they were opened under, never by the tag the caller asked for, with the
-    run's variant out-suffix stripped; and a comparison neither side can
-    vouch for warns rather than passing quietly.
+    string is identical; a product predating that attr is the canon stack
+    whatever its ``--out-suffix`` appended to the name, so a ``_q`` quarters
+    file still compares against freshly tagged halves; and a name no rule
+    covers warns rather than being guessed at or passed over quietly.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -161,30 +161,34 @@ def main() -> int:
           and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
     check("matching tags are accepted",
           check_provenance(full_t, half_t, pair_def) == [(0, V)])
-    def legacy_half(name):
-        """Halves predating the tag attr: the tag is only in the file's name."""
-        h = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 0})
-        h.encoding["source"] = f"/processed/{name}"
-        return h
+    def named(names, name, **attrs):
+        """A product predating the tag attr: identified only by its filename."""
+        d = ds(names, attrs={"velocity": V, "common_epoch": 0, **attrs})
+        d.encoding["source"] = f"/processed/{name}"
+        return d
 
-    with contextlib.redirect_stdout(io.StringIO()):
-        agreed_t = check_provenance(
-            full_t, legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt.nc"), pair_def)
-    check("halves predating the tag attr are read from their own filename",
-          agreed_t == [(0, V)], f"{agreed_t}")
-    err, _ = system_exit(check_provenance, full_t,
-                         legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt_"
-                                     "is2ctempo_sheltilt_qcey.nc"), pair_def,
-                         half_suffix="_is2ctempo_sheltilt_qcey")
-    check("a legacy doubled-tag name resolves to the stack it was solved from, "
-          "not to the tag the caller asked for",
-          err is not None and "tag='is2ctempo_sheltilt_qcey'" in err, f"SystemExit: {err!s:.60}")
-    with contextlib.redirect_stdout(io.StringIO()):
-        agreed_ce = check_provenance(
-            full_t, legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt_ce.nc"),
-            pair_def, half_suffix="_ce")
-    check("a variant out-suffix is stripped, so --half-suffix _ce still compares",
-          agreed_ce == [(0, V)], f"{agreed_ce}")
+    legacy = {s: named(["eulerian_A", "eulerian_B"],
+                       f"pig_noise_floor_250m_is2ctempo_sheltilt{s}.nc")
+              for s in ("", "_ce", "_q", "_is2ctempo_sheltilt_qcey")}
+    for suffix, h in legacy.items():
+        with contextlib.redirect_stdout(io.StringIO()):
+            agreed_l = check_provenance(full_t, h, pair_def)
+        check(f"a pre-tag half named ...{suffix or '<none>'} is the canon stack "
+              "whatever its out-suffix says", agreed_l == [(0, V)], f"{agreed_l}")
+    quarters = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    ladder = [("ladder", "eulerian_Q0", "eulerian_A", "eulerian_B", None)]
+    err, _ = system_exit(check_provenance, quarters, half_t, ladder, full_name="quarters")
+    check("pre-tag quarters vs freshly tagged halves of the same stack are compared, "
+          "not refused over the '_q' out-suffix", err is None, f"SystemExit: {err!s:.60}")
+    full_qcey = ds(["eulerian"], attrs={"velocity": V, "tag": "is2ctempo_sheltilt_qcey"})
+    err, _ = system_exit(check_provenance, full_qcey, legacy[""], pair_def)
+    check("a pre-tag half against another stack's product is still refused",
+          err is not None and "instrument mismatch" in err, f"SystemExit: {err!s:.60}")
+    err, out = system_exit(check_provenance, full_t,
+                           named(["eulerian_A", "eulerian_B"],
+                                 "pig_noise_floor_250m_othertag.nc"), pair_def)
+    check("a name that is not the canon stack is not guessed at, it warns",
+          err is None and "cannot verify the stack/mask tag" in out)
     err, out = system_exit(check_provenance, ds(["eulerian"], attrs={"velocity": V}),
                            half_nov, pair_def)
     check("neither side able to state its tag warns instead of passing quietly",
