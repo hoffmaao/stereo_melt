@@ -58,10 +58,23 @@ def geometry_bins(H, vx, vy, domain, n_bins, blend_px, extra=None):
     """Bins on ``(H, u_x, u_y[, extra])`` over ``domain`` with partition-of-unity weights.
 
     Returns ``(geom, W)``: ``geom`` is a list of per-bin centroid tuples in
-    physical units and ``W`` is ``(n_bins, ny, nx)`` and sums to one everywhere.
+    physical units and ``W`` is ``(len(geom), ny, nx)`` and sums to one
+    everywhere. Every centroid is a mean over the VALID CELLS OF ``domain`` --
+    off-domain pixels (grounded ice, open ocean on a shelf window) would pull a
+    bin's operator away from the ice it is applied to -- which is not the same
+    quantity as a whole-stack summary such as the B-PINN's ``data.H0``; see
+    :func:`stereo_melt.dynamics.bpinn.fit_bpinn` for why that difference is kept
+    and how the collapsed case is reconciled with it.
+
     Uniform geometry (to 1e-6 relative) collapses to ONE bin so a single global
     operator is reproduced exactly, not to round-off; ``n_bins <= 1`` is the
-    domain mean. Same construction as ``budget_bridging_melt_rate(n_bins=...)``.
+    domain mean. The returned bin count is the EFFECTIVE one: a cluster with no
+    members, or whose centroid duplicates another (which the deterministic
+    quantile seeding produces when one geometry dominates the domain), is
+    dropped or merged rather than returned as a dead bin -- it would build a
+    duplicate or unused operator and cost a full FFT per epoch per optimiser
+    step in the B-PINN hot loop. Same construction as
+    ``budget_bridging_melt_rate(n_bins=...)``.
     """
     H = np.asarray(H, float)
     ny, nx = H.shape
@@ -81,6 +94,18 @@ def geometry_bins(H, vx, vy, domain, n_bins, blend_px, extra=None):
         lab, cent = np.zeros(len(feats), int), feats.mean(0, keepdims=True)
     else:
         lab, cent = kmeans_geometry(feats, nb)
+        keep: list[int] = []
+        for b in range(nb):
+            dup = next((k for k in keep
+                        if np.all(np.abs(cent[b] - cent[k]) <= 1e-6 * scale)), None)
+            if dup is not None:
+                lab[lab == b] = dup
+            elif (lab == b).any():
+                keep.append(b)
+        if len(keep) < nb:
+            remap = np.full(nb, -1, int)
+            remap[keep] = np.arange(len(keep))
+            lab, cent, nb = remap[lab], cent[keep], len(keep)
     W = np.zeros((nb, ny, nx))
     geom = []
     for b in range(nb):

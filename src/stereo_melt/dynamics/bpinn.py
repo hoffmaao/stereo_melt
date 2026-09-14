@@ -65,7 +65,8 @@ the field is reflect-padded to twice its size and multiplied in the FFT domain
 by :math:`M(k) = 1 + (T(k) - 1)\,(1 - L(k))` — ``T`` from
 :func:`~stereo_melt.dynamics.bridging_restoration._bridging_transfer` (the
 same advected Newtonian transfer the monolithic and restored-budget solvers
-use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``ux_ref_myr``/``uy_ref_myr``)
+use; ``eta_bar``, ``alpha_scale`` and, for the single-geometry operator only,
+``H_ref_m``, ``ux_ref_myr``/``uy_ref_myr``)
 and ``L`` a
 Gaussian low-pass at ``transfer_bg_sigma_H`` ice thicknesses that keeps the
 operator at unity on the long wavelengths where ``T`` is unity anyway — then
@@ -80,8 +81,20 @@ solver's ``n_bins`` construction), one ``M_b`` is built and checked per bin from
 its centroid, each is applied to the whole padded field, and the responses are
 blended with Gaussian (``blend_px``) partition-of-unity weights
 (:func:`transfer_observation_operator`, :func:`apply_blended_operator` are the
-numpy reference of that path). ``n_bins=1`` (default) is the single
-domain-mean geometry.
+numpy reference of that path; :func:`local_bin_geometry` resolves which
+geometries get built). ``n_bins=1`` (default) is the single domain-mean
+geometry.
+
+The local bins are read off the data, so ``n_bins > 1`` is mutually exclusive
+with the ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` overrides: they would never
+reach an operator, so :class:`BPINNConfig` rejects the pair up front rather
+than dropping them silently, and the reference-velocity line is not logged on
+the local path. The two paths also define the reference THICKNESS differently
+— ``n_bins=1`` uses ``data.H0``, the median of the whole unmasked stack, while
+a bin centroid is a mean over ``data.domain`` of the per-pixel temporal median
+— so when the binning collapses to one bin the single-geometry reference is
+used instead of that centroid and the reduction to ``n_bins=1`` is exact
+rather than merely close (:func:`fit_bpinn` documents both definitions).
 
 ``T`` is strongly anisotropic about the flow axis, so the reference velocity is
 passed as COMPONENTS, defaulting to the tile mean of ``data.vx``/``data.vy``
@@ -180,6 +193,11 @@ class BPINNConfig:
        observed median is under ``STEADY_TREND_MYR``, as on the steady twins;
     2. ``transfer=False`` must change the answer. If it does not, the observation
        operator is not informing the fit.
+
+    ``n_bins > 1`` (the LOCAL observation operator) takes its per-bin reference
+    geometry from the data, so it is mutually exclusive with the explicit
+    ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` overrides; the combination raises
+    rather than silently discarding them.
     """
 
     hidden: int = 128
@@ -218,12 +236,25 @@ class BPINNConfig:
     eta_bar: float = 1e14
     alpha_scale: float = 0.34
     transfer_bg_sigma_H: float = 3.0
-    n_bins: int = 1
-    blend_px: float = 8.0
+    n_bins: int = 1              # > 1: LOCAL operator, one geometry per (H, ux, uy) bin
+    blend_px: float = 8.0        # Gaussian blend width (px) of the bin weights
     batch_epochs: int = 16
+    # Single reference geometry of the transfer, None = whole-stack median thickness
+    # (``data.H0``) and domain-mean velocity components. Mutually exclusive with
+    # n_bins > 1, which reads every bin's geometry off the data instead.
     H_ref_m: float | None = None
     ux_ref_myr: float | None = None
     uy_ref_myr: float | None = None
+
+    def __post_init__(self):
+        over = [n for n, v in (("H_ref_m", self.H_ref_m), ("ux_ref_myr", self.ux_ref_myr),
+                               ("uy_ref_myr", self.uy_ref_myr)) if v is not None]
+        if int(self.n_bins) > 1 and over:
+            raise ValueError(
+                f"n_bins={int(self.n_bins)} reads the reference geometry off the data, one bin at a "
+                f"time, so the override(s) {', '.join(over)} would never reach an operator: the two "
+                f"are mutually exclusive. Use n_bins=1 to set the reference geometry by hand, or "
+                f"drop the override(s) to bin it locally.")
 
 
 @dataclass
@@ -291,6 +322,29 @@ def apply_blended_operator(M, W, field):
     spec = np.fft.fft2(np.pad(field, ((0, ny), (0, nx)), mode="reflect"))
     outs = np.real(np.fft.ifft2(spec[None] * M))[:, :ny, :nx]
     return np.sum(W * outs, axis=0)
+
+
+def local_bin_geometry(H_pix, vx_myr, vy_myr, domain, n_bins, blend_px, ref_geom):
+    """``(bin_geom, W)``: the geometries the observation operator is built from, and their weights.
+
+    ``n_bins <= 1`` is the single ``ref_geom`` under a weight of ones. Otherwise
+    :func:`~stereo_melt.dynamics.geometry_bins.geometry_bins` bins
+    ``(H, u_x, u_y)`` over ``domain`` -- ``H_pix`` the per-pixel temporal median
+    thickness, the velocities in m/yr -- and returns one centroid per EFFECTIVE
+    bin. If that binning collapses to ONE bin (uniform geometry, or duplicate
+    bins merged away) ``ref_geom`` is used in place of the lone centroid, so the
+    local path reduces EXACTLY to the ``n_bins=1`` operator instead of to a
+    differently-defined mean thickness; :func:`fit_bpinn` documents why the two
+    definitions differ.
+    """
+    ny, nx = np.asarray(domain).shape
+    if int(n_bins) <= 1:
+        return [tuple(float(c) for c in ref_geom)], np.ones((1, ny, nx))
+    from .geometry_bins import geometry_bins
+    geom, W = geometry_bins(H_pix, vx_myr, vy_myr, domain, int(n_bins), blend_px)
+    if len(geom) == 1:
+        geom = [tuple(float(c) for c in ref_geom)]
+    return geom, W
 
 
 def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
@@ -399,7 +453,25 @@ def _features(B, u):
 
 
 def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BPINNResult:
-    """Fit the space-time B-PINN; see the module docstring for the model."""
+    """Fit the space-time B-PINN; see the module docstring for the model.
+
+    Reference geometry of the bridging observation operator (``transfer=True``).
+    With ``n_bins=1`` it is one ``(H_ref, ux_ref, uy_ref)``: ``H_ref`` is
+    ``cfg.H_ref_m`` or ``data.H0``, the median of the WHOLE unmasked stack, and
+    the velocity is ``cfg.ux_ref_myr``/``cfg.uy_ref_myr`` or the ``data.domain``
+    mean of the time-averaged velocity. With ``n_bins > 1`` those overrides are
+    rejected by :class:`BPINNConfig` and each bin's geometry is instead a k-means
+    centroid over ``data.domain`` of the per-pixel temporal median thickness and
+    the mean velocity components. The two thickness definitions differ on
+    purpose: ``data.H0`` is what every recorded single-geometry number was
+    produced with and stays bit-identical, while a bin centroid has to be
+    domain-restricted or an off-domain pixel (grounded ice, open ocean) would
+    pull that bin's operator away from the ice it is applied to. Because they do
+    differ, a local run whose binning collapses to ONE bin falls back to the
+    single-geometry reference (:func:`local_bin_geometry`), so ``n_bins > 1`` on
+    uniform geometry reproduces the ``n_bins=1`` operator exactly rather than
+    approximately.
+    """
     import jax
     import jax.numpy as jnp
     import optax
@@ -502,6 +574,10 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     # ---- bridging transfer as the observation operator (optional) ----
     if cfg.transfer:
         from .bridging_restoration import _bridging_transfer
+        # n_bins > 1 bins the geometry off the data; BPINNConfig has already rejected the
+        # overrides, so H_ref/ux_ref/uy_ref here are the single-geometry reference and are
+        # used only if the binning collapses to one bin (see local_bin_geometry).
+        is_local = int(cfg.n_bins) > 1
         H_ref = cfg.H_ref_m if cfg.H_ref_m is not None else float(data.H0)
         if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
             if not data.domain.any():
@@ -513,7 +589,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
             ux_d = uy_d = 0.0
         ux_ref = float(cfg.ux_ref_myr) if cfg.ux_ref_myr is not None else ux_d
         uy_ref = float(cfg.uy_ref_myr) if cfg.uy_ref_myr is not None else uy_d
-        if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
+        if not is_local and (cfg.ux_ref_myr is None or cfg.uy_ref_myr is None):
             how = ["override" if c is not None else "domain mean" for c
                    in (cfg.ux_ref_myr, cfg.uy_ref_myr)]
             print(f"  [bpinn] reference velocity = (ux {ux_ref:+.0f} [{how[0]}], "
@@ -650,15 +726,16 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
 
         # ---- local operator: bins on (H, u_x, u_y) with partition-of-unity blending (the
         # monolithic solver's n_bins/blend_px construction); n_bins=1 is the reference geometry
-        if int(cfg.n_bins) <= 1:
-            bin_geom = [(H_ref, ux_ref, uy_ref)]
-            W_np = np.ones((1, ny, nx))
-        else:
-            from .geometry_bins import geometry_bins
-            H_pix = np.nanmedian(data.H_obs, axis=0)
-            bin_geom, W_np = geometry_bins(H_pix, data.vx.mean(axis=0) * 1e3, data.vy.mean(axis=0) * 1e3,
-                                           data.domain, cfg.n_bins, cfg.blend_px)
-            print(f"  [bpinn] local transfer: {len(bin_geom)} (H, ux, uy) bins, blend {cfg.blend_px:g} px", flush=True)
+        bin_geom, W_np = local_bin_geometry(
+            np.nanmedian(data.H_obs, axis=0) if is_local else None,
+            data.vx.mean(axis=0) * 1e3, data.vy.mean(axis=0) * 1e3,
+            data.domain, cfg.n_bins, cfg.blend_px, (H_ref, ux_ref, uy_ref))
+        if is_local:
+            collapsed = ("" if len(bin_geom) > 1 else
+                         "; uniform geometry, so the single reference geometry is used and this "
+                         "run reduces exactly to n_bins=1")
+            print(f"  [bpinn] local transfer: {len(bin_geom)} (H, ux, uy) bins, "
+                  f"blend {cfg.blend_px:g} px{collapsed}", flush=True)
         M_list = []
         for bi, (Hb, uxb, uyb) in enumerate(bin_geom):
             lab_b = f" bin {bi} (area {W_np[bi].mean():.2f})" if len(bin_geom) > 1 else ""

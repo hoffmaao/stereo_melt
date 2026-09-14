@@ -7,10 +7,15 @@ solver's ``n_bins``), builds one observation operator per bin
 (:func:`stereo_melt.dynamics.bpinn.transfer_observation_operator`, the physical
 flow's y component mirrored into the FFT lattice because ``y`` descends) and
 blends the per-bin responses (:func:`stereo_melt.dynamics.bpinn.apply_blended_operator`).
-Rungs, on the numpy reference implementation the JAX path mirrors line for line:
+Which geometries get built is :func:`stereo_melt.dynamics.bpinn.local_bin_geometry`,
+the same resolution ``fit_bpinn`` uses. Rungs, on the numpy reference
+implementation the JAX path mirrors line for line:
 
 B1  REDUCTION. One bin reproduces the global operator exactly, and uniform
-    geometry asked for 4 bins collapses to one (max |diff| == 0).
+    geometry asked for 4 bins collapses to one (max |diff| == 0) -- collapsing
+    onto the SINGLE-GEOMETRY reference, not onto the bin centroid, because the
+    two define the reference thickness differently (whole-stack median vs
+    domain-restricted mean), so the reduction is exact and not merely close.
 B2  IT VARIES. A shelf whose left half flows +x and right half flows -y gets
     two bins whose interiors (beyond the blend width) equal their own global
     operator EXACTLY, while the two operators differ by a real margin.
@@ -19,6 +24,16 @@ B3  ORIENTATION. Rotating the field and the flow by 90 degrees (square
     flow is at least 10x smaller than with the y sign flipped.
 B4  PARTITION OF UNITY. The bin weights sum to one everywhere, and every
     valid cell's own bin carries the largest weight far from the seams.
+
+B5  EFFECTIVE BINS. A field of one dominant geometry plus a small anomalous
+    patch returns no duplicate centroid and no zero-weight bin: a dead bin
+    would build a duplicate or unused operator and cost a full FFT per epoch
+    per optimiser step in the B-PINN hot loop, and would overstate the logged
+    bin count.
+
+B6  MUTUALLY EXCLUSIVE. ``BPINNConfig(n_bins > 1)`` with an explicit
+    ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` raises: the local bins come from
+    the data, so an override could never reach an operator.
 """
 from __future__ import annotations
 
@@ -29,7 +44,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from stereo_melt.dynamics.bpinn import apply_blended_operator, transfer_observation_operator  # noqa: E402
+from stereo_melt.dynamics.bpinn import (  # noqa: E402
+    BPINNConfig, apply_blended_operator, local_bin_geometry, transfer_observation_operator)
 from stereo_melt.dynamics.geometry_bins import geometry_bins  # noqa: E402
 
 ny, nx, dx = 128, 160, 100.0
@@ -46,8 +62,9 @@ def M_for(Hb, ux, uy, ny_=ny, nx_=nx):
     return transfer_observation_operator(ny_, nx_, dx, dx, Hb, ux, uy, eta, alpha, bg)[1]
 
 
-def local(H, vx, vy, n_bins, blend_px, f):
-    geom, W = geometry_bins(H, vx, vy, dom, n_bins, blend_px)
+def local(H, vx, vy, n_bins, blend_px, f, ref_geom=None):
+    geom, W = local_bin_geometry(H, vx, vy, dom, n_bins, blend_px,
+                                 (H0, 1500.0, -800.0) if ref_geom is None else ref_geom)
     M = np.stack([M_for(*g) for g in geom])
     return apply_blended_operator(M, W, f), geom, W
 
@@ -60,7 +77,18 @@ out4, geom4, _ = local(Hm, vx, vy, 4, 8, field)
 d1, d4 = np.abs(out1 - ref).max(), np.abs(out4 - ref).max()
 assert len(geom1) == 1 and len(geom4) == 1, (len(geom1), len(geom4))
 assert d1 == 0.0 and d4 == 0.0, (d1, d4)
-print(f"B1 PASS  one bin == global (max|diff| {d1:.1e}); uniform geometry with n_bins=4 collapses to 1 bin ({d4:.1e})")
+# The collapse must land on the SINGLE-GEOMETRY reference, which on a real window is not the
+# bin centroid: data.H0 is the whole unmasked stack's median, a centroid is a domain-restricted
+# mean. Ask for 4 bins on uniform geometry with a reference 90 m away from that centroid and
+# the one operator built must be the reference's, exactly.
+ref_off = (H0 + 90.0, 1500.0, -800.0)
+ref_b = apply_blended_operator(M_for(*ref_off), None, field)
+out_off, geom_off, _ = local(Hm, vx, vy, 4, 8, field, ref_geom=ref_off)
+assert np.abs(ref_b - ref).max() > 1.0, np.abs(ref_b - ref).max()   # the two operators do differ
+assert geom_off == [ref_off], geom_off
+assert np.abs(out_off - ref_b).max() == 0.0, np.abs(out_off - ref_b).max()
+print(f"B1 PASS  one bin == global (max|diff| {d1:.1e}); uniform geometry with n_bins=4 collapses to 1 bin ({d4:.1e}) "
+      f"onto the single-geometry reference, not the centroid ({np.abs(ref_b - ref).max():.2f} m apart)")
 
 # B2
 left = X < nx * dx / 2
@@ -95,4 +123,30 @@ own = np.where(left, left_bin, 1 - left_bin)
 far = np.abs(X - nx * dx / 2) > 20 * dx
 assert np.all(W2.argmax(0)[far] == own[far])
 print("B4 PASS  weights sum to one; every cell far from the seam is owned by its own bin")
+
+# B5
+Hd, vxd, vyd = np.full((ny, nx), H0), np.full((ny, nx), 1500.0), np.full((ny, nx), -800.0)
+patch = (slice(4, 12), slice(4, 12))
+Hd[patch], vxd[patch], vyd[patch] = 700.0, 200.0, 900.0
+geom5, W5 = geometry_bins(Hd, vxd, vyd, dom, 4, 4)
+mass = W5.sum(axis=(1, 2))
+assert np.allclose(W5.sum(0), 1.0), (W5.sum(0).min(), W5.sum(0).max())
+assert np.all(mass > 0), mass
+assert len(W5) == len(geom5), (len(W5), len(geom5))
+for a in range(len(geom5)):
+    for b in range(a + 1, len(geom5)):
+        assert not np.allclose(geom5[a], geom5[b]), (geom5[a], geom5[b])
+print(f"B5 PASS  dominant geometry + anomalous patch -> {len(geom5)} effective bin(s) of 4 asked for, "
+      f"no duplicate centroid, min weight mass {mass.min():.0f} px")
+
+# B6
+for over in ({"H_ref_m": 700.0}, {"ux_ref_myr": 1500.0}, {"uy_ref_myr": -800.0}):
+    try:
+        BPINNConfig(transfer=True, n_bins=4, **over)
+    except ValueError as exc:
+        assert next(iter(over)) in str(exc), str(exc)
+    else:
+        raise AssertionError(f"BPINNConfig(n_bins=4, {over}) was accepted")
+    BPINNConfig(transfer=True, n_bins=1, **over)        # still legal on the single-geometry path
+print("B6 PASS  n_bins > 1 rejects the H_ref_m/ux_ref_myr/uy_ref_myr overrides; n_bins=1 still takes them")
 print("gate_bpinn_local_transfer: all rungs passed")
