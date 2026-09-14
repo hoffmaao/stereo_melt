@@ -19,6 +19,13 @@ and ``--no-transfer`` must change the answer. The 2026-09-13 defaults
 collapsed. Uncertainty: ``--ensemble N`` (epoch bootstrap) gives a σ map that
 under-reads the independent half-stack σ by about 1.3-1.8x; the halves are the
 honest per-pixel σ.
+
+Every trunk number recorded so far -- the fluxes, the correlations and that σ
+ratio -- predates the transfer-orientation fixes and is a diagnostic only. The
+transfer-on runs in particular used an operator whose along/across damping was
+swapped at 2H, so repeat them with the corrected operator before quoting any of
+it. Validated numbers come from the DEM-stack twin, where the truth is known:
+``examples/elmer_synth/scripts/run_bpinn_twin.py``.
 """
 from __future__ import annotations
 
