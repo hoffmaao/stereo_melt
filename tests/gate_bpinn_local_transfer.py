@@ -26,14 +26,22 @@ B4  PARTITION OF UNITY. The bin weights sum to one everywhere, and every
     valid cell's own bin carries the largest weight far from the seams.
 
 B5  EFFECTIVE BINS. A field of one dominant geometry plus a small anomalous
-    patch returns no duplicate centroid and no zero-weight bin: a dead bin
-    would build a duplicate or unused operator and cost a full FFT per epoch
-    per optimiser step in the B-PINN hot loop, and would overstate the logged
-    bin count.
+    patch gets the patch its OWN bin, with no duplicate centroid and no
+    zero-weight bin. The quantile seeding degenerates there -- every quantile
+    of the principal-component projection lands on the dominant geometry -- so
+    this is the farthest-point re-seeding, and the run must not report itself
+    as uniform or fall back to the single reference geometry: that would hand
+    back the global operator on exactly the field localisation was asked for.
 
 B6  MUTUALLY EXCLUSIVE. ``BPINNConfig(n_bins > 1)`` with an explicit
     ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` raises: the local bins come from
     the data, so an override could never reach an operator.
+
+B7  PIXEL PITCH. ``transfer_observation_operator`` rejects a non-positive
+    ``dx_m``/``dy_m``. A negative y step (``prepare_bpinn_data``'s signed
+    ``dy``, the other same-named quantity in that module) flips ``ky`` and
+    exactly cancels the operator's own y mirror, so it would otherwise build a
+    y-mirrored operator silently.
 """
 from __future__ import annotations
 
@@ -63,8 +71,8 @@ def M_for(Hb, ux, uy, ny_=ny, nx_=nx):
 
 
 def local(H, vx, vy, n_bins, blend_px, f, ref_geom=None):
-    geom, W = local_bin_geometry(H, vx, vy, dom, n_bins, blend_px,
-                                 (H0, 1500.0, -800.0) if ref_geom is None else ref_geom)
+    geom, W, _ = local_bin_geometry(H, vx, vy, dom, n_bins, blend_px,
+                                       (H0, 1500.0, -800.0) if ref_geom is None else ref_geom)
     M = np.stack([M_for(*g) for g in geom])
     return apply_blended_operator(M, W, f), geom, W
 
@@ -126,18 +134,30 @@ print("B4 PASS  weights sum to one; every cell far from the seam is owned by its
 
 # B5
 Hd, vxd, vyd = np.full((ny, nx), H0), np.full((ny, nx), 1500.0), np.full((ny, nx), -800.0)
-patch = (slice(4, 12), slice(4, 12))
+patch = (slice(40, 56), slice(40, 56))
 Hd[patch], vxd[patch], vyd[patch] = 700.0, 200.0, 900.0
-geom5, W5 = geometry_bins(Hd, vxd, vyd, dom, 4, 4)
+geom5, W5, info5 = geometry_bins(Hd, vxd, vyd, dom, 4, 4)
 mass = W5.sum(axis=(1, 2))
 assert np.allclose(W5.sum(0), 1.0), (W5.sum(0).min(), W5.sum(0).max())
 assert np.all(mass > 0), mass
-assert len(W5) == len(geom5), (len(W5), len(geom5))
+assert len(W5) == len(geom5) == info5["effective"] == 2, (geom5, info5)
+assert info5["requested"] == 4 and not info5["uniform"] and info5["reseeded"], info5
 for a in range(len(geom5)):
     for b in range(a + 1, len(geom5)):
         assert not np.allclose(geom5[a], geom5[b]), (geom5[a], geom5[b])
-print(f"B5 PASS  dominant geometry + anomalous patch -> {len(geom5)} effective bin(s) of 4 asked for, "
-      f"no duplicate centroid, min weight mass {mass.min():.0f} px")
+pb = int(np.argmin([abs(g[0] - 700.0) for g in geom5]))
+assert np.allclose(geom5[pb], (700.0, 200.0, 900.0)), geom5[pb]
+assert np.allclose(geom5[1 - pb], (H0, 1500.0, -800.0)), geom5[1 - pb]
+w_patch = W5[pb][patch].min()
+assert w_patch > 0.0, w_patch                      # the patch carries real weight of its own bin
+assert np.all(W5.argmax(0)[46:50, 46:50] == pb), W5.argmax(0)[46:50, 46:50]
+# The same field through the B-PINN's resolution must NOT be swapped for the single reference
+# geometry: only a genuinely uniform domain earns that fallback.
+_, geom5b, _ = local(Hd, vxd, vyd, 4, 4, field, ref_geom=(H0 + 90.0, 1500.0, -800.0))
+assert len(geom5b) == 2 and sorted(geom5b) == sorted(geom5), (geom5b, geom5)
+print(f"B5 PASS  dominant geometry + anomalous patch -> {info5['effective']} of {info5['requested']} bins "
+      f"after farthest-point re-seeding; patch bin {tuple(round(c) for c in geom5[pb])} holds min weight "
+      f"{w_patch:.2f} on the patch; not reported uniform")
 
 # B6
 for over in ({"H_ref_m": 700.0}, {"ux_ref_myr": 1500.0}, {"uy_ref_myr": -800.0}):
@@ -149,4 +169,14 @@ for over in ({"H_ref_m": 700.0}, {"ux_ref_myr": 1500.0}, {"uy_ref_myr": -800.0})
         raise AssertionError(f"BPINNConfig(n_bins=4, {over}) was accepted")
     BPINNConfig(transfer=True, n_bins=1, **over)        # still legal on the single-geometry path
 print("B6 PASS  n_bins > 1 rejects the H_ref_m/ux_ref_myr/uy_ref_myr overrides; n_bins=1 still takes them")
+
+# B7
+for bad in ((dx, -dx), (-dx, dx), (dx, 0.0)):
+    try:
+        transfer_observation_operator(ny, nx, bad[0], bad[1], H0, 1500.0, -800.0, eta, alpha, bg)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"transfer_observation_operator accepted pitches {bad}")
+print("B7 PASS  a non-positive pixel pitch raises instead of silently y-mirroring the operator")
 print("gate_bpinn_local_transfer: all rungs passed")

@@ -92,9 +92,13 @@ than dropping them silently, and the reference-velocity line is not logged on
 the local path. The two paths also define the reference THICKNESS differently
 — ``n_bins=1`` uses ``data.H0``, the median of the whole unmasked stack, while
 a bin centroid is a mean over ``data.domain`` of the per-pixel temporal median
-— so when the binning collapses to one bin the single-geometry reference is
-used instead of that centroid and the reduction to ``n_bins=1`` is exact
-rather than merely close (:func:`fit_bpinn` documents both definitions).
+— so when the domain is UNIFORM (one distinct geometry) the single-geometry
+reference is used instead of that centroid and the reduction to ``n_bins=1``
+is exact rather than merely close (:func:`fit_bpinn` documents both
+definitions). A domain with real structure never falls back that way: if the
+quantile seeding degenerates on a dominant geometry the cells are re-clustered
+from farthest-point seeds so the anomalous patch gets its own bin, and the log
+reports the effective bin count against the requested one with the reason.
 
 ``T`` is strongly anisotropic about the flow axis, so the reference velocity is
 passed as COMPONENTS, defaulting to the tile mean of ``data.vx``/``data.vy``
@@ -297,7 +301,20 @@ def transfer_observation_operator(ny, nx, dx_m, dy_m, H_ref, ux_myr, uy_myr, eta
     thicknesses. ``ux_myr, uy_myr`` are the PHYSICAL flow components (m/yr, y up);
     ``y`` descends on the stacks, so the y component is mirrored into the lattice
     here -- the orientation guard in :func:`fit_bpinn` checks exactly this.
+
+    ``dx_m``/``dy_m`` are the POSITIVE pixel PITCHES in metres: ``fit_bpinn``'s
+    spacings, NOT ``prepare_bpinn_data``'s signed (negative) y step, two
+    same-named quantities of opposite sign in this module. Both the low-pass
+    below and ``_bridging_transfer`` lay their lattices out with
+    ``fftfreq(N, pitch)``, so a negative ``dy_m`` flips ``ky`` and exactly
+    cancels the mirror applied here: the operator comes out y-mirrored, with the
+    along- and across-flow damping swapped, and nothing raises. Hence the check.
     """
+    if not (float(dx_m) > 0.0 and float(dy_m) > 0.0):
+        raise ValueError(
+            f"transfer_observation_operator: dx_m and dy_m are the POSITIVE pixel pitches in "
+            f"metres, got ({dx_m}, {dy_m}). A negative y step -- prepare_bpinn_data's signed dy "
+            f"-- flips ky and silently y-mirrors the operator instead of raising.")
     from .bridging_restoration import _bridging_transfer
     Py, Px = 2 * ny, 2 * nx
     T = np.asarray(_bridging_transfer(Py, Px, dx_m, dy_m, H_ref, float(ux_myr), -float(uy_myr), eta_bar,
@@ -312,39 +329,51 @@ def transfer_observation_operator(ny, nx, dx_m, dy_m, H_ref, ux_myr, uy_myr, eta
 def apply_blended_operator(M, W, field):
     """numpy reference of the observation operator the JAX path applies per epoch:
     ``sum_b W_b * crop(ifft2(fft2(reflect_pad(field)) * M_b))``. ``M`` is ``(Py, Px)``
-    or ``(nb, Py, Px)``; ``W`` is ``(nb, ny, nx)`` or ``None`` for a single operator."""
+    or ``(nb, Py, Px)`` from :func:`transfer_observation_operator` (so built on
+    POSITIVE pixel pitches, which is what carries the y mirror); ``W`` is
+    ``(nb, ny, nx)`` and sums to one over ``nb``, or ``None`` for a single operator."""
     M = np.asarray(M)
     field = np.asarray(field, float)
     ny, nx = field.shape
     if M.ndim == 2:
         M = M[None]
     W = np.ones((1, ny, nx)) if W is None else np.asarray(W)
+    if W.shape[0] != M.shape[0]:
+        raise ValueError(f"apply_blended_operator: {M.shape[0]} operator(s) but "
+                         f"{W.shape[0]} weight map(s)")
     spec = np.fft.fft2(np.pad(field, ((0, ny), (0, nx)), mode="reflect"))
     outs = np.real(np.fft.ifft2(spec[None] * M))[:, :ny, :nx]
     return np.sum(W * outs, axis=0)
 
 
 def local_bin_geometry(H_pix, vx_myr, vy_myr, domain, n_bins, blend_px, ref_geom):
-    """``(bin_geom, W)``: the geometries the observation operator is built from, and their weights.
+    """``(bin_geom, W, info)``: the geometries the operator is built from, their weights, the outcome.
 
     ``n_bins <= 1`` is the single ``ref_geom`` under a weight of ones. Otherwise
     :func:`~stereo_melt.dynamics.geometry_bins.geometry_bins` bins
     ``(H, u_x, u_y)`` over ``domain`` -- ``H_pix`` the per-pixel temporal median
     thickness, the velocities in m/yr -- and returns one centroid per EFFECTIVE
-    bin. If that binning collapses to ONE bin (uniform geometry, or duplicate
-    bins merged away) ``ref_geom`` is used in place of the lone centroid, so the
-    local path reduces EXACTLY to the ``n_bins=1`` operator instead of to a
-    differently-defined mean thickness; :func:`fit_bpinn` documents why the two
-    definitions differ.
+    bin plus the ``info`` the caller logs.
+
+    ``ref_geom`` replaces the lone centroid ONLY when the domain is genuinely
+    uniform (``info["uniform"]``, one distinct geometry), where the local path
+    should reduce EXACTLY to the ``n_bins=1`` operator rather than to a
+    differently-defined mean thickness (:func:`fit_bpinn` documents why the two
+    definitions differ). A domain with real structure that merely CLUSTERS into
+    one bin keeps its own domain-restricted centroid: substituting a whole-stack
+    statistic there would quietly hand back the global operator on exactly the
+    field localisation was asked for.
     """
     ny, nx = np.asarray(domain).shape
     if int(n_bins) <= 1:
-        return [tuple(float(c) for c in ref_geom)], np.ones((1, ny, nx))
+        return ([tuple(float(c) for c in ref_geom)], np.ones((1, ny, nx)),
+                {"requested": int(n_bins), "n_unique": 1, "effective": 1,
+                 "uniform": True, "reseeded": False, "reason": ""})
     from .geometry_bins import geometry_bins
-    geom, W = geometry_bins(H_pix, vx_myr, vy_myr, domain, int(n_bins), blend_px)
-    if len(geom) == 1:
+    geom, W, info = geometry_bins(H_pix, vx_myr, vy_myr, domain, int(n_bins), blend_px)
+    if info["uniform"]:
         geom = [tuple(float(c) for c in ref_geom)]
-    return geom, W
+    return geom, W, info
 
 
 def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
@@ -467,10 +496,10 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     produced with and stays bit-identical, while a bin centroid has to be
     domain-restricted or an off-domain pixel (grounded ice, open ocean) would
     pull that bin's operator away from the ice it is applied to. Because they do
-    differ, a local run whose binning collapses to ONE bin falls back to the
-    single-geometry reference (:func:`local_bin_geometry`), so ``n_bins > 1`` on
-    uniform geometry reproduces the ``n_bins=1`` operator exactly rather than
-    approximately.
+    differ, a local run over a UNIFORM domain falls back to the single-geometry
+    reference (:func:`local_bin_geometry`), so ``n_bins > 1`` there reproduces
+    the ``n_bins=1`` operator exactly rather than approximately -- and only
+    there, so a structured domain is never quietly handed the global operator.
     """
     import jax
     import jax.numpy as jnp
@@ -726,16 +755,22 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
 
         # ---- local operator: bins on (H, u_x, u_y) with partition-of-unity blending (the
         # monolithic solver's n_bins/blend_px construction); n_bins=1 is the reference geometry
-        bin_geom, W_np = local_bin_geometry(
+        bin_geom, W_np, geom_info = local_bin_geometry(
             np.nanmedian(data.H_obs, axis=0) if is_local else None,
             data.vx.mean(axis=0) * 1e3, data.vy.mean(axis=0) * 1e3,
             data.domain, cfg.n_bins, cfg.blend_px, (H_ref, ux_ref, uy_ref))
         if is_local:
-            collapsed = ("" if len(bin_geom) > 1 else
-                         "; uniform geometry, so the single reference geometry is used and this "
-                         "run reduces exactly to n_bins=1")
-            print(f"  [bpinn] local transfer: {len(bin_geom)} (H, ux, uy) bins, "
-                  f"blend {cfg.blend_px:g} px{collapsed}", flush=True)
+            if geom_info["uniform"]:
+                why = ("; the domain is uniform, so the single reference geometry is used and "
+                       "this run reduces exactly to n_bins=1")
+            else:
+                why = f"; {geom_info['reason']}" if geom_info["reason"] else ""
+                if geom_info["reseeded"]:
+                    why += ("; the quantile seeding degenerated on a dominant geometry, so the "
+                            "cells were re-clustered from farthest-point seeds")
+            print(f"  [bpinn] local transfer: {geom_info['effective']} effective of "
+                  f"{geom_info['requested']} (H, ux, uy) bins requested, "
+                  f"blend {cfg.blend_px:g} px{why}", flush=True)
         M_list = []
         for bi, (Hb, uxb, uyb) in enumerate(bin_geom):
             lab_b = f" bin {bi} (area {W_np[bi].mean():.2f})" if len(bin_geom) > 1 else ""
