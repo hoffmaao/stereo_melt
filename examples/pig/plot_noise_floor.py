@@ -55,8 +55,6 @@ def half_path(tag=CANON_TAG, suffix=""):
     return config.PROCESSED_DIR / f"pig_noise_floor_250m_{tag}{suffix}.nc"
 
 
-NC_FULL = full_path()
-NC_HALF = half_path()
 LAM_3H_SHELF_KM, LAM_3H_TRUNK_KM = 3 * 0.438, 3 * 1.015
 PAIRS = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "#1f77b4"),
          ("restored budget + Helm", "restored_local_helm", "rb_A", "rb_B", "#2ca02c")]
@@ -128,25 +126,53 @@ def provenance(ds, var):
     return int(ce), (None if vel is None else str(vel))
 
 
-def product_tag(ds, expected=None):
-    """The stack/mask tag a product was solved from, or ``None`` if unknowable.
+_BRIDGING_NAME = re.compile(
+    r"^pig_melt_bridging_\d+m_(.+)_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.nc$")
+_NOISE_FLOOR_NAME = re.compile(r"^pig_noise_floor_\d+m_(.+)\.nc$")
 
-    ``run_noise_floor`` and the bridging driver stamp ``tag``. Files written
-    before that switch carry it only in their name, so a bridging product's
-    name is parsed and anything else falls back to ``expected`` -- the tag the
-    caller composed the filename from.
+
+def _undouble(tag):
+    """Collapse the ``<t>_<t>...`` a run whose out-suffix repeated the tag wrote."""
+    parts = tag.split("_")
+    for i in range(1, len(parts)):
+        head, rest = "_".join(parts[:i]), "_".join(parts[i:])
+        if rest == head or rest.startswith(head + "_"):
+            return rest
+    return tag
+
+
+def product_tag(ds, suffix=""):
+    """``(tag, authoritative)``: the stack/mask a product was solved from.
+
+    A stamped ``tag`` attr is authoritative, and so is a bridging product's
+    name, where the date range delimits the tag. A noise-floor file written
+    before that attr existed is read from the name it was opened under --
+    never from the tag the caller asked for, which would only compare a
+    request against itself -- and that reading is NOT authoritative: the name
+    concatenates the tag and the run's ``--out-suffix`` with no separator, so
+    ``suffix`` (the variant the caller composed the name with) is stripped and
+    what remains is an inference. Returns ``(None, False)`` when the product
+    is unnamed, e.g. built in memory.
     """
     tag = ds.attrs.get("tag")
-    if tag is None:
-        src = ds.encoding.get("source")
-        m = (re.match(r"pig_melt_bridging_\d+m_(.+)_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.nc$",
-                      str(src).rsplit("/", 1)[-1]) if src else None)
-        tag = m.group(1) if m else expected
-    return None if tag is None else str(tag)
+    if tag is not None:
+        return str(tag), True
+    src = ds.encoding.get("source")
+    name = str(src).rsplit("/", 1)[-1] if src else ""
+    m = _BRIDGING_NAME.match(name)
+    if m:
+        return m.group(1), True
+    m = _NOISE_FLOOR_NAME.match(name)
+    if m is None:
+        return None, False
+    tag = _undouble(m.group(1))
+    if suffix and tag.endswith(suffix) and len(tag) > len(suffix):
+        tag = tag[:-len(suffix)]
+    return tag, False
 
 
 def check_provenance(full, half, pairs, *, full_name="full product",
-                     purpose="the noise floor", full_tag=None, half_tag=None,
+                     purpose="the noise floor", full_suffix="", half_suffix="",
                      hint="re-solve the full product with the halves' settings (or "
                           "pick a --half-suffix / --full-var-suffix pair that match)"):
     """Refuse to compare halves and a full product solved with different instruments.
@@ -160,8 +186,10 @@ def check_provenance(full, half, pairs, *, full_name="full product",
     The stack/mask ``tag`` is the same kind of divergence and is checked the
     same way: two tags can share a velocity string and still be different
     stacks, so halves from one tag say nothing about a product from another.
-    ``full_tag``/``half_tag`` are the tags the caller composed the filenames
-    from, used only where a file predates the attr. Returns the agreed
+    ``full_suffix``/``half_suffix`` are the ``--out-suffix`` variants the
+    caller composed each filename with, needed only to read the tag off a file
+    that predates the attr; when neither side can state its tag authoritatively
+    the check says so rather than passing quietly. Returns the agreed
     ``(common_epoch, velocity)`` for labelling the output.
 
     ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
@@ -184,11 +212,10 @@ def check_provenance(full, half, pairs, *, full_name="full product",
                 problems.append(f"{label}: halves {hk} velocity={hvel!r} "
                                 f"vs {full_name} {fk} velocity={fvel!r}")
             agreed.add((fce, fvel))
-    ftag, htag = product_tag(full, full_tag), product_tag(half, half_tag)
-    if ftag is None or htag is None:
-        if ftag is not None or htag is not None:
-            print(f"  WARNING tag provenance missing (halves {htag!r}, "
-                  f"{full_name} {ftag!r}); cannot verify the stack/mask tag", flush=True)
+    (ftag, fauth), (htag, hauth) = product_tag(full, full_suffix), product_tag(half, half_suffix)
+    if ftag is None or htag is None or not (fauth or hauth):
+        print(f"  WARNING tag provenance missing (halves {htag!r}, {full_name} {ftag!r}); "
+              "cannot verify the stack/mask tag", flush=True)
     elif ftag != htag:
         problems.append(f"halves tag={htag!r} vs {full_name} tag={ftag!r}")
     if problems:
@@ -243,7 +270,7 @@ def main() -> int:
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
-    prov = check_provenance(full, half, pairs, full_tag=args.tag, half_tag=args.tag)
+    prov = check_provenance(full, half, pairs, half_suffix=args.half_suffix)
     prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
     print(f"  provenance (halves == full): {prov_label}", flush=True)
     suffix = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")

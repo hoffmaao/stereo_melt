@@ -20,8 +20,10 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     passed; matching provenance is returned for labelling; a velocity
     mismatch is refused; a missing velocity attr only warns. Halves solved
     from another stack/mask ``tag`` are refused even when the velocity
-    string is identical, and halves predating that attr are judged by the
-    tag the caller composed their filename from.
+    string is identical; halves predating that attr are judged by the name
+    they were opened under, never by the tag the caller asked for, with the
+    run's variant out-suffix stripped; and a comparison neither side can
+    vouch for warns rather than passing quietly.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -133,10 +135,12 @@ def main() -> int:
           and "eulerian_A common_epoch=1" in err and "common_epoch=0" in err,
           f"SystemExit: {err!s:.60}")
     err, out = system_exit(check_provenance, full, half_ce, pair_ce)
-    agreed = check_provenance(full, half_ce, pair_ce)
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed = check_provenance(full, half_ce, pair_ce)
     check("matching common-epoch provenance is accepted and returned",
           err is None and agreed == [(1, V)], f"{agreed}")
-    agreed0 = check_provenance(full, half_def, pair_def)
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed0 = check_provenance(full, half_def, pair_def)
     check("matching default provenance is accepted and returned", agreed0 == [(0, V)], f"{agreed0}")
     half_v = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": "other", "common_epoch": 0})
     err, _ = system_exit(check_provenance, full, half_v, pair_def)
@@ -157,14 +161,34 @@ def main() -> int:
           and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
     check("matching tags are accepted",
           check_provenance(full_t, half_t, pair_def) == [(0, V)])
+    def legacy_half(name):
+        """Halves predating the tag attr: the tag is only in the file's name."""
+        h = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 0})
+        h.encoding["source"] = f"/processed/{name}"
+        return h
+
     with contextlib.redirect_stdout(io.StringIO()):
-        agreed_t = check_provenance(full_t, half_nov, pair_def, half_tag="is2ctempo_sheltilt")
-    check("halves predating the tag attr fall back to the composed filename tag",
+        agreed_t = check_provenance(
+            full_t, legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt.nc"), pair_def)
+    check("halves predating the tag attr are read from their own filename",
           agreed_t == [(0, V)], f"{agreed_t}")
-    err, _ = system_exit(check_provenance, full_t, half_nov, pair_def,
-                         half_tag="is2ctempo_sheltilt_qcey")
-    check("...and are refused when that composed tag is another stack",
-          err is not None and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
+    err, _ = system_exit(check_provenance, full_t,
+                         legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt_"
+                                     "is2ctempo_sheltilt_qcey.nc"), pair_def,
+                         half_suffix="_is2ctempo_sheltilt_qcey")
+    check("a legacy doubled-tag name resolves to the stack it was solved from, "
+          "not to the tag the caller asked for",
+          err is not None and "tag='is2ctempo_sheltilt_qcey'" in err, f"SystemExit: {err!s:.60}")
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed_ce = check_provenance(
+            full_t, legacy_half("pig_noise_floor_250m_is2ctempo_sheltilt_ce.nc"),
+            pair_def, half_suffix="_ce")
+    check("a variant out-suffix is stripped, so --half-suffix _ce still compares",
+          agreed_ce == [(0, V)], f"{agreed_ce}")
+    err, out = system_exit(check_provenance, ds(["eulerian"], attrs={"velocity": V}),
+                           half_nov, pair_def)
+    check("neither side able to state its tag warns instead of passing quietly",
+          err is None and "cannot verify the stack/mask tag" in out)
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),
