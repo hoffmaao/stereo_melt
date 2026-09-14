@@ -2,7 +2,8 @@
 
     CUDA_VISIBLE_DEVICES=1 XLA_PYTHON_CLIENT_PREALLOCATE=false $PY -u \
         elmer_synth/scripts/run_bpinn_twin.py [--tag multixy_pigreal] [--steps 20000] \
-        [--ensemble 4] [--hmc 0] [--sigma-h 2] [--sigma-r 1] [--transfer] [--eta 1e14]
+        [--ensemble 4] [--hmc 0] [--sigma-h 2] [--sigma-r 1] [--col-slices 24] \
+        [--transfer] [--eta 1e14]
 
 Scores the MAP / posterior mean against the prescribed truth (nrmse, corr, bias,
 2-sigma coverage) next to the Eulerian / Lagrangian benchmarks packaged by
@@ -41,7 +42,12 @@ def main() -> int:
     ap.add_argument("--hmc", type=int, default=0)
     ap.add_argument("--hmc-joint", action="store_true")
     ap.add_argument("--sigma-h", type=float, default=2.0)
-    ap.add_argument("--sigma-r", type=float, default=1.0)
+    ap.add_argument("--sigma-r", type=float, default=1.0,
+                    help="physics residual sd (m/yr); the steady twins were validated at 1 with 24 slices")
+    ap.add_argument("--col-slices", type=int, default=24,
+                    help="nominal physics observations = domain cells x this; the steady twins were validated "
+                         "at --sigma-r 1 --col-slices 24, while the library defaults (20 / 4) are the pair that "
+                         "survives a real stack")
     ap.add_argument("--nu", type=float, default=4.0)
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--layers", type=int, default=4)
@@ -65,7 +71,7 @@ def main() -> int:
     data = prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, rho_i=float(z["rho_i"]), rho_w=float(z["rho_w"]))
     cfg = BPINNConfig(n_steps=args.steps, ensemble=args.ensemble, hmc_samples=args.hmc, hmc_joint=args.hmc_joint,
                       sigma_h_m=args.sigma_h, sigma_r_myr=args.sigma_r, nu=(None if args.nu <= 0 else args.nu),
-                      hidden=args.hidden, layers=args.layers,
+                      n_col_slices=args.col_slices, hidden=args.hidden, layers=args.layers,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")),
                       transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha,

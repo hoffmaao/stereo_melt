@@ -6,12 +6,19 @@ prescribed truth melt field, and the Eulerian / Lagrangian benchmarks from the
 production solvers on identical inputs, so the JAX environment needs nothing
 but numpy.
 
+The twin tier is a local dataset -- the Elmer runs, the synthetic stacks and the
+``run_dem_stack_melt.py`` solver driver with its scoring helpers live only on the
+analysis host -- so from a clean clone this script documents the validation
+recipe rather than being runnable, and exits with that message when the driver is
+absent.
+
     $PY elmer_synth/scripts/prep_bpinn_twin.py [tag] [pert] [variant]
     e.g. multixy_pigreal multixy_bmb tilt_corrected   (variant 'clean' = noise-free stack)
 """
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 
 import numpy as np
@@ -22,15 +29,33 @@ sys.path.insert(0, "/wd2/projects/stereo_melt/examples")
 sys.path.insert(0, "/wd2/projects/stereo_melt/src")
 from stereo_melt.freeboard import freeboard_to_thickness  # noqa: E402
 
-_SPEC = importlib.util.spec_from_file_location(
-    "rds", "/wd2/projects/stereo_melt/examples/elmer_synth/scripts/run_dem_stack_melt.py")
-rds = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(rds)
+_RDS_CANDIDATES = (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_dem_stack_melt.py"),
+    "/wd2/projects/stereo_melt/examples/elmer_synth/scripts/run_dem_stack_melt.py",
+)
 
 SOLVERS = {"Eulerian": "eulerian", "Lagrangian path": "lagrangian"}
 
 
+def _load_rds():
+    """Load the twin solver driver, preferring the copy beside this script."""
+    for path in _RDS_CANDIDATES:
+        if os.path.exists(path):
+            spec = importlib.util.spec_from_file_location("rds", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    raise SystemExit(
+        "run_dem_stack_melt.py not found (looked in: " + ", ".join(_RDS_CANDIDATES) + "). "
+        "Packaging a twin needs the elmer_synth twin tier on the analysis host -- the Elmer runs, "
+        "the synthetic DEM stacks, and run_dem_stack_melt.py with its scoring and parameter helpers "
+        "-- which is a local dataset that is not part of the repository. From a clean clone this "
+        "script documents the validation recipe rather than being runnable."
+    )
+
+
 def main() -> int:
+    rds = _load_rds()
     tag = sys.argv[1] if len(sys.argv) > 1 else "multixy_pigreal"
     pert = sys.argv[2] if len(sys.argv) > 2 else "multixy_bmb"
     variant = sys.argv[3] if len(sys.argv) > 3 else "tilt_corrected"
@@ -66,6 +91,7 @@ def main() -> int:
         print(f"  {name}: nrmse {np.sqrt(np.mean(e[fin] ** 2)) / np.sqrt(np.mean(truth2d[fin] ** 2)):.3f}  "
               f"corr {np.corrcoef(bench[f'bench_{key}'][fin], truth2d[fin])[0, 1]:.3f}  finite {fin.mean():.2f}")
     out = f"/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn/twin_{out_tag}.npz"
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     np.savez_compressed(out, H_obs=np.asarray(H_obs.values, np.float32), x=h.x.values, y=h.y.values,
                         t_yr=np.asarray(t_yr, float), vx=np.asarray(vx.values, float),
                         vy=np.asarray(vy.values, float), truth=truth2d, H0=float(p.H0),
