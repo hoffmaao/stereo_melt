@@ -16,10 +16,11 @@ multixy_bmb clean`` (writes ``twin_multixy_pigreal_clean.npz``) and score it
 once each way:
 
     run_bpinn_twin.py --tag multixy_pigreal_clean --transfer --sigma-h 0.5 \
-        --no-planes --sigma-r 1 --col-slices 24 --steps 10000
+        --no-planes --sigma-r 1 --col-slices 24 --steps 10000 --ensemble 1
 
-The default ``multixy_pigreal`` tag is the tilt-corrected, error-injected tier,
-which is noise-limited here (corr about 0).
+The recorded number is the single-member ``B-PINN MAP`` row, hence
+``--ensemble 1``. The default ``multixy_pigreal`` tag is the tilt-corrected,
+error-injected tier, which is noise-limited here (corr about 0).
 """
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, "/wd2/projects/stereo_melt/src")
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
+sys.path.insert(0, f"{_REPO}/src")
 from stereo_melt.dynamics.bpinn import BPINNConfig, fit_bpinn, prepare_bpinn_data  # noqa: E402
 
 R = "/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn"
