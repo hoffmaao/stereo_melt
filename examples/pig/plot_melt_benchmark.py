@@ -34,10 +34,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "examples"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
 
 from pig import config  # noqa: E402
 from stereo_melt.colormaps import add_melt_colorbar, melt_cmap, melt_norm  # noqa: E402
 
+# Asked of the backend that will do the writing, so --out is validated against
+# what this matplotlib can actually render rather than a hand-kept list.
+FIGURE_SUFFIXES = frozenset(Figure().canvas.get_supported_filetypes())
 RHO_I = 918.0
 CANON_BENCHMARK = "pig_melt_250m_is2ctempo_minext_2010-01-01_2024-01-10.nc"
 
@@ -55,7 +59,10 @@ def main() -> int:
                     help="trunk zoom for the second figure: 'auto' (largest connected patch "
                          "of 1 km-smoothed Eulerian melt < -30 m/yr), 'x0,x1,y0,y1' in km, or 'none'")
     ap.add_argument("--dpi", type=int, default=250)
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", default=None,
+                    help="output path for the full-shelf figure; must carry an image "
+                         "extension matplotlib can write, since the trunk zoom is "
+                         "written beside it as <stem>_trunk<ext>")
     args = ap.parse_args()
 
     window = f"{config.START_TIME}_{config.END_TIME}"
@@ -186,8 +193,20 @@ def main() -> int:
         fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
         print(f"wrote {out}")
 
-    stem = args.out[:-4] if args.out and args.out.endswith(".png") else None
-    out_full = Path(args.out) if args.out else config.FIGURES_DIR / f"melt_benchmark_250m_{args.tag}.png"
+    stem = None
+    if args.out:
+        out_full = Path(args.out)
+        if out_full.suffix.lower().lstrip(".") not in FIGURE_SUFFIXES:
+            raise SystemExit(
+                f"--out {args.out!r} has no image extension matplotlib can write "
+                f"(one of: {', '.join('.' + e for e in sorted(FIGURE_SUFFIXES))}). "
+                f"The trunk zoom is written beside it as <stem>_trunk{out_full.suffix or '.png'}, "
+                f"so an extensionless path would send it to the canonical figures directory "
+                f"instead of where you asked."
+            )
+        stem = out_full.with_suffix("")
+    else:
+        out_full = config.FIGURES_DIR / f"melt_benchmark_250m_{args.tag}.png"
     render(full, out_full, "full shelf")
 
     if args.zoom != "none":
@@ -215,7 +234,8 @@ def main() -> int:
         print(f"  trunk zoom box rows {box[0]}:{box[1]} cols {box[2]}:{box[3]} "
               f"= x {ref.x.values[box[2]]/1e3:.0f}..{ref.x.values[box[3]-1]/1e3:.0f} km, "
               f"y {ref.y.values[box[1]-1]/1e3:.0f}..{ref.y.values[box[0]]/1e3:.0f} km")
-        out_zoom = (Path(stem + "_trunk.png") if stem
+        out_zoom = (stem.with_name(stem.name + "_trunk").with_suffix(out_full.suffix)
+                    if stem is not None
                     else config.FIGURES_DIR / f"melt_benchmark_trunk_250m_{args.tag}.png")
         render(box, out_zoom, "fast trunk")
     return 0

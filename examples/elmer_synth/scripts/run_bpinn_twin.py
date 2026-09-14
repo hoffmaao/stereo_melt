@@ -16,7 +16,8 @@ The twin itself is a local dataset written by ``prep_bpinn_twin.py`` into
 ``results/bpinn``, so from a clean clone this script documents the recipe below
 rather than being runnable, and exits with that message when the twin is absent.
 
-The recorded twin result -- corr 0.23 without the transfer, 0.70 with it -- is
+The recorded twin result -- corr 0.231 without the transfer, 0.693 with it
+(nrmse 0.995 -> 0.764; measured 2026-09-13 on the packaging in this tree) -- is
 the noise-free tier. Package it with ``prep_bpinn_twin.py multixy_pigreal
 multixy_bmb clean`` (writes ``twin_multixy_pigreal_clean.npz``) and score it
 once each way:

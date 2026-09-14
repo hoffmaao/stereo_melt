@@ -460,12 +460,16 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                                  "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
             ux_d = float(data.vx.mean(axis=0)[data.domain].mean() * 1e3)
             uy_d = float(data.vy.mean(axis=0)[data.domain].mean() * 1e3)
-            print(f"  [bpinn] reference velocity default: tile mean over {int(data.domain.sum())} "
-                  f"domain px = ({ux_d:+.0f}, {uy_d:+.0f}) m/yr", flush=True)
         else:
             ux_d = uy_d = 0.0
         ux_ref = float(cfg.ux_ref_myr) if cfg.ux_ref_myr is not None else ux_d
         uy_ref = float(cfg.uy_ref_myr) if cfg.uy_ref_myr is not None else uy_d
+        if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
+            how = ["override" if c is not None else "domain mean" for c
+                   in (cfg.ux_ref_myr, cfg.uy_ref_myr)]
+            print(f"  [bpinn] reference velocity = (ux {ux_ref:+.0f} [{how[0]}], "
+                  f"uy {uy_ref:+.0f} [{how[1]}]) m/yr; the domain mean is over "
+                  f"{int(data.domain.sum())} px", flush=True)
         u_ref = float(np.hypot(ux_ref, uy_ref))
         flow_deg = float(np.degrees(np.arctan2(uy_ref, ux_ref)))
         # y_km descends, so fft2 of the row-indexed grid puts a physical (kx, ky)
