@@ -15,13 +15,24 @@ absent.
     $PY elmer_synth/scripts/prep_bpinn_twin.py [tag] [pert] [variant] [axis]
     e.g. multixy_pigreal multixy_bmb tilt_corrected   (variant 'clean' = noise-free stack)
 
-The truth axis comes from the run metadata -- 'xy' for a ``multicos`` melt, whose
-components carry their own axes, else the run's ``melt.axis`` -- and is recorded
-in the npz as ``truth_axis``. The optional 4th argument overrides it.
+The truth axis comes from the run metadata exactly as ``run_dem_stack_melt.py``
+derives it -- the run's ``melt.axis``, except for a ``multicos`` melt, which is
+'xy' only when its components span both axes and otherwise the single axis they
+share -- and is recorded in the npz as ``truth_axis``. The optional 4th argument
+overrides it.
+
+The prescribed truth is scaled by the window-mean temporal factor
+``window_mean_modulation`` over the packaged stack's model-year window (read from
+the run's ``e2a_demstack_<tag>_truth.json`` sidecar), the same factor the repo's
+scorer applies, because the inverse recovers a window-representative melt. It is
+exactly 1.0 for the constant-melt runs (``tmod: none``), which the validated twin
+is; for a time-varying melt it leaves correlation untouched (scale-invariant)
+while shifting nrmse, bias and the amplitude line. It is recorded as ``truth_fac``.
 """
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 
@@ -84,9 +95,30 @@ def main() -> int:
     t = pd.to_datetime(h.time.values)
     t_yr = t.year + (t.dayofyear - 1) / 365.25
     melt_meta = meta["melt"]
-    axis = axis_arg or ("xy" if melt_meta.get("kind") == "multicos" else melt_meta.get("axis", "xy"))
-    print(f"truth axis {axis} (melt kind {melt_meta.get('kind')!r})")
-    truth2d = rds.truth_field2d(h.x.values, h.y.values, melt_meta, axis)
+    axis = melt_meta.get("axis", "x")
+    if melt_meta.get("kind") == "multicos":
+        comp_axes = sorted({c[0] for c in melt_meta.get("components", [])})
+        axis = "xy" if len(comp_axes) > 1 else (comp_axes[0] if comp_axes else axis)
+    axis = axis_arg or axis
+    tmod = melt_meta.get("tmod", "none")
+    sidecar = rds.RES / f"e2a_demstack_{tag}_truth.json"
+    if sidecar.exists():
+        t_truth = np.array([r["t_truth_yr"] for r in json.loads(sidecar.read_text())["strips"]])
+        t_lo, t_hi = float(np.floor(t_truth.min())), float(np.ceil(t_truth.max()))
+        fac = float(rds.window_mean_modulation(melt_meta, t_lo, t_hi - t_lo))
+        window = f"model years [{t_lo:g}, {t_hi:g}]"
+    elif tmod == "none":
+        fac, window = 1.0, "constant melt, no window needed"
+    else:
+        raise SystemExit(
+            f"{sidecar} not found, so the packaged stack's model-year window is unknown and the "
+            f"window-mean factor for tmod={tmod!r} cannot be computed -- the truth would be "
+            f"packaged at the wrong amplitude. Write the sidecar with make_dem_stack.py for tag "
+            f"{tag!r}, or package a run with tmod 'none'."
+        )
+    print(f"truth axis {axis} (melt kind {melt_meta.get('kind')!r}); window-mean melt factor "
+          f"{fac:.4f} (tmod {tmod!r}, {window})")
+    truth2d = rds.truth_field2d(h.x.values, h.y.values, melt_meta, axis, fac)
     bench = {}
     for name, key in SOLVERS.items():
         try:
@@ -104,6 +136,7 @@ def main() -> int:
     np.savez_compressed(out, H_obs=np.asarray(H_obs.values, np.float32), x=h.x.values, y=h.y.values,
                         t_yr=np.asarray(t_yr, float), vx=np.asarray(vx.values, float),
                         vy=np.asarray(vy.values, float), truth=truth2d, truth_axis=axis,
+                        truth_fac=fac,
                         H0=float(p.H0), rho_i=p.RHO_I, rho_w=p.RHO_W, **bench)
     print(f"wrote {out} | obs finite {int(np.isfinite(H_obs.values).sum())}")
     return 0

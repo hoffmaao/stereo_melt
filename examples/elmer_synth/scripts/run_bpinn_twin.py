@@ -152,9 +152,9 @@ def main() -> int:
     truth_axis = str(z["truth_axis"]) if "truth_axis" in z else "xy"
     amp_axis = "y" if truth_axis == "y" else "x"
     print(f"amplitude along {amp_axis} (the truth's axis, {truth_axis!r}) "
-          f"at λ=1.0 km / 1.5 km (truth 15 / 10 m/yr):")
-    for name, m in (("Eulerian", z.get("bench_eulerian")), ("Lagrangian", z.get("bench_lagrangian")),
-                    ("B-PINN mean", res.melt_mean)):
+          f"at λ=1.0 km / 1.5 km:")
+    for name, m in (("truth", truth), ("Eulerian", z.get("bench_eulerian")),
+                    ("Lagrangian", z.get("bench_lagrangian")), ("B-PINN mean", res.melt_mean)):
         if m is not None:
             print(f"  {name:12s} {_amp_at(m, x, y, data.domain, 1000, truth_axis):.1f} / "
                   f"{_amp_at(m, x, y, data.domain, 1500, truth_axis):.1f}")

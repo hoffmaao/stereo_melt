@@ -318,8 +318,13 @@ def main(
     # with an aligned strip would otherwise inherit its Ez 0.1 prior instead of the
     # nocorr 1.0 tier, pinning the one datum the recipe needs the LSQ to estimate
     # (beardmore_shelf 2026-07-11: 35 of 99 nocorr layers leaked that way).
-    ez_by_dem_id = (os.environ.get("PIG_TILT_EZ_BY_DEM_ID", "") == "1"
-                    or any(variant == "nocorr" for _d, variant in config.STRIP_SOURCES))
+    ez_env = os.environ.get("PIG_TILT_EZ_BY_DEM_ID", "") == "1"
+    ez_nocorr = any(variant == "nocorr" for _d, variant in config.STRIP_SOURCES)
+    ez_by_dem_id = ez_env or ez_nocorr
+    ez_why = " + ".join(
+        [w for w, on in (("PIG_TILT_EZ_BY_DEM_ID=1", ez_env),
+                         ("nocorr root in STRIP_SOURCES", ez_nocorr)) if on]
+    )
     ez_dem_ids = (stack["dem_id"].values
                   if ez_by_dem_id and "dem_id" in stack.coords else None)
     if ez_by_dem_id and ez_dem_ids is None:
@@ -369,13 +374,15 @@ def main(
                 stimes = pd.to_datetime(stack["time"].values).normalize()
                 ep = np.array([per.get(d, np.nan) for d in stimes], dtype=float)
             offset_only = np.isfinite(ep) & (ep > offset_thresh)
-            print(f"  P3 offset-only (resolved by {gate_key}): "
+            print(f"  P3 offset-only (resolved by {gate_key}"
+                  f"{f'; {ez_why}' if gate_key == 'dem_id' else ''}): "
                   f"{int(offset_only.sum())}/{len(offset_only)} "
                   f"epochs have end_p50>{offset_thresh:.1f}m -> alpha_z-only fit")
             n_noquality = int(np.sum(~np.isfinite(ep)))
             if gate_key == "dem_id" and n_noquality:
-                print(f"    {n_noquality}/{len(ep)} epochs carry no pc_align end_errors row of "
-                      "their own (the control-free nocorr root has none): full x/y fit, never "
+                searched = ", ".join(variant for _d, variant in config.STRIP_SOURCES)
+                print(f"    {n_noquality}/{len(ep)} epochs have no pc_align end_errors row of "
+                      f"their own in the searched roots ({searched}): full x/y fit, never "
                       "demoted on a same-date strip's alignment")
     except Exception as exc:
         print(f"  P3 offset-only gate skipped: {exc}")
