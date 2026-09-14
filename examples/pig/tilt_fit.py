@@ -177,13 +177,13 @@ def main(
         config.STRIP_SOURCES = [
             config.STRIP_SOURCES[0],
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
-        ]
+        ] + config.STRIP_SOURCES[2:]
     if is2_asp:
         variant = is2_asp.lstrip("_")
         config.STRIP_SOURCES = [
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
             config.STRIP_SOURCES[1],
-        ]
+        ] + config.STRIP_SOURCES[2:]
 
     print("Loading raw stack...")
     stack, src_path = _load_raw_stack(stack_prefix=stack_prefix)
@@ -450,7 +450,9 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Override the pre-IS2 strip source for per-epoch Ez sidecar "
-            "lookup (e.g. ctempoatmlvis); must match the build_stack run."
+            "lookup (e.g. ctempoatmlvis); must match the build_stack run. "
+            "Replaces only that entry: any further roots (PIG_SOURCES=nocorr "
+            "appends one) stay in the list, so by-dem_id Ez still sees them."
         ),
     )
     parser.add_argument(
@@ -458,7 +460,8 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Override the IS2-era strip source for per-epoch Ez sidecar "
-            "lookup; must match the build_stack run. Point both --is2-asp "
+            "lookup; must match the build_stack run, and leaves any further "
+            "roots in place. Point both --is2-asp "
             "and --pre-is2-asp at the same variant for a uniform-control "
             "stack (e.g. ctempoatmlvis)."
         ),
