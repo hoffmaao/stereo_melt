@@ -53,6 +53,9 @@ def main() -> int:
     ap.add_argument("--eta", type=float, default=1e13)
     ap.add_argument("--alpha", type=float, default=0.34)
     ap.add_argument("--no-transfer", action="store_true")
+    ap.add_argument("--n-bins", type=int, default=1,
+                    help="local transfer: bins on (H, ux, uy) with partition-of-unity blending; 1 = one reference geometry")
+    ap.add_argument("--blend-px", type=float, default=8.0, help="Gaussian blend width of the bin weights (px)")
     ap.add_argument("--no-planes", action="store_true")
     ap.add_argument("--sigma-h", type=float, default=None, help="obs scale (thickness m); default = measured NMAD")
     ap.add_argument("--sigma-r", type=float, default=20.0,
@@ -83,7 +86,7 @@ def main() -> int:
     data = prepare_bpinn_data(H, x, y, t, vx, vy, a_dot=z["a_dot"], domain=dom,
                               rho_i=float(z["rho_i"]), rho_w=float(z["rho_w"]), vt_yr=vt)
     cfg = BPINNConfig(n_steps=args.steps, ensemble=args.ensemble, hmc_samples=args.hmc, sigma_h_m=sig,
-                      sigma_r_myr=args.sigma_r, transfer=not args.no_transfer, eta_bar=args.eta, alpha_scale=args.alpha,
+                      sigma_r_myr=args.sigma_r, transfer=not args.no_transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       batch_epochs=args.batch_epochs, epoch_planes=not args.no_planes, H_scale_m=args.H_scale, base_field=not args.no_base_field, b_scale_myr=args.b_scale, n_col_slices=args.col_slices, lr=args.lr,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")))

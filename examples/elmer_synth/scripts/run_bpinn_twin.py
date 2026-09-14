@@ -115,6 +115,9 @@ def main() -> int:
     ap.add_argument("--eta", type=float, default=1e14)
     ap.add_argument("--alpha", type=float, default=0.34)
     ap.add_argument("--bg-sigma-H", type=float, default=3.0)
+    ap.add_argument("--n-bins", type=int, default=1,
+                    help="local transfer: bins on (H, ux, uy) with partition-of-unity blending; 1 = one reference geometry")
+    ap.add_argument("--blend-px", type=float, default=8.0, help="Gaussian blend width of the bin weights (px)")
     ap.add_argument("--batch-epochs", type=int, default=16)
     ap.add_argument("--no-planes", action="store_true")
     ap.add_argument("--H-scale", type=float, default=20.0)
@@ -131,7 +134,7 @@ def main() -> int:
                       n_col_slices=args.col_slices, hidden=args.hidden, layers=args.layers,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")),
-                      transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha,
+                      transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       transfer_bg_sigma_H=args.bg_sigma_H, batch_epochs=args.batch_epochs,
                       epoch_planes=not args.no_planes, H_scale_m=args.H_scale,
                       base_field=not args.no_base_field)

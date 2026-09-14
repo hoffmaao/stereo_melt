@@ -9,6 +9,7 @@ test:
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_restored_budget.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_helmholtz_divergence.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_budget_bridging_local.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_bpinn_local_transfer.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_strip_noise_model.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_powerlaw_layer.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_budget_bridging_identity.py
