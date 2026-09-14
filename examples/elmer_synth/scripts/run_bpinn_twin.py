@@ -9,6 +9,17 @@ Scores the MAP / posterior mean against the prescribed truth (nrmse, corr, bias,
 2-sigma coverage) next to the Eulerian / Lagrangian benchmarks packaged by
 prep_bpinn_twin.py, and reports the along-flow amplitude at the truth's channel
 wavelengths (1.0 / 1.5 km for the multixy twins).
+
+The recorded twin result -- corr 0.23 without the transfer, 0.70 with it -- is
+the noise-free tier. Package it with ``prep_bpinn_twin.py multixy_pigreal
+multixy_bmb clean`` (writes ``twin_multixy_pigreal_clean.npz``) and score it
+once each way:
+
+    run_bpinn_twin.py --tag multixy_pigreal_clean --transfer --sigma-h 0.5 \
+        --no-planes --sigma-r 1 --col-slices 24 --steps 10000
+
+The default ``multixy_pigreal`` tag is the tilt-corrected, error-injected tier,
+which is noise-limited here (corr about 0).
 """
 from __future__ import annotations
 
