@@ -17,13 +17,15 @@ Run::
     $PY -m pig.plot_noise_floor [--tag is2ctempo_sheltilt]
 
 ``--tag`` picks the stack/mask both sides were solved from: it names the full
-product and the halves together, so a half-stack written by ``run_noise_floor
---tag`` is never compared against a different stack's product.
+product and the halves together, and the ``tag`` each file carries is checked
+before they are compared, so a half-stack solved from one stack is never
+scored against another stack's product. A file written before that attr
+existed states nothing about its stack and is refused until it is regenerated
+or its tag is asserted with ``--assume-tag``.
 """
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 
 _REPO = __import__("pathlib").Path(__file__).resolve().parents[2]
@@ -126,32 +128,29 @@ def provenance(ds, var):
     return int(ce), (None if vel is None else str(vel))
 
 
-_PRODUCT_NAME = re.compile(r"^pig_(?:melt_bridging|noise_floor)_\d+m_(.+)\.nc$")
-
-
 def product_tag(ds):
-    """The stack/mask tag a product was solved from, or ``None`` if unknowable.
+    """The stack/mask tag stamped on a product, or ``None`` if it carries none.
 
-    A stamped ``tag`` attr settles it, and every product written since the
-    stack became selectable carries one. A file from before that could only
-    have come from the canon stack -- ``run_noise_floor`` loaded it by name --
-    so a name that starts with ``CANON_TAG`` is canon, whatever the run's
-    ``--out-suffix`` appended after it. The name is never parsed for any other
-    tag: it concatenates the tag and the out-suffix with no separator, so
-    ``..._q`` (a quarters run of the canon stack) and ``..._qcey`` (were it a
-    different stack) are indistinguishable, and guessing would refuse matched
-    pairs as readily as it accepted mismatched ones.
+    Every product written since the stack became selectable stamps ``tag``.
+    An older file is simply unidentifiable, and its name is no substitute: the
+    name concatenates the tag with the run's ``--out-suffix`` and no separator,
+    and the pre-attr half-stacks on disk include runs of other stacks whose
+    names begin with the canon tag (one of 498 epochs, one of 588, against the
+    canon 513), so reading a name would assert a provenance the file does not
+    have. Regenerate the file, or state the tag with ``--assume-tag``.
     """
     tag = ds.attrs.get("tag")
-    if tag is not None:
-        return str(tag)
+    return None if tag is None else str(tag)
+
+
+def source_name(ds):
+    """The file ``ds`` was opened from, for messages about that file."""
     src = ds.encoding.get("source")
-    m = _PRODUCT_NAME.match(str(src).rsplit("/", 1)[-1] if src else "")
-    return CANON_TAG if m and m.group(1).startswith(CANON_TAG) else None
+    return str(src).rsplit("/", 1)[-1] if src else "an in-memory dataset"
 
 
 def check_provenance(full, half, pairs, *, full_name="full product",
-                     purpose="the noise floor",
+                     purpose="the noise floor", assume_tag=None,
                      hint="re-solve the full product with the halves' settings (or "
                           "pick a --half-suffix / --full-var-suffix pair that match)"):
     """Refuse to compare halves and a full product solved with different instruments.
@@ -165,8 +164,10 @@ def check_provenance(full, half, pairs, *, full_name="full product",
     The stack/mask ``tag`` is the same kind of divergence and is checked the
     same way: two tags can share a velocity string and still be different
     stacks, so halves from one tag say nothing about a product from another.
-    A side whose tag :func:`product_tag` cannot establish is reported as
-    unverified rather than passed over quietly. Returns the agreed
+    A file that carries no ``tag`` cannot be placed at all, so it is refused
+    by name rather than assumed to match; ``assume_tag`` is the caller's
+    explicit statement of what such a file was solved from, and it is checked
+    against the other side like any stamped tag. Returns the agreed
     ``(common_epoch, velocity)`` for labelling the output.
 
     ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
@@ -189,10 +190,15 @@ def check_provenance(full, half, pairs, *, full_name="full product",
                 problems.append(f"{label}: halves {hk} velocity={hvel!r} "
                                 f"vs {full_name} {fk} velocity={fvel!r}")
             agreed.add((fce, fvel))
-    ftag, htag = product_tag(full), product_tag(half)
-    if ftag is None or htag is None:
-        print(f"  WARNING tag provenance missing (halves {htag!r}, {full_name} {ftag!r}); "
-              "cannot verify the stack/mask tag", flush=True)
+    ftag = product_tag(full) or assume_tag
+    htag = product_tag(half) or assume_tag
+    untagged = [source_name(d) for d, t in ((half, htag), (full, ftag)) if t is None]
+    if untagged:
+        problems.append(
+            f"no stack/mask tag on {', '.join(untagged)}: the file predates that attr, so "
+            f"which stack it was solved from cannot be established -- the pre-attr half-stacks "
+            f"on disk include runs of other stacks. Regenerate it with run_noise_floor, which "
+            f"stamps the tag, or state it with --assume-tag")
     elif ftag != htag:
         problems.append(f"halves tag={htag!r} vs {full_name} tag={ftag!r}")
     if problems:
@@ -236,6 +242,10 @@ def main() -> int:
     ap.add_argument("--full-var-suffix", default="",
                     help="suffix of the full-product variables to compare against "
                          "(e.g. _ce); every PAIRS variable must exist with it")
+    ap.add_argument("--assume-tag", default=None,
+                    help="state the stack/mask tag of a file written before the tag attr "
+                         "existed, which is otherwise unidentifiable and refused; the "
+                         "assumption is recorded in the figure title")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -247,8 +257,10 @@ def main() -> int:
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
-    prov = check_provenance(full, half, pairs)
+    prov = check_provenance(full, half, pairs, assume_tag=args.assume_tag)
     prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
+    if args.assume_tag:
+        prov_label += f"; stack tag ASSUMED {args.assume_tag} (not stamped on the file)"
     print(f"  provenance (halves == full): {prov_label}", flush=True)
     suffix = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
 

@@ -56,7 +56,7 @@ HALVES = ("eulerian_A", "eulerian_B")
 QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
 
 
-def open_ladder(quarters_nc, half_nc=None):
+def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
     """``(halves, quarters)`` datasets for the ladder.
 
     The quarters file carries the same run's halves, so by default both rungs
@@ -71,7 +71,7 @@ def open_ladder(quarters_nc, half_nc=None):
     half = xr.open_dataset(half_nc or NC_HALF)
     ce, vel = check_provenance(
         q, half, [(f"ladder {qk}", qk, *HALVES, None) for qk in QUARTERS],
-        full_name="quarters", purpose="the count scaling",
+        full_name="quarters", purpose="the count scaling", assume_tag=assume_tag,
         hint="re-run run_noise_floor --quarters with the halves' settings (its "
              "output carries both rungs) or pass a matching --half-nc")[0]
     print(f"  halves {half_nc or NC_HALF} + quarters {quarters_nc}: "
@@ -87,11 +87,14 @@ def main() -> int:
                     help="separate halves file (default: the halves solved in the "
                          "same run as the quarters); refused if its common_epoch/"
                          "velocity provenance differs from the quarters")
+    ap.add_argument("--assume-tag", default=None,
+                    help="state the stack/mask tag of ladder files written before the tag "
+                         "attr existed, which are otherwise unidentifiable and refused")
     ap.add_argument("--dpi", type=int, default=200)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    half, q = open_ladder(args.quarters_nc, args.half_nc)
+    half, q = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
     st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
     n_full = np.isfinite(st.values).sum(0).astype(float)
     z = np.load(config.PROCESSED_DIR / "pig_eta_field_250m_dual_20260730_t0era5.npz")

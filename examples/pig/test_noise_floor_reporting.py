@@ -20,10 +20,10 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     passed; matching provenance is returned for labelling; a velocity
     mismatch is refused; a missing velocity attr only warns. Halves solved
     from another stack/mask ``tag`` are refused even when the velocity
-    string is identical; a product predating that attr is the canon stack
-    whatever its ``--out-suffix`` appended to the name, so a ``_q`` quarters
-    file still compares against freshly tagged halves; and a name no rule
-    covers warns rather than being guessed at or passed over quietly.
+    string is identical; a file carrying no ``tag`` at all states nothing
+    about its stack, so it is refused by name rather than read from that
+    name, and ``--assume-tag`` states it explicitly and is then checked
+    like a stamped tag.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -122,11 +122,13 @@ def main() -> int:
     check("no complete pair at all is an error", err is not None and "nothing to plot" in err)
 
     print("T3  check_provenance(): the files' attrs decide, not the caller's flags")
-    V = "fused-test-velocity"
-    full = ds(["eulerian", "eulerian_ce"], attrs={"velocity": V},
+    V, T = "fused-test-velocity", "is2ctempo_sheltilt"
+    full = ds(["eulerian", "eulerian_ce"], attrs={"velocity": V, "tag": T},
               var_attrs={"eulerian_ce": {"common_epoch": 1}})
-    half_ce = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 1})
-    half_def = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 0})
+    half_ce = ds(["eulerian_A", "eulerian_B"],
+                 attrs={"velocity": V, "common_epoch": 1, "tag": T})
+    half_def = ds(["eulerian_A", "eulerian_B"],
+                  attrs={"velocity": V, "common_epoch": 0, "tag": T})
     pair_def = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "c")]
     pair_ce = [("Eulerian", "eulerian_ce", "eulerian_A", "eulerian_B", "c")]
     err, _ = system_exit(check_provenance, full, half_ce, pair_def)
@@ -142,11 +144,12 @@ def main() -> int:
     with contextlib.redirect_stdout(io.StringIO()):
         agreed0 = check_provenance(full, half_def, pair_def)
     check("matching default provenance is accepted and returned", agreed0 == [(0, V)], f"{agreed0}")
-    half_v = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": "other", "common_epoch": 0})
+    half_v = ds(["eulerian_A", "eulerian_B"],
+                attrs={"velocity": "other", "common_epoch": 0, "tag": T})
     err, _ = system_exit(check_provenance, full, half_v, pair_def)
     check("velocity mismatch is refused", err is not None and "velocity='other'" in err,
           f"SystemExit: {err!s:.60}")
-    half_nov = ds(["eulerian_A", "eulerian_B"], attrs={"common_epoch": 0})
+    half_nov = ds(["eulerian_A", "eulerian_B"], attrs={"common_epoch": 0, "tag": T})
     err, out = system_exit(check_provenance, full, half_nov, pair_def)
     check("missing velocity provenance warns but does not refuse",
           err is None and "WARNING" in out and "cannot verify" in out)
@@ -162,37 +165,42 @@ def main() -> int:
     check("matching tags are accepted",
           check_provenance(full_t, half_t, pair_def) == [(0, V)])
     def named(names, name, **attrs):
-        """A product predating the tag attr: identified only by its filename."""
+        """A product predating the tag attr: no tag, only a filename."""
         d = ds(names, attrs={"velocity": V, "common_epoch": 0, **attrs})
         d.encoding["source"] = f"/processed/{name}"
         return d
 
-    legacy = {s: named(["eulerian_A", "eulerian_B"],
-                       f"pig_noise_floor_250m_is2ctempo_sheltilt{s}.nc")
-              for s in ("", "_ce", "_q", "_is2ctempo_sheltilt_qcey")}
-    for suffix, h in legacy.items():
-        with contextlib.redirect_stdout(io.StringIO()):
-            agreed_l = check_provenance(full_t, h, pair_def)
-        check(f"a pre-tag half named ...{suffix or '<none>'} is the canon stack "
-              "whatever its out-suffix says", agreed_l == [(0, V)], f"{agreed_l}")
+    # The pre-attr half-stacks on disk include runs of other stacks whose names
+    # begin with the canon tag, so no name is evidence of a stack.
+    for suffix in ("", "_ce", "_q", "_is2ctempo_sheltilt_qcey"):
+        name = f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc"
+        err, _ = system_exit(check_provenance, full_t,
+                             named(["eulerian_A", "eulerian_B"], name), pair_def)
+        check(f"a half with no tag attr is refused, named: ...{suffix or '<none>'}",
+              err is not None and name in err and "--assume-tag" in err
+              and "cannot be established" in err, f"SystemExit: {err!s:.60}")
+    legacy_half = named(["eulerian_A", "eulerian_B"],
+                        "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    check("--assume-tag states the missing tag and the comparison proceeds",
+          check_provenance(full_t, legacy_half, pair_def,
+                           assume_tag="is2ctempo_sheltilt") == [(0, V)])
+    err, _ = system_exit(check_provenance, full_t, legacy_half, pair_def,
+                         assume_tag="is2ctempo_sheltilt_qcey")
+    check("an assumed tag is checked like a stamped one, not trusted blindly",
+          err is not None and "tag='is2ctempo_sheltilt_qcey'" in err, f"SystemExit: {err!s:.60}")
     quarters = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
     ladder = [("ladder", "eulerian_Q0", "eulerian_A", "eulerian_B", None)]
     err, _ = system_exit(check_provenance, quarters, half_t, ladder, full_name="quarters")
-    check("pre-tag quarters vs freshly tagged halves of the same stack are compared, "
-          "not refused over the '_q' out-suffix", err is None, f"SystemExit: {err!s:.60}")
-    full_qcey = ds(["eulerian"], attrs={"velocity": V, "tag": "is2ctempo_sheltilt_qcey"})
-    err, _ = system_exit(check_provenance, full_qcey, legacy[""], pair_def)
-    check("a pre-tag half against another stack's product is still refused",
-          err is not None and "instrument mismatch" in err, f"SystemExit: {err!s:.60}")
-    err, out = system_exit(check_provenance, full_t,
-                           named(["eulerian_A", "eulerian_B"],
-                                 "pig_noise_floor_250m_othertag.nc"), pair_def)
-    check("a name that is not the canon stack is not guessed at, it warns",
-          err is None and "cannot verify the stack/mask tag" in out)
-    err, out = system_exit(check_provenance, ds(["eulerian"], attrs={"velocity": V}),
-                           half_nov, pair_def)
-    check("neither side able to state its tag warns instead of passing quietly",
-          err is None and "cannot verify the stack/mask tag" in out)
+    check("an untagged quarters file is named in the refusal too",
+          err is not None and "is2ctempo_sheltilt_q.nc" in err, f"SystemExit: {err!s:.60}")
+    check("with the tag assumed, tagged halves and an untagged quarters file compare",
+          check_provenance(quarters, half_t, ladder, full_name="quarters",
+                           assume_tag="is2ctempo_sheltilt") == [(0, V)])
+    err, _ = system_exit(check_provenance, ds(["eulerian"], attrs={"velocity": V}),
+                         ds(["eulerian_A", "eulerian_B"],
+                            attrs={"velocity": V, "common_epoch": 0}), pair_def)
+    check("neither side carrying a tag is refused, not passed over quietly",
+          err is not None and "cannot be established" in err, f"SystemExit: {err!s:.60}")
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),
