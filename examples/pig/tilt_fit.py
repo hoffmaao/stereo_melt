@@ -9,6 +9,14 @@ the per-pixel temporal-statistics filter from
 defaults (Shean 2019 PIG priors), and writes a tilt-corrected stack
 as a new NetCDF that downstream melt-rate solvers consume directly.
 
+Opt-in env switches, each defaulting to the behaviour above so the canon
+products come out unchanged: ``PIG_TILT_DOMAIN=full`` fits over all ice pixels
+including the shelf (Shean ndinterp both-mode) and must be paired with
+``PIG_TILT_DHDT_SMOOTH=1.0``; ``PIG_TILT_IRLS_MAX`` caps the Tukey IRLS
+iterations; ``PIG_TILT_EZ_BY_DEM_ID=1`` resolves per-epoch Ez per layer rather
+than by date union (implied whenever a nocorr root is active). What each is
+for is in the comments at its call site below.
+
 The PIG stack covers a wider domain than ``PIG_AOI_SHP``
 (see ``PIG_STACK_AOI_SHP``: ~30 km extension into the Queen
 Alexandra Range, ~47% grounded + ~7% rock outcrop) for exactly this

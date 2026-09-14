@@ -7,8 +7,10 @@
 
 Scores the MAP / posterior mean against the prescribed truth (nrmse, corr, bias,
 2-sigma coverage) next to the Eulerian / Lagrangian benchmarks packaged by
-prep_bpinn_twin.py, and reports the along-flow amplitude at the truth's channel
-wavelengths (1.0 / 1.5 km for the multixy twins).
+prep_bpinn_twin.py, and reports the amplitude at the truth's channel wavelengths
+(1.0 / 1.5 km for the multixy twins), measured along the axis the prescribed
+melt varies in as recorded in the npz (``truth_axis``: x for the ``multicos``
+xy twins, y for a y-only twin).
 
 The recorded twin result -- corr 0.23 without the transfer, 0.70 with it -- is
 the noise-free tier. Package it with ``prep_bpinn_twin.py multixy_pigreal

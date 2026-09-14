@@ -156,6 +156,9 @@ def main() -> int:
             run(f"eulerian_Q{q}", stack.isel(time=idx), "eulerian")
 
     ds_out = xr.Dataset(out)
+    # velocity/common_epoch/tag are the provenance pig.plot_noise_floor checks before
+    # it compares these halves against a full product: an unstamped file cannot be
+    # placed at all and is refused there, so keep stamping them.
     ds_out.attrs.update(velocity=vel_source, n_epochs_a=sa.sizes["time"],
                         n_epochs_b=sb.sizes["time"], n_bins=args.n_bins,
                         lift_umax_myr=args.lift_umax_myr,
