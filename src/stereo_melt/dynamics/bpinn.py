@@ -500,6 +500,12 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     reference (:func:`local_bin_geometry`), so ``n_bins > 1`` there reproduces
     the ``n_bins=1`` operator exactly rather than approximately -- and only
     there, so a structured domain is never quietly handed the global operator.
+
+    ``extras["transfer_bins"]`` records the ``(H, ux, uy)`` geometries the
+    observation operator was actually built from and ``extras["n_bins_effective"]``
+    how many there were (empty and 0 without ``transfer``, one entry on the
+    reference path), so a stored run can be told apart from one that requested
+    the same ``cfg.n_bins`` and got fewer bins out of the data.
     """
     import jax
     import jax.numpy as jnp
@@ -599,6 +605,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     Xg, Yg = np.meshgrid(data.x_km, data.y_km)
     Xg_j, Yg_j = jnp.asarray(Xg), jnp.asarray(Yg)
     gx, gy = Xg_j.ravel(), Yg_j.ravel()
+    transfer_bins: list[tuple] = []
 
     # ---- bridging transfer as the observation operator (optional) ----
     if cfg.transfer:
@@ -610,8 +617,13 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         H_ref = cfg.H_ref_m if cfg.H_ref_m is not None else float(data.H0)
         if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
             if not data.domain.any():
-                raise ValueError("empty domain: cannot default the reference velocity, "
-                                 "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
+                raise ValueError(
+                    f"empty domain: the local transfer (n_bins={int(cfg.n_bins)}) reads every bin's "
+                    f"geometry off the domain cells, and the ux_ref_myr/uy_ref_myr overrides are "
+                    f"not an option alongside it, so there is nothing to build an operator from"
+                    if is_local else
+                    "empty domain: cannot default the reference velocity, "
+                    "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
             ux_d = float(data.vx.mean(axis=0)[data.domain].mean() * 1e3)
             uy_d = float(data.vy.mean(axis=0)[data.domain].mean() * 1e3)
         else:
@@ -775,6 +787,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         for bi, (Hb, uxb, uyb) in enumerate(bin_geom):
             lab_b = f" bin {bi} (area {W_np[bi].mean():.2f})" if len(bin_geom) > 1 else ""
             M_list.append(_build_checked_operator(Hb, uxb, uyb, lab_b)[1])
+        transfer_bins = [tuple(float(c) for c in g) for g in bin_geom]
         M_op = jnp.asarray(np.stack(M_list))          # (nb, Py, Px)
         W_op = jnp.asarray(W_np)                      # (nb, ny, nx)
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
@@ -1024,4 +1037,6 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                         "obs_trend": obs_trend, "trend_median_myr": fit_med,
                         "obs_trend_median_myr": obs_med,
                         "trend_median_domain_myr": dom_med, "n_trend_cmp_px": n_cmp,
-                        "collapse_check_stood_down": bool(steady)})
+                        "collapse_check_stood_down": bool(steady),
+                        "transfer_bins": transfer_bins,
+                        "n_bins_effective": len(transfer_bins)})

@@ -93,6 +93,10 @@ def main() -> int:
     t0 = time.time()
     res = fit_bpinn(data, cfg)
     print(f"fit time {time.time() - t0:.0f} s")
+    tb = np.asarray(res.extras["transfer_bins"], float).reshape(-1, 3)
+    print(f"transfer operator: {res.extras['n_bins_effective']} bin(s) built of {cfg.n_bins} requested"
+          + "".join(f"\n  bin {i}: H {b[0]:.0f} m, u ({b[1]:+.0f}, {b[2]:+.0f}) m/yr"
+                    for i, b in enumerate(tb)))
 
     fields = {"B-PINN": res.melt_mean, "Eulerian": z["bench_eulerian"], "Lagrangian": z["bench_lagrangian"],
               "monolithic v2": z["bench_monolithic_v2"], "restored local+Helm": z["bench_restored_local_helm"]}
@@ -109,7 +113,8 @@ def main() -> int:
         print(f"  posterior sd: median {np.nanmedian(res.melt_sd[common]):.1f} m/yr; |mean|>2sd on {(np.abs(res.melt_mean[common]) > 2*res.melt_sd[common]).mean()*100:.0f}% of pixels")
     stem = R / f"bpinn_trunk_{args.tag}_{args.half}{args.out_suffix}"
     np.savez_compressed(str(stem) + ".npz", mean=res.melt_mean, sd=res.melt_sd, samples=res.samples, map=res.map_melt,
-                        obs_rms=res.obs_rms_m, loss=res.loss_history, common=common)
+                        obs_rms=res.obs_rms_m, loss=res.loss_history, common=common,
+                        transfer_bins=tb, n_bins_effective=res.extras["n_bins_effective"])
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

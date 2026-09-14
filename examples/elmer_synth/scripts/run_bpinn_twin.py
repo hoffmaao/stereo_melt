@@ -141,6 +141,10 @@ def main() -> int:
     t0 = time.time()
     res = fit_bpinn(data, cfg)
     print(f"fit time {time.time() - t0:.0f} s")
+    tb = np.asarray(res.extras["transfer_bins"], float).reshape(-1, 3)
+    print(f"transfer operator: {res.extras['n_bins_effective']} bin(s) built of {cfg.n_bins} requested"
+          + "".join(f"\n  bin {i}: H {b[0]:.0f} m, u ({b[1]:+.0f}, {b[2]:+.0f}) m/yr"
+                    for i, b in enumerate(tb)))
 
     def score(m, name, sd=None):
         fin = np.isfinite(m) & np.isfinite(truth) & data.domain
@@ -169,7 +173,8 @@ def main() -> int:
             print(f"  {name:12s} {_amp_at(m, x, y, data.domain, 1000, truth_axis):.1f} / "
                   f"{_amp_at(m, x, y, data.domain, 1500, truth_axis):.1f}")
     np.savez_compressed(f"{R}/bpinn_{args.tag}{args.out_suffix}.npz", mean=res.melt_mean, sd=res.melt_sd,
-                        samples=res.samples, map=res.map_melt, obs_rms=res.obs_rms_m, loss=res.loss_history)
+                        samples=res.samples, map=res.map_melt, obs_rms=res.obs_rms_m, loss=res.loss_history,
+                        transfer_bins=tb, n_bins_effective=res.extras["n_bins_effective"])
 
     import matplotlib
     matplotlib.use("Agg")
