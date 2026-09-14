@@ -1,6 +1,8 @@
 """Package a PIGREAL DEM-stack twin for the B-PINN (run in the stereo_melt env).
 
-Writes ``results/bpinn/twin_<tag>[_<variant>].npz`` with the twin stack
+Writes ``<checkout>/examples/elmer_synth/results/bpinn/twin_<tag>[_<variant>].npz``
+-- the first directory ``run_bpinn_twin.py`` searches, so packaging and scoring
+always agree on which file the twin is -- with the twin stack
 converted to hydrostatic thickness, the time-mean twin velocity, the
 prescribed truth melt field, and the Eulerian / Lagrangian benchmarks from the
 production solvers on identical inputs, so the JAX environment needs nothing
@@ -57,6 +59,10 @@ _RDS_CANDIDATES = (
 )
 
 SOLVERS = {"Eulerian": "eulerian", "Lagrangian path": "lagrangian"}
+
+# The twin lands in THIS checkout's results directory, which is the first entry
+# run_bpinn_twin.py searches, so packaging and scoring always name the same file.
+TWIN_DIR = f"{_REPO}/examples/elmer_synth/results/bpinn"
 
 
 def _load_rds():
@@ -151,8 +157,8 @@ def main() -> int:
         fin = np.isfinite(e)
         print(f"  {name}: nrmse {np.sqrt(np.mean(e[fin] ** 2)) / np.sqrt(np.mean(truth2d[fin] ** 2)):.3f}  "
               f"corr {np.corrcoef(bench[f'bench_{key}'][fin], truth2d[fin])[0, 1]:.3f}  finite {fin.mean():.2f}")
-    out = f"/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn/twin_{out_tag}.npz"
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    out = f"{TWIN_DIR}/twin_{out_tag}.npz"
+    os.makedirs(TWIN_DIR, exist_ok=True)
     np.savez_compressed(out, H_obs=np.asarray(H_obs.values, np.float32), x=h.x.values, y=h.y.values,
                         t_yr=np.asarray(t_yr, float), vx=np.asarray(vx.values, float),
                         vy=np.asarray(vy.values, float), truth=truth2d, truth_axis=axis,

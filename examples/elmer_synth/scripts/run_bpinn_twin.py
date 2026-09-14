@@ -13,8 +13,11 @@ melt varies in as recorded in the npz (``truth_axis``: x for the ``multicos``
 xy twins, y for a y-only twin).
 
 The twin itself is a local dataset written by ``prep_bpinn_twin.py`` into
-``results/bpinn``, so from a clean clone this script documents the recipe below
-rather than being runnable, and exits with that message when the twin is absent.
+``<checkout>/examples/elmer_synth/results/bpinn`` -- the first directory searched
+here, so the two drivers always name the same file; the analysis host's absolute
+path is kept as a second entry for twins packaged before that. From a clean clone
+this script documents the recipe below rather than being runnable, and exits with
+that message when the twin is absent.
 
 The recorded twin result -- corr 0.231 without the transfer, 0.693 with it
 (nrmse 0.995 -> 0.764; measured 2026-09-13 on the packaging in this tree) -- is
@@ -51,7 +54,10 @@ _TWIN_DIRS = tuple(dict.fromkeys((
 def _load_twin(tag):
     """``(npz, results_dir)`` for ``twin_<tag>.npz``, preferring this checkout's.
 
-    Scores and figures are written back beside the twin that was scored.
+    This checkout's directory is where ``prep_bpinn_twin.py`` writes, so the
+    recipe's two halves resolve to the same file; the analysis-host path is the
+    fallback for twins packaged before that. Scores and figures are written back
+    beside the twin that was scored.
     """
     for d in _TWIN_DIRS:
         path = f"{d}/twin_{tag}.npz"

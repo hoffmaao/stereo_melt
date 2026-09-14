@@ -1,6 +1,7 @@
-"""Test: the noise-floor reporting guards and the PIG_VELOCITY fallback warning.
+"""Test: the PIG plotting drivers' reporting guards and output contracts.
 
-Exercises the public functions of :mod:`pig.plot_noise_floor` and
+Exercises the public functions of :mod:`pig.plot_noise_floor`,
+:mod:`pig.plot_error_vs_count`, :mod:`pig.plot_melt_benchmark` and
 :mod:`pig.run_melt` on synthetic in-memory datasets — no PIG data is read.
 
 T1  ``crossing``: a non-positive SNR bin (product PSD below the noise floor)
@@ -36,6 +37,12 @@ T5  ``ladder_stack_name``: the count ladder's DEM-count axis follows the
     ``stamped`` flag is what distinguishes a tag read off a file from one the
     caller stated, so the single-run ladder -- one file, no provenance
     comparison at all -- still labels a ``--assume-tag`` stack as assumed.
+T6  ``figure_paths``: both benchmark figures go where ``--out`` asked. The
+    trunk zoom is the given name with ``_trunk`` appended to its stem and the
+    same extension, including when the stem itself contains a dot (the marker
+    must survive); an ``--out`` matplotlib cannot write is refused before any
+    rendering, since only the zoom would otherwise fall back to the canonical
+    figures directory; no ``--out`` keeps both canonical names.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -67,6 +74,7 @@ import stereo_melt  # noqa: E402,F401
 import pig  # noqa: E402,F401
 from pig import config  # noqa: E402
 from pig.plot_error_vs_count import ladder_stack_name  # noqa: E402
+from pig.plot_melt_benchmark import figure_paths  # noqa: E402
 from pig.plot_noise_floor import (  # noqa: E402
     CANON_TAG,
     available_pairs,
@@ -275,6 +283,29 @@ def main() -> int:
           ladder_stack_name(ds(["eulerian_Q0", "eulerian_A", "eulerian_B"],
                                attrs={"velocity": V, "tag": QT}))
           == (f"pig_stack_250m_{QT}", QT, True))
+
+    print("T6  figure_paths(): both figures land where --out asked")
+    check("a plain stem gets the _trunk sibling",
+          figure_paths("/tmp/bench.png", "T")
+          == (pathlib.Path("/tmp/bench.png"), pathlib.Path("/tmp/bench_trunk.png")))
+    # with_suffix() replaces everything after the LAST dot, so a dotted stem
+    # would silently lose the _trunk marker and overwrite an unrelated file.
+    for given, want in (("/tmp/melt_v1.2.png", "/tmp/melt_v1.2_trunk.png"),
+                        ("/tmp/run_2.5.pdf", "/tmp/run_2.5_trunk.pdf")):
+        got = figure_paths(given, "T")[1]
+        check(f"a dotted stem keeps its marker: {given}",
+              got == pathlib.Path(want), f"{got}")
+    check("a non-png extension is honoured for both figures",
+          figure_paths("/tmp/bench.svg", "T")[1] == pathlib.Path("/tmp/bench_trunk.svg"))
+    err, _ = system_exit(figure_paths, "/tmp/bench", "T")
+    check("an --out matplotlib cannot write is refused before rendering",
+          err is not None and "no image extension" in err and "/tmp/bench" in err,
+          f"SystemExit: {err!s:.60}")
+    canon = figure_paths(None, "T")
+    check("no --out keeps both canonical names in the figures directory",
+          canon == (config.FIGURES_DIR / "melt_benchmark_250m_T.png",
+                    config.FIGURES_DIR / "melt_benchmark_trunk_250m_T.png"),
+          f"{[p.name for p in canon]}")
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),

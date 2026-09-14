@@ -46,6 +46,33 @@ RHO_I = 918.0
 CANON_BENCHMARK = "pig_melt_250m_is2ctempo_minext_2010-01-01_2024-01-10.nc"
 
 
+def figure_paths(out, tag):
+    """``(full_shelf, trunk_zoom)`` figure paths for this run.
+
+    Both figures go where the caller asked: the trunk zoom is the ``--out``
+    name with ``_trunk`` appended to its stem and the SAME extension, built
+    from the parts rather than through ``with_suffix`` so a dotted stem
+    (``melt_v1.2.png``) keeps its marker instead of losing everything after
+    its last dot. Without ``--out`` both take their canonical names in
+    ``config.FIGURES_DIR``. An ``--out`` matplotlib could not write is refused
+    here, before any rendering, because the zoom would otherwise be the only
+    figure to fall back to the canonical directory.
+    """
+    if not out:
+        return (config.FIGURES_DIR / f"melt_benchmark_250m_{tag}.png",
+                config.FIGURES_DIR / f"melt_benchmark_trunk_250m_{tag}.png")
+    full = Path(out)
+    if full.suffix.lower().lstrip(".") not in FIGURE_SUFFIXES:
+        raise SystemExit(
+            f"--out {out!r} has no image extension matplotlib can write "
+            f"(one of: {', '.join('.' + e for e in sorted(FIGURE_SUFFIXES))}). "
+            f"The trunk zoom is written beside it as <stem>_trunk{full.suffix or '.png'}, "
+            f"so an extensionless path would send it to the canonical figures directory "
+            f"instead of where you asked."
+        )
+    return full, full.with_name(full.stem + "_trunk" + full.suffix)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -193,20 +220,7 @@ def main() -> int:
         fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
         print(f"wrote {out}")
 
-    stem = None
-    if args.out:
-        out_full = Path(args.out)
-        if out_full.suffix.lower().lstrip(".") not in FIGURE_SUFFIXES:
-            raise SystemExit(
-                f"--out {args.out!r} has no image extension matplotlib can write "
-                f"(one of: {', '.join('.' + e for e in sorted(FIGURE_SUFFIXES))}). "
-                f"The trunk zoom is written beside it as <stem>_trunk{out_full.suffix or '.png'}, "
-                f"so an extensionless path would send it to the canonical figures directory "
-                f"instead of where you asked."
-            )
-        stem = out_full.with_suffix("")
-    else:
-        out_full = config.FIGURES_DIR / f"melt_benchmark_250m_{args.tag}.png"
+    out_full, out_zoom = figure_paths(args.out, args.tag)
     render(full, out_full, "full shelf")
 
     if args.zoom != "none":
@@ -234,9 +248,6 @@ def main() -> int:
         print(f"  trunk zoom box rows {box[0]}:{box[1]} cols {box[2]}:{box[3]} "
               f"= x {ref.x.values[box[2]]/1e3:.0f}..{ref.x.values[box[3]-1]/1e3:.0f} km, "
               f"y {ref.y.values[box[1]-1]/1e3:.0f}..{ref.y.values[box[0]]/1e3:.0f} km")
-        out_zoom = (stem.with_name(stem.name + "_trunk").with_suffix(out_full.suffix)
-                    if stem is not None
-                    else config.FIGURES_DIR / f"melt_benchmark_trunk_250m_{args.tag}.png")
         render(box, out_zoom, "fast trunk")
     return 0
 
