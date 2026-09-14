@@ -8,15 +8,15 @@ scaling:
    quarters (disjoint strips, full time span; ``run_noise_floor --quarters``
    writes both rungs from one run, and a halves file from another run is
    only accepted if its recorded solver settings match), the Eulerian melt
-   is solved
-   from each, and the per-pixel DEM counts on the x axis come from that same
-   ladder's own stack (resolved from its stamped tag), and pairwise
-   differences give the noise at n/2 and n/4 over
-   the SAME pixels: Var[A-B] = 2 sigma^2 at that count, so sigma_{n/2} =
-   rms(A-B)/sqrt(2) and sigma_{n/4} = rms(Qi-Qj)/sqrt(2). Everything else
-   (region, velocity, SMB, window) is
-   held fixed, so the slope between the two rungs is the count scaling
-   alone. White per-epoch errors: sigma ~ n^{-1/2}.
+   is solved from each, and pairwise differences give the noise at n/2 and
+   n/4 over the SAME pixels: Var[A-B] = 2 sigma^2 at that count, so
+   sigma_{n/2} = rms(A-B)/sqrt(2) and sigma_{n/4} = rms(Qi-Qj)/sqrt(2). The
+   per-pixel DEM counts on the x axis come from the stack that same ladder
+   was solved from, identified by :func:`ladder_stack_name` -- which also
+   says when the stack had to be assumed rather than read off a ladder file,
+   a caveat the figure then carries. Everything else (region, velocity, SMB,
+   window) is held fixed, so the slope between the two rungs is the count
+   scaling alone. White per-epoch errors: sigma ~ n^{-1/2}.
 
 2. SPATIAL BINNING (deliberately NOT computed or drawn). Binning the
    per-pixel half-difference by that pixel's DEM count LOOKS like the same
