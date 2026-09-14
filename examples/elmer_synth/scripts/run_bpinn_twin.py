@@ -12,6 +12,10 @@ prep_bpinn_twin.py, and reports the amplitude at the truth's channel wavelengths
 melt varies in as recorded in the npz (``truth_axis``: x for the ``multicos``
 xy twins, y for a y-only twin).
 
+The twin itself is a local dataset written by ``prep_bpinn_twin.py`` into
+``results/bpinn``, so from a clean clone this script documents the recipe below
+rather than being runnable, and exits with that message when the twin is absent.
+
 The recorded twin result -- corr 0.23 without the transfer, 0.70 with it -- is
 the noise-free tier. Package it with ``prep_bpinn_twin.py multixy_pigreal
 multixy_bmb clean`` (writes ``twin_multixy_pigreal_clean.npz``) and score it
@@ -27,6 +31,7 @@ error-injected tier, which is noise-limited here (corr about 0).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 
@@ -36,7 +41,29 @@ _REPO = __import__("pathlib").Path(__file__).resolve().parents[3]
 sys.path.insert(0, f"{_REPO}/src")
 from stereo_melt.dynamics.bpinn import BPINNConfig, fit_bpinn, prepare_bpinn_data  # noqa: E402
 
-R = "/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn"
+_TWIN_DIRS = tuple(dict.fromkeys((
+    f"{_REPO}/examples/elmer_synth/results/bpinn",
+    "/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn",
+)))
+
+
+def _load_twin(tag):
+    """``(npz, results_dir)`` for ``twin_<tag>.npz``, preferring this checkout's.
+
+    Scores and figures are written back beside the twin that was scored.
+    """
+    for d in _TWIN_DIRS:
+        path = f"{d}/twin_{tag}.npz"
+        if os.path.exists(path):
+            return np.load(path), d
+    raise SystemExit(
+        f"twin_{tag}.npz not found (looked in: " + ", ".join(_TWIN_DIRS) + "). "
+        "Scoring the B-PINN needs a packaged twin from the elmer_synth twin tier on the "
+        "analysis host -- the Elmer runs and the synthetic DEM stacks it is built from are a "
+        "local dataset that is not part of the repository. From a clean clone this script "
+        "documents the validation recipe rather than being runnable; on the analysis host, "
+        "package the twin first with `prep_bpinn_twin.py multixy_pigreal multixy_bmb clean`."
+    )
 
 
 def _amp_at(m, x, y, domain, lam, axis="xy"):
@@ -87,7 +114,7 @@ def main() -> int:
     ap.add_argument("--no-base-field", action="store_true")
     args = ap.parse_args()
 
-    z = np.load(f"{R}/twin_{args.tag}.npz")
+    z, R = _load_twin(args.tag)
     H_obs, x, y, t_yr, vx, vy, truth = (z[k] for k in ("H_obs", "x", "y", "t_yr", "vx", "vy", "truth"))
     print(f"twin {args.tag}: stack {H_obs.shape}, dx {x[1] - x[0]:.0f} m, {t_yr.min():.2f}..{t_yr.max():.2f}, "
           f"finite {np.isfinite(H_obs).mean():.2f}, |v| {np.hypot(vx, vy).mean():.0f} m/yr")

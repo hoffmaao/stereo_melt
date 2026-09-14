@@ -176,8 +176,12 @@ def check_provenance(full, half, pairs, *, full_name="full product",
     such a file was solved from, and it is then checked against the other side
     like any stamped tag. It stands in for at most ONE side: filling both would
     make them agree by construction and check nothing, so a pair in which
-    neither file can be placed is refused whatever the caller asserts. Returns
-    the agreed ``(common_epoch, velocity)`` for labelling the output.
+    neither file can be placed is refused whatever the caller asserts.
+
+    Returns ``(agreed, assumed_for)``: the agreed ``(common_epoch, velocity)``
+    for labelling the output, and the name of the file ``assume_tag`` actually
+    stood in for -- ``None`` when both files carry their own tag, so a caller
+    labels the assumption only when one was needed.
 
     ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
     comparisons of ``run_noise_floor`` products against a reference (e.g. the
@@ -201,6 +205,7 @@ def check_provenance(full, half, pairs, *, full_name="full product",
             agreed.add((fce, fvel))
     ftag, htag = product_tag(full), product_tag(half)
     unplaced = [source_name(d) for d, t in ((half, htag), (full, ftag)) if t is None]
+    assumed_for = unplaced[0] if len(unplaced) == 1 and assume_tag is not None else None
     if len(unplaced) == 2:
         problems.append(
             f"neither {unplaced[0]} nor {unplaced[1]} carries a stack/mask tag: --assume-tag "
@@ -221,7 +226,7 @@ def check_provenance(full, half, pairs, *, full_name="full product",
             f"instrument mismatch between halves and {full_name} — {purpose} "
             "is only meaningful when both come from the same solver settings:\n  "
             + "\n  ".join(problems) + "\n  " + hint)
-    return sorted(agreed)
+    return sorted(agreed), assumed_for
 
 
 def stratify(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, label_prefix=""):
@@ -272,10 +277,10 @@ def main() -> int:
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
-    prov = check_provenance(full, half, pairs, assume_tag=args.assume_tag)
+    prov, assumed_for = check_provenance(full, half, pairs, assume_tag=args.assume_tag)
     prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
-    if args.assume_tag:
-        prov_label += f"; stack tag ASSUMED {args.assume_tag} (not stamped on the file)"
+    if assumed_for:
+        prov_label += f"; stack tag ASSUMED {args.assume_tag} (not stamped on {assumed_for})"
     print(f"  provenance (halves == full): {prov_label}", flush=True)
     suffix = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
 

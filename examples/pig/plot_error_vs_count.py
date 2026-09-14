@@ -57,27 +57,31 @@ QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
 
 
 def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
-    """``(halves, quarters)`` datasets for the ladder.
+    """``(halves, quarters, assumed_for)`` for the ladder.
 
     The quarters file carries the same run's halves, so by default both rungs
     are read from it; an explicit ``half_nc`` (or a quarters file without
     halves, from an older run) falls back to the separate halves file and
-    is checked for matching provenance.
+    is checked for matching provenance. ``assumed_for`` is the file
+    ``assume_tag`` had to stand in for, or ``None`` -- including on the
+    single-run path, which compares nothing and so assumes nothing -- so the
+    caller records the assumption only where one was actually made.
     """
     q = xr.open_dataset(quarters_nc)
     if half_nc is None and all(k in q for k in HALVES):
         print(f"  halves and quarters from one run: {quarters_nc}", flush=True)
-        return q, q
+        return q, q, None
     half = xr.open_dataset(half_nc or NC_HALF)
-    ce, vel = check_provenance(
+    agreed, assumed_for = check_provenance(
         q, half, [(f"ladder {qk}", qk, *HALVES, None) for qk in QUARTERS],
         full_name="quarters", purpose="the count scaling", assume_tag=assume_tag,
         hint="re-run run_noise_floor --quarters with the halves' settings (its "
-             "output carries both rungs) or pass a matching --half-nc")[0]
-    assumed = f", stack tag ASSUMED {assume_tag}" if assume_tag else ""
+             "output carries both rungs) or pass a matching --half-nc")
+    ce, vel = agreed[0]
+    assumed = f", stack tag ASSUMED {assume_tag} (not stamped on {assumed_for})" if assumed_for else ""
     print(f"  halves {half_nc or NC_HALF} + quarters {quarters_nc}: "
           f"provenance agrees (common_epoch={ce}, velocity={vel!r}{assumed})", flush=True)
-    return half, q
+    return half, q, assumed_for
 
 
 def main() -> int:
@@ -95,7 +99,7 @@ def main() -> int:
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    half, q = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
+    half, q, assumed_for = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
     st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
     n_full = np.isfinite(st.values).sum(0).astype(float)
     z = np.load(config.PROCESSED_DIR / "pig_eta_field_250m_dual_20260730_t0era5.npz")
@@ -154,8 +158,8 @@ def main() -> int:
                  "same pixels, same everything\nempirical trunk slope "
                  f"{sl:+.2f} (white −0.50) ⇒ trunk bridging band needs "
                  f"~{need:.1f}× the strips (1/n assumption said 1.4×)"
-                 + (f"\nstack tag ASSUMED {args.assume_tag} (not stamped on the file)"
-                    if args.assume_tag else ""), fontsize=11)
+                 + (f"\nstack tag ASSUMED {args.assume_tag} (not stamped on {assumed_for})"
+                    if assumed_for else ""), fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_error_vs_dem_count.png")
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")

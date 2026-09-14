@@ -674,9 +674,9 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
 
     def loss_fn(params, key, obs_idx, epoch_w):
         theta, phi = params["theta"], params["phi"]
-        k_o, k_c, k_t = jax.random.split(key, 3)
+        k_o, k_c, k_j, k_t = jax.random.split(key, 4)
         ic = jax.random.choice(k_c, dom_xy.shape[0], (cfg.batch_col,))
-        xy = dom_xy[ic] + jax.random.uniform(k_c, (cfg.batch_col, 2), minval=-0.5, maxval=0.5) * jnp.array([dx, dy])
+        xy = dom_xy[ic] + jax.random.uniform(k_j, (cfg.batch_col, 2), minval=-0.5, maxval=0.5) * jnp.array([dx, dy])
         tcol = jax.random.uniform(k_t, (cfg.batch_col,), minval=t0, maxval=t1)
         if cfg.transfer:
             # Importance sampling: draw epochs with probability ∝ (bootstrap weight × finite

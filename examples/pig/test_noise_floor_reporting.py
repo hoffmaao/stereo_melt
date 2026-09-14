@@ -24,7 +24,9 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     unless its name is the un-suffixed default that predates ``--tag``, so
     it is refused by name rather than read from that name; ``--assume-tag``
     states it explicitly and is then checked like a stamped tag, and it
-    stands in for one side only, so two untagged files stay refused.
+    stands in for one side only, so two untagged files stay refused. The
+    check reports which side (if any) the assumption stood in for, so a
+    caller labels its figure with the caveat only when one was needed.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -139,11 +141,11 @@ def main() -> int:
           f"SystemExit: {err!s:.60}")
     err, out = system_exit(check_provenance, full, half_ce, pair_ce)
     with contextlib.redirect_stdout(io.StringIO()):
-        agreed = check_provenance(full, half_ce, pair_ce)
+        agreed, assumed = check_provenance(full, half_ce, pair_ce)
     check("matching common-epoch provenance is accepted and returned",
-          err is None and agreed == [(1, V)], f"{agreed}")
+          err is None and agreed == [(1, V)] and assumed is None, f"{agreed}, assumed {assumed!r}")
     with contextlib.redirect_stdout(io.StringIO()):
-        agreed0 = check_provenance(full, half_def, pair_def)
+        agreed0, _ = check_provenance(full, half_def, pair_def)
     check("matching default provenance is accepted and returned", agreed0 == [(0, V)], f"{agreed0}")
     half_v = ds(["eulerian_A", "eulerian_B"],
                 attrs={"velocity": "other", "common_epoch": 0, "tag": T})
@@ -164,7 +166,10 @@ def main() -> int:
           err is not None and "instrument mismatch" in err
           and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
     check("matching tags are accepted",
-          check_provenance(full_t, half_t, pair_def) == [(0, V)])
+          check_provenance(full_t, half_t, pair_def) == ([(0, V)], None))
+    check("both tags stamped: --assume-tag is unused, so nothing is reported as assumed",
+          check_provenance(full_t, half_t, pair_def,
+                           assume_tag="is2ctempo_sheltilt_qcey") == ([(0, V)], None))
     def named(names, name, **attrs):
         """A product predating the tag attr: no tag, only a filename."""
         d = ds(names, attrs={"velocity": V, "common_epoch": 0, **attrs})
@@ -177,7 +182,7 @@ def main() -> int:
     default_half = named(["eulerian_A", "eulerian_B"],
                          "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
     check("the un-suffixed default half predates --tag, so it is the canon stack",
-          check_provenance(full_t, default_half, pair_def) == [(0, V)])
+          check_provenance(full_t, default_half, pair_def) == ([(0, V)], None))
     for suffix in ("_ce", "_q", "_is2ctempo_sheltilt_qcey"):
         name = f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc"
         err, _ = system_exit(check_provenance, full_t,
@@ -187,9 +192,12 @@ def main() -> int:
               and "cannot be established" in err, f"SystemExit: {err!s:.60}")
     qcey_half = named(["eulerian_A", "eulerian_B"],
                       "pig_noise_floor_250m_is2ctempo_sheltilt_is2ctempo_sheltilt_qcey.nc")
+    agreed_a, assumed_a = check_provenance(full_t, qcey_half, pair_def,
+                                           assume_tag="is2ctempo_sheltilt")
     check("--assume-tag states the missing tag and the comparison proceeds",
-          check_provenance(full_t, qcey_half, pair_def,
-                           assume_tag="is2ctempo_sheltilt") == [(0, V)])
+          agreed_a == [(0, V)], f"{agreed_a}")
+    check("the untagged side is reported, so only then is the caveat labelled",
+          assumed_a == qcey_half.encoding["source"].rsplit("/", 1)[-1], f"assumed {assumed_a!r}")
     err, _ = system_exit(check_provenance, full_t, qcey_half, pair_def,
                          assume_tag="is2ctempo_sheltilt_qcey")
     check("an assumed tag is checked like a stamped one, not trusted blindly",
@@ -201,7 +209,8 @@ def main() -> int:
           err is not None and "is2ctempo_sheltilt_q.nc" in err, f"SystemExit: {err!s:.60}")
     check("with the tag assumed, tagged halves and an untagged quarters file compare",
           check_provenance(quarters, half_t, ladder, full_name="quarters",
-                           assume_tag="is2ctempo_sheltilt") == [(0, V)])
+                           assume_tag="is2ctempo_sheltilt")
+          == ([(0, V)], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc"))
     # The ladder pair that motivated the override: canon quarters, qcey halves,
     # neither carrying a tag. One assertion cannot vouch for both sides.
     err, _ = system_exit(check_provenance, quarters, qcey_half, ladder,
