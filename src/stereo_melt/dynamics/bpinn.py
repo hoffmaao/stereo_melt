@@ -117,9 +117,10 @@ is finer than that — a shelf thinner than its own pixel cannot carry a
 resolvable 2H probe. The probe must also stay under a quarter of the shorter
 domain side, above which reflect-pad leakage swamps the projected gain and the
 ordering is decided by the window rather than by the flow. Outside that band the
-physics check only logs. On the PIG trunk (120x160 at 250 m, :math:`H` 560 m)
-the usable band is 1000-7500 m and the probe sits at 1120 m, 6.7x under the
-ceiling -- the ceiling is a quarter of the 30 km domain, not the domain itself.
+physics check only logs. On the packaged PIG trunk window (164 rows x 154 cols
+at 250 m, :math:`H` 560 m) the usable band is 1000-9625 m and the probe sits at
+1120 m, 8.6x under the ceiling -- the ceiling is a quarter of the 38.5 km
+shorter side, not the side itself.
 
 Without the transfer
 (the default) a hydrostatic budget can only see :math:`|T|` of channel-scale
@@ -142,6 +143,10 @@ __all__ = ["BPINNConfig", "BPINNData", "BPINNResult", "prepare_bpinn_data", "fit
 
 # Epochs a pixel needs before its observed dH/dt is trusted as a collapse yardstick.
 MIN_TREND_EPOCHS = 5
+# Observed thinning a stack must show before a near-zero fitted trend means anything.
+# A steady stack -- the DEM-stack twins are steady by construction -- has an observed
+# median at the noise level, and a ratio against that would call a perfect fit a collapse.
+STEADY_TREND_MYR = 0.5
 
 
 @dataclass
@@ -159,7 +164,9 @@ class BPINNConfig:
     1. the fitted surrogate ``dH/dt`` must be of the order of the observed
        thinning (about -3 to -6 m/yr on the PIG trunk; near 0 means collapse).
        ``fit_bpinn`` prints both trends and raises a ``RuntimeWarning`` when the
-       fitted one falls under 20 % of the observed one;
+       fitted one falls under 20 % of the observed one. The ratio needs a stack
+       that is actually thinning, so the check stands down (and says so) when the
+       observed median is under ``STEADY_TREND_MYR``, as on the steady twins;
     2. ``transfer=False`` must change the answer. If it does not, the observation
        operator is not informing the fit.
     """
@@ -491,7 +498,8 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         # There is an upper bound too: once the probe is an appreciable fraction of the tile,
         # reflect-pad leakage swamps the projected gain and the along/across ordering is
         # decided by the window rather than by the flow. A quarter of the shorter domain side
-        # is the ceiling; the PIG trunk probes 1120 m in a 1000-7500 m band, 6.7x under it.
+        # is the ceiling; the packaged PIG trunk (164 x 154 at 250 m) probes 1120 m in a
+        # 1000-9625 m band, 8.6x under it.
         lam_min = 4.0 * max(dx, dy) * 1e3
         lam_max = 0.25 * min(nx * dx, ny * dy) * 1e3
         lam_probe = max(2.0 * H_ref, lam_min)
@@ -797,7 +805,12 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
           f"p10/p90 {np.nanpercentile(trend[data.domain], 10):+.1f}/{np.nanpercentile(trend[data.domain], 90):+.1f}"
           f"; over the {n_cmp} px with >= {MIN_TREND_EPOCHS} epochs: fitted {fit_med:+.2f} vs "
           f"observed {obs_med:+.2f} m/yr", flush=True)
-    if np.isfinite(obs_med) and np.isfinite(fit_med) and abs(obs_med) > 0 and abs(fit_med) < 0.2 * abs(obs_med):
+    steady = np.isfinite(obs_med) and abs(obs_med) < STEADY_TREND_MYR
+    if steady:
+        print(f"  [bpinn] collapse check stood down: the observed trend median {obs_med:+.3f} m/yr is "
+              f"under the {STEADY_TREND_MYR:g} m/yr floor, so this stack is steady and a near-zero "
+              f"fitted trend {fit_med:+.3f} m/yr is not evidence of collapse", flush=True)
+    if not steady and np.isfinite(obs_med) and np.isfinite(fit_med) and abs(fit_med) < 0.2 * abs(obs_med):
         warnings.warn(
             f"B-PINN surrogate may have collapsed to a static field: over the {n_cmp} domain px "
             f"with >= {MIN_TREND_EPOCHS} epochs, the fitted dH/dt median {fit_med:+.3f} m/yr is "
@@ -825,4 +838,5 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                        {"n_obs": int(N_obs), "n_col_nominal": int(N_col), "trend": trend,
                         "obs_trend": obs_trend, "trend_median_myr": fit_med,
                         "obs_trend_median_myr": obs_med,
-                        "trend_median_domain_myr": dom_med, "n_trend_cmp_px": n_cmp})
+                        "trend_median_domain_myr": dom_med, "n_trend_cmp_px": n_cmp,
+                        "collapse_check_stood_down": bool(steady)})
