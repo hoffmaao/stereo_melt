@@ -13,9 +13,9 @@ Opt-in env switches, each defaulting to the behaviour above so the canon
 products come out unchanged: ``PIG_TILT_DOMAIN=full`` fits over all ice pixels
 including the shelf (Shean ndinterp both-mode) and must be paired with
 ``PIG_TILT_DHDT_SMOOTH=1.0``; ``PIG_TILT_IRLS_MAX`` caps the Tukey IRLS
-iterations; ``PIG_TILT_EZ_BY_DEM_ID=1`` resolves per-epoch Ez per layer rather
-than by date union (implied whenever a nocorr root is active). What each is
-for is in the comments at its call site below.
+iterations; ``PIG_TILT_EZ_BY_DEM_ID=1`` resolves per-epoch Ez and the P3
+offset-only gate per layer rather than by date (implied whenever a nocorr root
+is active). What each is for is in the comments at its call site below.
 
 The PIG stack covers a wider domain than ``PIG_AOI_SHP``
 (see ``PIG_STACK_AOI_SHP``: ~30 km extension into the Queen
@@ -323,10 +323,10 @@ def main(
     ez_dem_ids = (stack["dem_id"].values
                   if ez_by_dem_id and "dem_id" in stack.coords else None)
     if ez_by_dem_id and ez_dem_ids is None:
-        print("WARNING: by-dem_id Ez resolution requested but this stack carries no dem_id "
-              "coord, so Ez falls back to date union -- a nocorr layer sharing a REMA date "
-              "with an aligned strip will inherit that strip's tighter Ez. Rebuild the stack "
-              "with build_stack to close the leak.")
+        print("WARNING: by-dem_id resolution requested but this stack carries no dem_id "
+              "coord, so Ez and the P3 offset-only gate fall back to date -- a nocorr layer "
+              "sharing a REMA date with an aligned strip will inherit that strip's tighter Ez "
+              "and its alignment verdict. Rebuild the stack with build_stack to close the leak.")
     Ez_per_epoch, ez_summary = build_per_epoch_ez(
         stack["time"].values,
         [(p.parent, suf) for p, suf in config.STRIP_SOURCES],
@@ -340,6 +340,16 @@ def main(
     # plane on a strip pc_align couldn't lock is noise-dominated and injects a
     # spurious ramp into dh/dt. Threshold via PIG_OFFSET_ONLY_END_P50_M (default
     # 3 m); strips above the find_bad_epochs drop gate (~5 m) are already gone.
+    # Keyed by DATE by default -- the worst same-day end_p50 demotes every layer
+    # that day -- which is how the canon products were built, so that stays the
+    # default. Keyed by dem_id on the same switch as Ez above, for the same
+    # collision: aggregate_basin_quality enumerates strips by their pc_align
+    # *-end_errors.csv, which a control-free nocorr root has none of (PIG
+    # 2026-09-12: 0 of 144 nocorr layers carry a row of their own, and 7 share a
+    # REMA date with an aligned strip over the threshold). By date those layers
+    # are demoted to alpha_z-only on another strip's failed alignment, losing the
+    # x/y plane the no-control recipe needs the LSQ to estimate. A layer with no
+    # row of its own is never demoted on someone else's evidence.
     offset_only = None
     offset_thresh = float(os.environ.get("PIG_OFFSET_ONLY_END_P50_M", "3.0"))
     try:
@@ -348,13 +358,25 @@ def main(
         aq = aggregate_basin_quality(config.STRIP_SOURCES)
         if not aq.empty:
             aq = aq.copy()
-            aq["d"] = pd.to_datetime(aq["date"]).dt.normalize()
-            per = aq.groupby("d")["end_p50"].max()
-            stimes = pd.to_datetime(stack["time"].values).normalize()
-            ep = np.array([per.get(d, np.nan) for d in stimes], dtype=float)
+            if ez_dem_ids is not None:
+                gate_key = "dem_id"
+                per = aq.groupby("dem_id")["end_p50"].max()
+                ep = np.array([per.get(str(i), np.nan) for i in ez_dem_ids], dtype=float)
+            else:
+                gate_key = "date"
+                aq["d"] = pd.to_datetime(aq["date"]).dt.normalize()
+                per = aq.groupby("d")["end_p50"].max()
+                stimes = pd.to_datetime(stack["time"].values).normalize()
+                ep = np.array([per.get(d, np.nan) for d in stimes], dtype=float)
             offset_only = np.isfinite(ep) & (ep > offset_thresh)
-            print(f"  P3 offset-only: {int(offset_only.sum())}/{len(offset_only)} "
+            print(f"  P3 offset-only (resolved by {gate_key}): "
+                  f"{int(offset_only.sum())}/{len(offset_only)} "
                   f"epochs have end_p50>{offset_thresh:.1f}m -> alpha_z-only fit")
+            n_noquality = int(np.sum(~np.isfinite(ep)))
+            if gate_key == "dem_id" and n_noquality:
+                print(f"    {n_noquality}/{len(ep)} epochs carry no pc_align end_errors row of "
+                      "their own (the control-free nocorr root has none): full x/y fit, never "
+                      "demoted on a same-date strip's alignment")
     except Exception as exc:
         print(f"  P3 offset-only gate skipped: {exc}")
     print("Fitting per-epoch residual tilts (Shean 2019 / Smith ndinterp.py-style)...")
