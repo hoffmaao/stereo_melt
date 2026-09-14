@@ -9,6 +9,14 @@ the per-pixel temporal-statistics filter from
 defaults (Shean 2019 PIG priors), and writes a tilt-corrected stack
 as a new NetCDF that downstream melt-rate solvers consume directly.
 
+Opt-in env switches, each defaulting to the behaviour above so the canon
+products come out unchanged: ``PIG_TILT_DOMAIN=full`` fits over all ice pixels
+including the shelf (Shean ndinterp both-mode) and must be paired with
+``PIG_TILT_DHDT_SMOOTH=1.0``; ``PIG_TILT_IRLS_MAX`` caps the Tukey IRLS
+iterations; ``PIG_TILT_EZ_BY_DEM_ID=1`` resolves per-epoch Ez and the P3
+offset-only gate per layer rather than by date (implied whenever a nocorr root
+is active). What each is for is in the comments at its call site below.
+
 The PIG stack covers a wider domain than ``PIG_AOI_SHP``
 (see ``PIG_STACK_AOI_SHP``: ~30 km extension into the Queen
 Alexandra Range, ~47% grounded + ~7% rock outcrop) for exactly this
@@ -44,6 +52,7 @@ import xarray as xr
 
 from stereo_melt.coregister.control_source import build_per_epoch_ez
 from stereo_melt.coregister.tilt import (
+    build_ice_domain_mask,
     build_static_area_polygon_mask,
     build_static_control_mask,
     fit_tilt_stack,
@@ -168,13 +177,13 @@ def main(
         config.STRIP_SOURCES = [
             config.STRIP_SOURCES[0],
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
-        ]
+        ] + config.STRIP_SOURCES[2:]
     if is2_asp:
         variant = is2_asp.lstrip("_")
         config.STRIP_SOURCES = [
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
             config.STRIP_SOURCES[1],
-        ]
+        ] + config.STRIP_SOURCES[2:]
 
     print("Loading raw stack...")
     stack, src_path = _load_raw_stack(stack_prefix=stack_prefix)
@@ -246,11 +255,45 @@ def main(
     # every epoch contributes its control-overlap pixels, and strips with
     # too little static overlap degrade to offset-only via min_width + the
     # Ez/Ex/Ey priors -- none are dropped.
-    obs_domain = control
-    print(
-        f"  tilt-fit observation domain = static control (shelf excluded): "
-        f"{int(control.sum())}/{control.size} ({100*float(control.mean()):.1f}%)"
-    )
+    #
+    # PIG_TILT_DOMAIN=full (2026-09-06 nocorr test; mirrors beardmore_shelf)
+    # switches to Shean's actual production system (vendor ndinterp.py
+    # clip_to_shelfmask=False, both=True): ALL valid ice pixels including the
+    # floating shelf. It MUST be paired with the dh/dt smoothness rows
+    # (PIG_TILT_DHDT_SMOOTH, Shean L574+ unit weight = 1.0), which is what
+    # closes the aliasing nullspace above and lets cross-epoch self-consistency
+    # set the datum of control-free (nocorr) epochs, which the static domain
+    # gives ZERO observation rows. Default remains static.
+    tilt_domain = os.environ.get("PIG_TILT_DOMAIN", "static").lower()
+    dhdt_smooth = float(os.environ.get("PIG_TILT_DHDT_SMOOTH", "0"))
+    irls_max = int(os.environ.get("PIG_TILT_IRLS_MAX", "8"))
+    if irls_max != 8:
+        print(f"  IRLS max iterations: {irls_max} (PIG_TILT_IRLS_MAX)")
+    if tilt_domain == "full":
+        obs_domain = build_ice_domain_mask(stack, config.BEDMACHINE_NC)
+        print(
+            f"  tilt-fit observation domain = full ice incl. shelf (Shean "
+            f"ndinterp both-mode): {int(obs_domain.values.sum())}/{obs_domain.size} "
+            f"({100*float(obs_domain.values.mean()):.1f}%)"
+        )
+        if not dhdt_smooth:
+            print(
+                "  ⚠ full domain WITHOUT dh/dt smoothness reproduces the "
+                "2026-06-07 aliasing nullspace — set PIG_TILT_DHDT_SMOOTH=1.0 "
+                "unless deliberately reproducing it."
+            )
+    elif tilt_domain == "static":
+        obs_domain = control
+        print(
+            f"  tilt-fit observation domain = static control (shelf excluded): "
+            f"{int(control.sum())}/{control.size} ({100*float(control.mean()):.1f}%)"
+        )
+    else:
+        raise SystemExit(
+            f"PIG_TILT_DOMAIN must be 'static' or 'full', got {tilt_domain!r}"
+        )
+    if dhdt_smooth:
+        print(f"  dh/dt smoothness weight: {dhdt_smooth:g} (Shean ndinterp L574+)")
 
     # 4/4: per-epoch tilt LSQ on the geoid+MDT-corrected stack.
     # PIG stack is ~23 km × 54 km; Shean's 40 km PIG default would
@@ -267,17 +310,51 @@ def main(
     # Multi-root form: walk every ASP root in STRIP_SOURCES so the pre-IS2
     # IS2+ATM+LVIS era (ASP_is2atmlvis/) and the post-Oct 2018 IS2+CS2 era
     # (ASP/) both contribute sources.json sidecars.
+    # Layers resolve by DATE UNION by default -- every strip sharing a timestamp
+    # contributes, min Ez wins -- which is how the canon PIG products were built,
+    # so that stays the default and they remain byte-identical. Resolve by dem_id
+    # instead when a nocorr root is active (or PIG_TILT_EZ_BY_DEM_ID=1): REMA
+    # filenames carry no time-of-day, so a control-free nocorr layer sharing a date
+    # with an aligned strip would otherwise inherit its Ez 0.1 prior instead of the
+    # nocorr 1.0 tier, pinning the one datum the recipe needs the LSQ to estimate
+    # (beardmore_shelf 2026-07-11: 35 of 99 nocorr layers leaked that way).
+    ez_env = os.environ.get("PIG_TILT_EZ_BY_DEM_ID", "") == "1"
+    ez_nocorr = any(variant == "nocorr" for _d, variant in config.STRIP_SOURCES)
+    ez_by_dem_id = ez_env or ez_nocorr
+    ez_why = " + ".join(
+        [w for w, on in (("PIG_TILT_EZ_BY_DEM_ID=1", ez_env),
+                         ("nocorr root in STRIP_SOURCES", ez_nocorr)) if on]
+    )
+    ez_dem_ids = (stack["dem_id"].values
+                  if ez_by_dem_id and "dem_id" in stack.coords else None)
+    if ez_by_dem_id and ez_dem_ids is None:
+        print("WARNING: by-dem_id resolution requested but this stack carries no dem_id "
+              "coord, so Ez and the P3 offset-only gate fall back to date -- a nocorr layer "
+              "sharing a REMA date with an aligned strip will inherit that strip's tighter Ez "
+              "and its alignment verdict. Rebuild the stack with build_stack to close the leak.")
     Ez_per_epoch, ez_summary = build_per_epoch_ez(
         stack["time"].values,
         [(p.parent, suf) for p, suf in config.STRIP_SOURCES],
+        epoch_dem_ids=ez_dem_ids,
     )
-    print(f"Per-epoch Ez (best-source breakdown): {dict(ez_summary)}")
+    print(f"Per-epoch Ez (best-source breakdown, resolved by "
+          f"{'dem_id' if ez_dem_ids is not None else 'date'}): {dict(ez_summary)}")
 
     # P3: demote poorly-coregistered strips (high pc_align end_p50) to an
     # offset-only (alpha_z) tilt fit rather than dropping them -- a full x/y
     # plane on a strip pc_align couldn't lock is noise-dominated and injects a
     # spurious ramp into dh/dt. Threshold via PIG_OFFSET_ONLY_END_P50_M (default
     # 3 m); strips above the find_bad_epochs drop gate (~5 m) are already gone.
+    # Keyed by DATE by default -- the worst same-day end_p50 demotes every layer
+    # that day -- which is how the canon products were built, so that stays the
+    # default. Keyed by dem_id on the same switch as Ez above, for the same
+    # collision: aggregate_basin_quality enumerates strips by their pc_align
+    # *-end_errors.csv, which a control-free nocorr root has none of (PIG
+    # 2026-09-12: 0 of 144 nocorr layers carry a row of their own, and 7 share a
+    # REMA date with an aligned strip over the threshold). By date those layers
+    # are demoted to alpha_z-only on another strip's failed alignment, losing the
+    # x/y plane the no-control recipe needs the LSQ to estimate. A layer with no
+    # row of its own is never demoted on someone else's evidence.
     offset_only = None
     offset_thresh = float(os.environ.get("PIG_OFFSET_ONLY_END_P50_M", "3.0"))
     try:
@@ -286,13 +363,27 @@ def main(
         aq = aggregate_basin_quality(config.STRIP_SOURCES)
         if not aq.empty:
             aq = aq.copy()
-            aq["d"] = pd.to_datetime(aq["date"]).dt.normalize()
-            per = aq.groupby("d")["end_p50"].max()
-            stimes = pd.to_datetime(stack["time"].values).normalize()
-            ep = np.array([per.get(d, np.nan) for d in stimes], dtype=float)
+            if ez_dem_ids is not None:
+                gate_key = "dem_id"
+                per = aq.groupby("dem_id")["end_p50"].max()
+                ep = np.array([per.get(str(i), np.nan) for i in ez_dem_ids], dtype=float)
+            else:
+                gate_key = "date"
+                aq["d"] = pd.to_datetime(aq["date"]).dt.normalize()
+                per = aq.groupby("d")["end_p50"].max()
+                stimes = pd.to_datetime(stack["time"].values).normalize()
+                ep = np.array([per.get(d, np.nan) for d in stimes], dtype=float)
             offset_only = np.isfinite(ep) & (ep > offset_thresh)
-            print(f"  P3 offset-only: {int(offset_only.sum())}/{len(offset_only)} "
+            print(f"  P3 offset-only (resolved by {gate_key}"
+                  f"{f'; {ez_why}' if gate_key == 'dem_id' else ''}): "
+                  f"{int(offset_only.sum())}/{len(offset_only)} "
                   f"epochs have end_p50>{offset_thresh:.1f}m -> alpha_z-only fit")
+            n_noquality = int(np.sum(~np.isfinite(ep)))
+            if gate_key == "dem_id" and n_noquality:
+                searched = ", ".join(variant for _d, variant in config.STRIP_SOURCES)
+                print(f"    {n_noquality}/{len(ep)} epochs have no pc_align end_errors row of "
+                      f"their own in the searched roots ({searched}): full x/y fit, never "
+                      "demoted on a same-date strip's alignment")
     except Exception as exc:
         print(f"  P3 offset-only gate skipped: {exc}")
     print("Fitting per-epoch residual tilts (Shean 2019 / Smith ndinterp.py-style)...")
@@ -307,6 +398,8 @@ def main(
         Ey=config.TILT_EY,
         Ez=Ez_per_epoch,
         offset_only_epochs=offset_only,
+        dhdt_smoothness=dhdt_smooth or None,
+        robust_max_iter=irls_max,
     )
     n_xy = int(params["fit_xy"].sum())
     print(
@@ -386,7 +479,9 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Override the pre-IS2 strip source for per-epoch Ez sidecar "
-            "lookup (e.g. ctempoatmlvis); must match the build_stack run."
+            "lookup (e.g. ctempoatmlvis); must match the build_stack run. "
+            "Replaces only that entry: any further roots (PIG_SOURCES=nocorr "
+            "appends one) stay in the list, so by-dem_id Ez still sees them."
         ),
     )
     parser.add_argument(
@@ -394,7 +489,8 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Override the IS2-era strip source for per-epoch Ez sidecar "
-            "lookup; must match the build_stack run. Point both --is2-asp "
+            "lookup; must match the build_stack run, and leaves any further "
+            "roots in place. Point both --is2-asp "
             "and --pre-is2-asp at the same variant for a uniform-control "
             "stack (e.g. ctempoatmlvis)."
         ),

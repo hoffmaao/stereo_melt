@@ -442,13 +442,13 @@ def main(
         config.STRIP_SOURCES = [
             config.STRIP_SOURCES[0],
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
-        ]
+        ] + config.STRIP_SOURCES[2:]
     if is2_asp:
         variant = is2_asp.lstrip("_")
         config.STRIP_SOURCES = [
             (config.BASIN_DIR / "data" / f"ASP_{variant}" / "asp_aligned", variant),
             config.STRIP_SOURCES[1],
-        ]
+        ] + config.STRIP_SOURCES[2:]
 
     print("Listing ASP-aligned DEMs across fused sources...")
     for src_dir, variant in config.STRIP_SOURCES:
@@ -615,7 +615,8 @@ if __name__ == "__main__":
         help=(
             "Override the pre-IS2 strip source: ASP_<value>/asp_aligned "
             "replaces the second config.STRIP_SOURCES entry "
-            "(e.g. ctempoatmlvis)."
+            "(e.g. ctempoatmlvis); any further roots (PIG_SOURCES=nocorr "
+            "appends one) stay in the list."
         ),
     )
     parser.add_argument(
@@ -623,7 +624,8 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Override the IS2-era strip source: ASP_<value>/asp_aligned "
-            "replaces the first config.STRIP_SOURCES entry. Point both "
+            "replaces the first config.STRIP_SOURCES entry, leaving any "
+            "further roots in place. Point both "
             "--is2-asp and --pre-is2-asp at the same variant for a "
             "uniform-control stack (list_aligned_dems dedups by stem, so "
             "the duplicate entry is harmless)."

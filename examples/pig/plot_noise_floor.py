@@ -14,7 +14,16 @@ BURGEE 50 m PIG melt and the 3H bridging band are drawn for reference.
 Run::
 
     PY=/home/hoffmaao/miniconda3/envs/stereo_melt/bin/python
-    $PY -m pig.plot_noise_floor
+    $PY -m pig.plot_noise_floor [--tag is2ctempo_sheltilt]
+
+``--tag`` picks the stack/mask both sides were solved from: it names the full
+product and the halves together, and the ``tag`` each file carries is checked
+before they are compared, so a half-stack solved from one stack is never
+scored against another stack's product. A file written before that attr
+existed states nothing about its stack, with one exception -- the un-suffixed
+default name, which predates ``--tag`` and could only have come from the canon
+stack -- and is otherwise refused until it is regenerated or its tag is
+asserted with ``--assume-tag``, which stands in for one side only.
 """
 from __future__ import annotations
 
@@ -38,9 +47,23 @@ from pig import config  # noqa: E402
 from pig.plot_melt_spectra import TIF_ZINCK, map_mask_nearest, read_tif_window  # noqa: E402
 from stereo_melt.spectra import radial_psd  # noqa: E402
 
-NC_FULL = (config.PROCESSED_DIR /
-           "pig_melt_bridging_250m_is2ctempo_sheltilt_2010-01-01_2024-01-10.nc")
-NC_HALF = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt.nc"
+CANON_TAG = "is2ctempo_sheltilt"
+FULL_DATES = "2010-01-01_2024-01-10"
+
+
+def full_path(tag=CANON_TAG):
+    return config.PROCESSED_DIR / f"pig_melt_bridging_250m_{tag}_{FULL_DATES}.nc"
+
+
+def half_path(tag=CANON_TAG, suffix=""):
+    return config.PROCESSED_DIR / f"pig_noise_floor_250m_{tag}{suffix}.nc"
+
+
+def stack_name(tag=CANON_TAG):
+    """Name of the 250 m stack a product with this tag was solved from."""
+    return f"pig_stack_250m_{tag}"
+
+
 LAM_3H_SHELF_KM, LAM_3H_TRUNK_KM = 3 * 0.438, 3 * 1.015
 PAIRS = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "#1f77b4"),
          ("restored budget + Helm", "restored_local_helm", "rb_A", "rb_B", "#2ca02c")]
@@ -112,19 +135,58 @@ def provenance(ds, var):
     return int(ce), (None if vel is None else str(vel))
 
 
+def source_name(ds):
+    """The file ``ds`` was opened from, for messages about that file."""
+    src = ds.encoding.get("source")
+    return str(src).rsplit("/", 1)[-1] if src else "an in-memory dataset"
+
+
+def product_tag(ds):
+    """The stack/mask tag of a product, or ``None`` if it cannot be placed.
+
+    Every product written since the stack became selectable stamps ``tag``.
+    For an older file the name is no substitute: it concatenates the tag with
+    the run's ``--out-suffix`` and no separator, and the pre-attr half-stacks
+    on disk include runs of other stacks whose names begin with the canon tag
+    (one of 498 epochs, one of 588, against the canon 513), so reading a name
+    would assert a provenance the file does not have. The one exception is the
+    un-suffixed default name, which predates ``--tag`` entirely: before that
+    switch existed ``run_noise_floor`` had no way to write it from anything
+    but the canon stack. Any other untagged file must be regenerated or have
+    its tag stated with ``--assume-tag``.
+    """
+    tag = ds.attrs.get("tag")
+    if tag is not None:
+        return str(tag)
+    return CANON_TAG if source_name(ds) == half_path().name else None
+
+
 def check_provenance(full, half, pairs, *, full_name="full product",
-                     purpose="the noise floor",
+                     purpose="the noise floor", assume_tag=None,
                      hint="re-solve the full product with the halves' settings (or "
                           "pick a --half-suffix / --full-var-suffix pair that match)"):
     """Refuse to compare halves and a full product solved with different instruments.
 
-    ``run_noise_floor`` stamps ``common_epoch`` and ``velocity`` on the halves
-    and the bridging driver stamps ``velocity`` on the full product, so the
-    files themselves say which solver settings produced them. Comparing
-    common-epoch halves against the default-path full product is the
-    mismatched instrument that produced the recorded prototype numbers, so a
-    disagreement is an error regardless of which flags the caller passed.
-    Returns the agreed ``(common_epoch, velocity)`` for labelling the output.
+    ``run_noise_floor`` stamps ``common_epoch``, ``velocity`` and ``tag`` on
+    the halves and the bridging driver stamps ``velocity`` and ``tag`` on the
+    full product, so the files themselves say which solver settings produced
+    them. Comparing common-epoch halves against the default-path full product
+    is the mismatched instrument that produced the recorded prototype numbers,
+    so a disagreement is an error regardless of which flags the caller passed.
+    The stack/mask ``tag`` is the same kind of divergence and is checked the
+    same way: two tags can share a velocity string and still be different
+    stacks, so halves from one tag say nothing about a product from another.
+    A file :func:`product_tag` cannot place is refused by name rather than
+    assumed to match; ``assume_tag`` is the caller's explicit statement of what
+    such a file was solved from, and it is then checked against the other side
+    like any stamped tag. It stands in for at most ONE side: filling both would
+    make them agree by construction and check nothing, so a pair in which
+    neither file can be placed is refused whatever the caller asserts.
+
+    Returns ``(agreed, assumed_for)``: the agreed ``(common_epoch, velocity)``
+    for labelling the output, and the name of the file ``assume_tag`` actually
+    stood in for -- ``None`` when both files carry their own tag, so a caller
+    labels the assumption only when one was needed.
 
     ``full_name``, ``purpose`` and ``hint`` only change the wording, so other
     comparisons of ``run_noise_floor`` products against a reference (e.g. the
@@ -146,12 +208,30 @@ def check_provenance(full, half, pairs, *, full_name="full product",
                 problems.append(f"{label}: halves {hk} velocity={hvel!r} "
                                 f"vs {full_name} {fk} velocity={fvel!r}")
             agreed.add((fce, fvel))
+    ftag, htag = product_tag(full), product_tag(half)
+    unplaced = [source_name(d) for d, t in ((half, htag), (full, ftag)) if t is None]
+    assumed_for = unplaced[0] if len(unplaced) == 1 and assume_tag is not None else None
+    if len(unplaced) == 2:
+        problems.append(
+            f"neither {unplaced[0]} nor {unplaced[1]} carries a stack/mask tag: --assume-tag "
+            f"can stand in for one side only, since asserting both would make them agree by "
+            f"construction and check nothing. Regenerate at least one with run_noise_floor, "
+            f"which stamps the tag")
+    elif unplaced and assume_tag is None:
+        problems.append(
+            f"no stack/mask tag on {unplaced[0]}: the file predates that attr, so which stack "
+            f"it was solved from cannot be established -- the pre-attr half-stacks on disk "
+            f"include runs of other stacks. Regenerate it with run_noise_floor, which stamps "
+            f"the tag, or state it with --assume-tag")
+    elif (ftag or assume_tag) != (htag or assume_tag):
+        problems.append(f"halves tag={htag or assume_tag!r} vs "
+                        f"{full_name} tag={ftag or assume_tag!r}")
     if problems:
         raise SystemExit(
             f"instrument mismatch between halves and {full_name} — {purpose} "
             "is only meaningful when both come from the same solver settings:\n  "
             + "\n  ".join(problems) + "\n  " + hint)
-    return sorted(agreed)
+    return sorted(agreed), assumed_for
 
 
 def stratify(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, label_prefix=""):
@@ -178,26 +258,36 @@ def main() -> int:
     ap.add_argument("--stratify", action="store_true",
                     help="also split into fast trunk / slow shelf and compare "
                          "the resolution limit with each region's own 3H")
+    ap.add_argument("--tag", default=CANON_TAG,
+                    help="stack/mask tag of BOTH sides: the full product "
+                         "pig_melt_bridging_250m_<tag>_<dates>.nc and the halves "
+                         "pig_noise_floor_250m_<tag>.nc that run_noise_floor --tag wrote")
     ap.add_argument("--half-suffix", default="",
                     help="use pig_noise_floor_...<suffix>.nc (e.g. _ce)")
     ap.add_argument("--full-var-suffix", default="",
                     help="suffix of the full-product variables to compare against "
                          "(e.g. _ce); every PAIRS variable must exist with it")
+    ap.add_argument("--assume-tag", default=None,
+                    help="state the stack/mask tag of a file written before the tag attr "
+                         "existed, which is otherwise unidentifiable and refused; the "
+                         "assumption is recorded in the figure title")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    full = xr.open_dataset(NC_FULL)
-    half_nc = (NC_HALF if not args.half_suffix else
-               config.PROCESSED_DIR /
-               f"pig_noise_floor_250m_is2ctempo_sheltilt{args.half_suffix}.nc")
+    full_nc = full_path(args.tag)
+    full = xr.open_dataset(full_nc)
+    half_nc = half_path(args.tag, args.half_suffix)
     half = xr.open_dataset(half_nc)
+    print(f"  full product: {full_nc.name}", flush=True)
     print(f"  halves: {half_nc.name}", flush=True)
     pairs = available_pairs(full, half, args.full_var_suffix)
     print("  full-product vars: " + ", ".join(p[1] for p in pairs), flush=True)
-    prov = check_provenance(full, half, pairs)
+    prov, assumed_for = check_provenance(full, half, pairs, assume_tag=args.assume_tag)
     prov_label = "; ".join(f"velocity={v}, common_epoch={ce}" for ce, v in prov)
+    if assumed_for:
+        prov_label += f"; stack tag ASSUMED {args.assume_tag} (not stamped on {assumed_for})"
     print(f"  provenance (halves == full): {prov_label}", flush=True)
-    tag = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
+    suffix = args.half_suffix + (f"_vs{args.full_var_suffix}" if args.full_var_suffix else "")
 
     # common mask: every field finite (halves lose thin-coverage pixels)
     m = np.isfinite(full.eulerian.values)
@@ -281,7 +371,7 @@ def main() -> int:
         print(f"  {label:24s} {s:8.1f} {n:8.1f} {pct:9.0f}% {lam_s:>9s}")
 
     if args.stratify:
-        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, tag)
+        _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, suffix)
 
     fig.suptitle("PIG melt products: how much of the short-wavelength power is real?\n"
                  "noise floor from independent half-stacks (alternating epochs, disjoint "
@@ -289,13 +379,13 @@ def main() -> int:
                  f"halves and full product solved alike: {prov_label}", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     out = args.out or (config.FIGURES_DIR /
-                       f"melt_noise_floor_250m_is2ctempo_sheltilt{tag}.png")
+                       f"melt_noise_floor_250m_{args.tag}{suffix}.png")
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"\nwrote {out}")
     return 0
 
 
-def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, tag=""):
+def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, suffix=""):
     """Is the lambda <~ 3H bridging band observable ANYWHERE at PIG?
 
     The bridging correction acts below ~3H. 3H is 1.3 km on the thin shelf but
@@ -312,7 +402,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, ta
     u = xr.DataArray(np.hypot(z["u_model_x"], z["u_model_y"]), dims=("y", "x"),
                      coords={"y": z["y"], "x": z["x"]})
     u = u.reindex_like(full.eulerian, method="nearest").values[r0:r1, c0:c1]
-    st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
+    st = load_stack(stack_name(args.tag))
     H = freeboard_to_thickness(st.mean("time", skipna=True)).values[r0:r1, c0:c1]
 
     regions = [("fast trunk (|u| ≥ 1 km/yr)", mask & np.isfinite(u) & (u >= 1000.0), "#d62728"),
@@ -349,7 +439,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, ta
     ax.set_title("Is the bridging band (λ ≲ 3H) observable at PIG?\n"
                  "dotted line = each region's own 3H; ● = SNR 1. Bridging is measurable "
                  "only where ● lies LEFT of the dotted line.", fontsize=10.5)
-    out = config.FIGURES_DIR / f"melt_noise_floor_regions_250m_is2ctempo_sheltilt{tag}.png"
+    out = config.FIGURES_DIR / f"melt_noise_floor_regions_250m_{args.tag}{suffix}.png"
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
     print(f"\nwrote {out}")

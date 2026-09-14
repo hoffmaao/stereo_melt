@@ -1,6 +1,7 @@
-"""Test: the noise-floor reporting guards and the PIG_VELOCITY fallback warning.
+"""Test: the PIG plotting drivers' reporting guards and output contracts.
 
-Exercises the public functions of :mod:`pig.plot_noise_floor` and
+Exercises the public functions of :mod:`pig.plot_noise_floor`,
+:mod:`pig.plot_error_vs_count`, :mod:`pig.plot_melt_benchmark` and
 :mod:`pig.run_melt` on synthetic in-memory datasets — no PIG data is read.
 
 T1  ``crossing``: a non-positive SNR bin (product PSD below the noise floor)
@@ -18,7 +19,35 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     product (the mismatched instrument that produced the recorded prototype
     numbers) are refused from the files' own attrs, whatever flags were
     passed; matching provenance is returned for labelling; a velocity
-    mismatch is refused; a missing velocity attr only warns.
+    mismatch is refused; a missing velocity attr only warns. Halves solved
+    from another stack/mask ``tag`` are refused even when the velocity
+    string is identical; an untagged file states nothing about its stack
+    unless its name is the un-suffixed default that predates ``--tag``, so
+    it is refused by name rather than read from that name; ``--assume-tag``
+    states it explicitly and is then checked like a stamped tag, and it
+    stands in for one side only, so two untagged files stay refused. The
+    check reports which side (if any) the assumption stood in for, so a
+    caller labels its figure with the caveat only when one was needed.
+T5  ``ladder_stack_name``: the count ladder's DEM-count axis follows the
+    stack the ladder itself was solved from -- a stamped ``tag`` selects
+    ``pig_stack_250m_<tag>``, an attr-less file whose name is the un-suffixed
+    canon default is the canon stack, ``--assume-tag`` states it when neither
+    file carries it, and an attr-less ladder with an out-suffix still loads
+    the canon stack but reports that the tag was only assumed. The reported
+    ``stamped`` flag is what distinguishes a tag read off a file from one the
+    caller stated, so the single-run ladder -- one file, no provenance
+    comparison at all -- still labels a ``--assume-tag`` stack as assumed.
+T7  ``stack_provenance_note``: the ladder figure says how its DEM-count stack
+    was identified whenever that was not read off a file -- a tag stated for an
+    unplaceable side, a tag stated for a single-run ladder, and the canon
+    fallback every default run takes while the products on disk predate the
+    attr. A stamped tag needs no caveat and gets none.
+T6  ``figure_paths``: both benchmark figures go where ``--out`` asked. The
+    trunk zoom is the given name with ``_trunk`` appended to its stem and the
+    same extension, including when the stem itself contains a dot (the marker
+    must survive); an ``--out`` matplotlib cannot write is refused before any
+    rendering, since only the zoom would otherwise fall back to the canonical
+    figures directory; no ``--out`` keeps both canonical names.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -49,7 +78,14 @@ sys.path.insert(0, str(ROOT / "examples"))
 import stereo_melt  # noqa: E402,F401
 import pig  # noqa: E402,F401
 from pig import config  # noqa: E402
-from pig.plot_noise_floor import available_pairs, check_provenance, crossing  # noqa: E402
+from pig.plot_error_vs_count import ladder_stack_name, stack_provenance_note  # noqa: E402
+from pig.plot_melt_benchmark import figure_paths  # noqa: E402
+from pig.plot_noise_floor import (  # noqa: E402
+    CANON_TAG,
+    available_pairs,
+    check_provenance,
+    crossing,
+)
 from pig.run_melt import load_velocity_on_grid  # noqa: E402
 
 FAILS = []
@@ -117,11 +153,13 @@ def main() -> int:
     check("no complete pair at all is an error", err is not None and "nothing to plot" in err)
 
     print("T3  check_provenance(): the files' attrs decide, not the caller's flags")
-    V = "fused-test-velocity"
-    full = ds(["eulerian", "eulerian_ce"], attrs={"velocity": V},
+    V, T = "fused-test-velocity", "is2ctempo_sheltilt"
+    full = ds(["eulerian", "eulerian_ce"], attrs={"velocity": V, "tag": T},
               var_attrs={"eulerian_ce": {"common_epoch": 1}})
-    half_ce = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 1})
-    half_def = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "common_epoch": 0})
+    half_ce = ds(["eulerian_A", "eulerian_B"],
+                 attrs={"velocity": V, "common_epoch": 1, "tag": T})
+    half_def = ds(["eulerian_A", "eulerian_B"],
+                  attrs={"velocity": V, "common_epoch": 0, "tag": T})
     pair_def = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "c")]
     pair_ce = [("Eulerian", "eulerian_ce", "eulerian_A", "eulerian_B", "c")]
     err, _ = system_exit(check_provenance, full, half_ce, pair_def)
@@ -130,19 +168,169 @@ def main() -> int:
           and "eulerian_A common_epoch=1" in err and "common_epoch=0" in err,
           f"SystemExit: {err!s:.60}")
     err, out = system_exit(check_provenance, full, half_ce, pair_ce)
-    agreed = check_provenance(full, half_ce, pair_ce)
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed, assumed = check_provenance(full, half_ce, pair_ce)
     check("matching common-epoch provenance is accepted and returned",
-          err is None and agreed == [(1, V)], f"{agreed}")
-    agreed0 = check_provenance(full, half_def, pair_def)
+          err is None and agreed == [(1, V)] and assumed is None, f"{agreed}, assumed {assumed!r}")
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed0, _ = check_provenance(full, half_def, pair_def)
     check("matching default provenance is accepted and returned", agreed0 == [(0, V)], f"{agreed0}")
-    half_v = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": "other", "common_epoch": 0})
+    half_v = ds(["eulerian_A", "eulerian_B"],
+                attrs={"velocity": "other", "common_epoch": 0, "tag": T})
     err, _ = system_exit(check_provenance, full, half_v, pair_def)
     check("velocity mismatch is refused", err is not None and "velocity='other'" in err,
           f"SystemExit: {err!s:.60}")
-    half_nov = ds(["eulerian_A", "eulerian_B"], attrs={"common_epoch": 0})
+    half_nov = ds(["eulerian_A", "eulerian_B"], attrs={"common_epoch": 0, "tag": T})
     err, out = system_exit(check_provenance, full, half_nov, pair_def)
     check("missing velocity provenance warns but does not refuse",
           err is None and "WARNING" in out and "cannot verify" in out)
+    full_t = ds(["eulerian"], attrs={"velocity": V, "tag": "is2ctempo_sheltilt"})
+    half_t = ds(["eulerian_A", "eulerian_B"],
+                attrs={"velocity": V, "common_epoch": 0, "tag": "is2ctempo_sheltilt"})
+    half_qcey = ds(["eulerian_A", "eulerian_B"],
+                   attrs={"velocity": V, "common_epoch": 0, "tag": "is2ctempo_sheltilt_qcey"})
+    err, _ = system_exit(check_provenance, full_t, half_qcey, pair_def)
+    check("halves from another stack tag are refused though the velocity matches",
+          err is not None and "instrument mismatch" in err
+          and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
+    check("matching tags are accepted",
+          check_provenance(full_t, half_t, pair_def) == ([(0, V)], None))
+    check("both tags stamped: --assume-tag is unused, so nothing is reported as assumed",
+          check_provenance(full_t, half_t, pair_def,
+                           assume_tag="is2ctempo_sheltilt_qcey") == ([(0, V)], None))
+    def named(names, name, **attrs):
+        """A product predating the tag attr: no tag, only a filename."""
+        d = ds(names, attrs={"velocity": V, "common_epoch": 0, **attrs})
+        d.encoding["source"] = f"/processed/{name}"
+        return d
+
+    # The pre-attr half-stacks on disk include runs of other stacks whose names
+    # begin with the canon tag, so an out-suffix is no evidence of a stack; only
+    # the un-suffixed default name predates --tag and must be the canon stack.
+    default_half = named(["eulerian_A", "eulerian_B"],
+                         "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    check("the un-suffixed default half predates --tag, so it is the canon stack",
+          check_provenance(full_t, default_half, pair_def) == ([(0, V)], None))
+    for suffix in ("_ce", "_q", "_is2ctempo_sheltilt_qcey"):
+        name = f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc"
+        err, _ = system_exit(check_provenance, full_t,
+                             named(["eulerian_A", "eulerian_B"], name), pair_def)
+        check(f"an untagged half with an out-suffix is refused: ...{suffix}",
+              err is not None and name in err and "--assume-tag" in err
+              and "cannot be established" in err, f"SystemExit: {err!s:.60}")
+    qcey_half = named(["eulerian_A", "eulerian_B"],
+                      "pig_noise_floor_250m_is2ctempo_sheltilt_is2ctempo_sheltilt_qcey.nc")
+    agreed_a, assumed_a = check_provenance(full_t, qcey_half, pair_def,
+                                           assume_tag="is2ctempo_sheltilt")
+    check("--assume-tag states the missing tag and the comparison proceeds",
+          agreed_a == [(0, V)], f"{agreed_a}")
+    check("the untagged side is reported, so only then is the caveat labelled",
+          assumed_a == qcey_half.encoding["source"].rsplit("/", 1)[-1], f"assumed {assumed_a!r}")
+    err, _ = system_exit(check_provenance, full_t, qcey_half, pair_def,
+                         assume_tag="is2ctempo_sheltilt_qcey")
+    check("an assumed tag is checked like a stamped one, not trusted blindly",
+          err is not None and "tag='is2ctempo_sheltilt_qcey'" in err, f"SystemExit: {err!s:.60}")
+    quarters = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    ladder = [("ladder", "eulerian_Q0", "eulerian_A", "eulerian_B", None)]
+    err, _ = system_exit(check_provenance, quarters, half_t, ladder, full_name="quarters")
+    check("an untagged quarters file is named in the refusal too",
+          err is not None and "is2ctempo_sheltilt_q.nc" in err, f"SystemExit: {err!s:.60}")
+    check("with the tag assumed, tagged halves and an untagged quarters file compare",
+          check_provenance(quarters, half_t, ladder, full_name="quarters",
+                           assume_tag="is2ctempo_sheltilt")
+          == ([(0, V)], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc"))
+    # The ladder pair that motivated the override: canon quarters, qcey halves,
+    # neither carrying a tag. One assertion cannot vouch for both sides.
+    err, _ = system_exit(check_provenance, quarters, qcey_half, ladder,
+                         full_name="quarters", assume_tag="is2ctempo_sheltilt")
+    check("--assume-tag cannot fill BOTH sides: two untagged files stay refused",
+          err is not None and "one side only" in err
+          and "is2ctempo_sheltilt_q.nc" in err and "qcey.nc" in err,
+          f"SystemExit: {err!s:.60}")
+    err, _ = system_exit(check_provenance, quarters, qcey_half, ladder, full_name="quarters")
+    check("...and are refused without the override too", err is not None,
+          f"SystemExit: {err!s:.60}")
+
+    print("T5  ladder_stack_name(): the DEM-count axis follows the ladder's own stack")
+    QT = "is2ctempo_sheltilt_qcey"
+    q_tagged = ds(["eulerian_Q0"], attrs={"velocity": V, "tag": QT})
+    h_tagged = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "tag": QT})
+    check("a stamped tag selects that tag's stack",
+          ladder_stack_name(q_tagged, h_tagged) == (f"pig_stack_250m_{QT}", QT, True),
+          f"{ladder_stack_name(q_tagged, h_tagged)}")
+    untagged_q = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("halves carry the tag when the quarters file does not",
+          ladder_stack_name(untagged_q, h_tagged) == (f"pig_stack_250m_{QT}", QT, True))
+    canon_default = named(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                          "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    check("the un-suffixed canon default resolves to the canon stack",
+          ladder_stack_name(canon_default) == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG, True))
+    untagged_h = named(["eulerian_A", "eulerian_B"],
+                       "pig_noise_floor_250m_is2ctempo_sheltilt_ce.nc")
+    check("an attr-less ladder still loads the canon stack, reported as assumed",
+          ladder_stack_name(untagged_q, untagged_h)
+          == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG, False),
+          f"{ladder_stack_name(untagged_q, untagged_h)}")
+    check("--assume-tag states the stack when neither file carries the tag",
+          ladder_stack_name(untagged_q, untagged_h, assume_tag=QT)
+          == (f"pig_stack_250m_{QT}", QT, False))
+    check("a stamped tag is not overridden by --assume-tag",
+          ladder_stack_name(q_tagged, h_tagged, assume_tag=CANON_TAG)[1:] == (QT, True))
+    # Single-run ladder: one attr-less file carrying its own halves, so
+    # check_provenance is never reached and only this flag can report the
+    # assumption that --assume-tag makes load-bearing.
+    single = named(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                   "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("single-run ladder: --assume-tag selects the stack and is reported as assumed",
+          ladder_stack_name(single, None, assume_tag=QT) == (f"pig_stack_250m_{QT}", QT, False),
+          f"{ladder_stack_name(single, None, assume_tag=QT)}")
+    check("single-run ladder with a stamped tag is not reported as assumed",
+          ladder_stack_name(ds(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                               attrs={"velocity": V, "tag": QT}))
+          == (f"pig_stack_250m_{QT}", QT, True))
+
+    print("T7  stack_provenance_note(): the figure records an unverified count axis")
+    check("a stamped tag needs no caveat",
+          stack_provenance_note(CANON_TAG, True) == "")
+    check("a stamped tag is not caveated just because --assume-tag was passed",
+          stack_provenance_note(QT, True, None, assume_tag=CANON_TAG) == "")
+    note = stack_provenance_note(QT, False, assume_tag=QT)
+    check("a tag stated for a single-run ladder is labelled",
+          note == f"stack tag ASSUMED {QT} (not stamped on the file)", note)
+    note = stack_provenance_note(QT, True, "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("a tag stated for an unplaceable side names that file",
+          note == f"stack tag ASSUMED {QT} "
+                  "(not stamped on pig_noise_floor_250m_is2ctempo_sheltilt_q.nc)", note)
+    # The default run today: the ladder products on disk carry no tag attr, so
+    # the count axis falls back to canon with nothing stated -- and the figure,
+    # which outlives its stdout, has to say so.
+    note = stack_provenance_note(CANON_TAG, False)
+    check("the canon fallback is labelled on the figure, not just on stdout",
+          note == f"DEM counts from the canon stack {CANON_TAG}: "
+                  "the ladder files carry no tag", note)
+
+    print("T6  figure_paths(): both figures land where --out asked")
+    check("a plain stem gets the _trunk sibling",
+          figure_paths("/tmp/bench.png", "T")
+          == (pathlib.Path("/tmp/bench.png"), pathlib.Path("/tmp/bench_trunk.png")))
+    # with_suffix() replaces everything after the LAST dot, so a dotted stem
+    # would silently lose the _trunk marker and overwrite an unrelated file.
+    for given, want in (("/tmp/melt_v1.2.png", "/tmp/melt_v1.2_trunk.png"),
+                        ("/tmp/run_2.5.pdf", "/tmp/run_2.5_trunk.pdf")):
+        got = figure_paths(given, "T")[1]
+        check(f"a dotted stem keeps its marker: {given}",
+              got == pathlib.Path(want), f"{got}")
+    check("a non-png extension is honoured for both figures",
+          figure_paths("/tmp/bench.svg", "T")[1] == pathlib.Path("/tmp/bench_trunk.svg"))
+    err, _ = system_exit(figure_paths, "/tmp/bench", "T")
+    check("an --out matplotlib cannot write is refused before rendering",
+          err is not None and "no image extension" in err and "/tmp/bench" in err,
+          f"SystemExit: {err!s:.60}")
+    canon = figure_paths(None, "T")
+    check("no --out keeps both canonical names in the figures directory",
+          canon == (config.FIGURES_DIR / "melt_benchmark_250m_T.png",
+                    config.FIGURES_DIR / "melt_benchmark_trunk_250m_T.png"),
+          f"{[p.name for p in canon]}")
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),

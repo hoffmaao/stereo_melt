@@ -77,9 +77,8 @@ from stereo_melt.melt import eulerian_melt_rate  # noqa: E402
 RHO_I = 918.0
 
 
-def out_path(suffix):
-    return (config.PROCESSED_DIR /
-            f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc")
+def out_path(tag, suffix):
+    return config.PROCESSED_DIR / f"pig_noise_floor_250m_{tag}{suffix}.nc"
 
 
 def main() -> int:
@@ -94,11 +93,13 @@ def main() -> int:
                     help="refer the mean thickness feeding the divergence to one epoch")
     ap.add_argument("--epoch-rate-sigma-px", type=float, default=2.0)
     ap.add_argument("--out-suffix", default="")
+    ap.add_argument("--tag", default="is2ctempo_sheltilt",
+                    help="stack/mask tag (pig_stack_250m_<tag>, pig_min_extent_250m_<tag>)")
     args = ap.parse_args()
 
     t00 = time.time()
-    stack = load_stack("pig_stack_250m_is2ctempo_sheltilt")
-    floating = apply_min_extent(load_floating_mask(stack), "_250m_is2ctempo_sheltilt",
+    stack = load_stack(f"pig_stack_250m_{args.tag}")
+    floating = apply_min_extent(load_floating_mask(stack), f"_250m_{args.tag}",
                                 str(config.START_TIME), str(config.END_TIME))
     stack = stack.where(floating)
     vx, vy, vel_source = load_velocity_on_grid(stack)
@@ -155,12 +156,16 @@ def main() -> int:
             run(f"eulerian_Q{q}", stack.isel(time=idx), "eulerian")
 
     ds_out = xr.Dataset(out)
+    # velocity/common_epoch/tag are the provenance pig.plot_noise_floor checks before
+    # it compares these halves against a full product: an unstamped file cannot be
+    # placed at all and is refused there, so keep stamping them.
     ds_out.attrs.update(velocity=vel_source, n_epochs_a=sa.sizes["time"],
                         n_epochs_b=sb.sizes["time"], n_bins=args.n_bins,
                         lift_umax_myr=args.lift_umax_myr,
                         common_epoch=int(bool(args.common_epoch)),
+                        tag=args.tag,
                         split="alternating epochs in time (disjoint strips)")
-    nc = out_path(args.out_suffix)
+    nc = out_path(args.tag, args.out_suffix)
     ds_out.to_netcdf(nc, encoding={k: {"zlib": True, "complevel": 4} for k in out})
     print(f"wrote {nc}", flush=True)
     print(f"[done] total {time.time() - t00:.0f}s", flush=True)
