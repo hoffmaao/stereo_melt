@@ -37,6 +37,11 @@ T5  ``ladder_stack_name``: the count ladder's DEM-count axis follows the
     ``stamped`` flag is what distinguishes a tag read off a file from one the
     caller stated, so the single-run ladder -- one file, no provenance
     comparison at all -- still labels a ``--assume-tag`` stack as assumed.
+T7  ``stack_provenance_note``: the ladder figure says how its DEM-count stack
+    was identified whenever that was not read off a file -- a tag stated for an
+    unplaceable side, a tag stated for a single-run ladder, and the canon
+    fallback every default run takes while the products on disk predate the
+    attr. A stamped tag needs no caveat and gets none.
 T6  ``figure_paths``: both benchmark figures go where ``--out`` asked. The
     trunk zoom is the given name with ``_trunk`` appended to its stem and the
     same extension, including when the stem itself contains a dot (the marker
@@ -73,7 +78,7 @@ sys.path.insert(0, str(ROOT / "examples"))
 import stereo_melt  # noqa: E402,F401
 import pig  # noqa: E402,F401
 from pig import config  # noqa: E402
-from pig.plot_error_vs_count import ladder_stack_name  # noqa: E402
+from pig.plot_error_vs_count import ladder_stack_name, stack_provenance_note  # noqa: E402
 from pig.plot_melt_benchmark import figure_paths  # noqa: E402
 from pig.plot_noise_floor import (  # noqa: E402
     CANON_TAG,
@@ -283,6 +288,26 @@ def main() -> int:
           ladder_stack_name(ds(["eulerian_Q0", "eulerian_A", "eulerian_B"],
                                attrs={"velocity": V, "tag": QT}))
           == (f"pig_stack_250m_{QT}", QT, True))
+
+    print("T7  stack_provenance_note(): the figure records an unverified count axis")
+    check("a stamped tag needs no caveat",
+          stack_provenance_note(CANON_TAG, True) == "")
+    check("a stamped tag is not caveated just because --assume-tag was passed",
+          stack_provenance_note(QT, True, None, assume_tag=CANON_TAG) == "")
+    note = stack_provenance_note(QT, False, assume_tag=QT)
+    check("a tag stated for a single-run ladder is labelled",
+          note == f"stack tag ASSUMED {QT} (not stamped on the file)", note)
+    note = stack_provenance_note(QT, True, "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("a tag stated for an unplaceable side names that file",
+          note == f"stack tag ASSUMED {QT} "
+                  "(not stamped on pig_noise_floor_250m_is2ctempo_sheltilt_q.nc)", note)
+    # The default run today: the ladder products on disk carry no tag attr, so
+    # the count axis falls back to canon with nothing stated -- and the figure,
+    # which outlives its stdout, has to say so.
+    note = stack_provenance_note(CANON_TAG, False)
+    check("the canon fallback is labelled on the figure, not just on stdout",
+          note == f"DEM counts from the canon stack {CANON_TAG}: "
+                  "the ladder files carry no tag", note)
 
     print("T6  figure_paths(): both figures land where --out asked")
     check("a plain stem gets the _trunk sibling",

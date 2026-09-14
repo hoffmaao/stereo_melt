@@ -85,6 +85,27 @@ def ladder_stack_name(quarters, halves=None, assume_tag=None):
     return stack_name(tag), tag, False
 
 
+def stack_provenance_note(tag, stamped, assumed_for=None, assume_tag=None):
+    """The figure's caveat about how the DEM-count stack was identified, or ``''``.
+
+    The count axis is only as trustworthy as the tag it was resolved from, and a
+    figure outlives the stdout it was printed with, so every route that did not
+    read the tag off a file says so on the figure itself: the tag stated for an
+    unplaceable side of a two-file ladder, the tag stated for a single-run
+    ladder, and the canon fallback taken when neither file carries the attr and
+    nothing was stated -- which is the route every default run takes while the
+    ladder products on disk predate the attr. A tag read off a file needs no
+    caveat and gets none.
+    """
+    if assumed_for:
+        return f"stack tag ASSUMED {tag} (not stamped on {assumed_for})"
+    if stamped:
+        return ""
+    if assume_tag is not None:
+        return f"stack tag ASSUMED {tag} (not stamped on the file)"
+    return f"DEM counts from the canon stack {tag}: the ladder files carry no tag"
+
+
 def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
     """``(halves, quarters, assumed_for)`` for the ladder.
 
@@ -130,9 +151,7 @@ def main() -> int:
 
     half, q, assumed_for = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
     st_name, st_tag, st_stamped = ladder_stack_name(q, half, args.assume_tag)
-    # An assumption stated with --assume-tag is labelled wherever it is load-bearing,
-    # including the single-run path on which open_ladder compares nothing; falling back
-    # to the canon stack with nothing stated stays a stdout warning.
+    stack_note = stack_provenance_note(st_tag, st_stamped, assumed_for, args.assume_tag)
     stack_assumed = (not st_stamped) and args.assume_tag is not None
     if not st_stamped and not stack_assumed:
         print("  WARNING: no stack/mask tag on either ladder file, so the DEM-count axis "
@@ -200,10 +219,7 @@ def main() -> int:
                  "same pixels, same everything\nempirical trunk slope "
                  f"{sl:+.2f} (white −0.50) ⇒ trunk bridging band needs "
                  f"~{need:.1f}× the strips (1/n assumption said 1.4×)"
-                 + (f"\nstack tag ASSUMED {args.assume_tag} (not stamped on {assumed_for})"
-                    if assumed_for else
-                    f"\nstack tag ASSUMED {st_tag} (not stamped on the file)"
-                    if stack_assumed else ""), fontsize=11)
+                 + (f"\n{stack_note}" if stack_note else ""), fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_error_vs_dem_count.png")
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")
