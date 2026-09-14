@@ -18,7 +18,10 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     product (the mismatched instrument that produced the recorded prototype
     numbers) are refused from the files' own attrs, whatever flags were
     passed; matching provenance is returned for labelling; a velocity
-    mismatch is refused; a missing velocity attr only warns.
+    mismatch is refused; a missing velocity attr only warns. Halves solved
+    from another stack/mask ``tag`` are refused even when the velocity
+    string is identical, and halves predating that attr are judged by the
+    tag the caller composed their filename from.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -143,6 +146,25 @@ def main() -> int:
     err, out = system_exit(check_provenance, full, half_nov, pair_def)
     check("missing velocity provenance warns but does not refuse",
           err is None and "WARNING" in out and "cannot verify" in out)
+    full_t = ds(["eulerian"], attrs={"velocity": V, "tag": "is2ctempo_sheltilt"})
+    half_t = ds(["eulerian_A", "eulerian_B"],
+                attrs={"velocity": V, "common_epoch": 0, "tag": "is2ctempo_sheltilt"})
+    half_qcey = ds(["eulerian_A", "eulerian_B"],
+                   attrs={"velocity": V, "common_epoch": 0, "tag": "is2ctempo_sheltilt_qcey"})
+    err, _ = system_exit(check_provenance, full_t, half_qcey, pair_def)
+    check("halves from another stack tag are refused though the velocity matches",
+          err is not None and "instrument mismatch" in err
+          and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
+    check("matching tags are accepted",
+          check_provenance(full_t, half_t, pair_def) == [(0, V)])
+    with contextlib.redirect_stdout(io.StringIO()):
+        agreed_t = check_provenance(full_t, half_nov, pair_def, half_tag="is2ctempo_sheltilt")
+    check("halves predating the tag attr fall back to the composed filename tag",
+          agreed_t == [(0, V)], f"{agreed_t}")
+    err, _ = system_exit(check_provenance, full_t, half_nov, pair_def,
+                         half_tag="is2ctempo_sheltilt_qcey")
+    check("...and are refused when that composed tag is another stack",
+          err is not None and "is2ctempo_sheltilt_qcey" in err, f"SystemExit: {err!s:.60}")
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),
