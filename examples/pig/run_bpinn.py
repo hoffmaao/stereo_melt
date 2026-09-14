@@ -53,6 +53,9 @@ def main() -> int:
     ap.add_argument("--eta", type=float, default=1e13)
     ap.add_argument("--alpha", type=float, default=0.34)
     ap.add_argument("--no-transfer", action="store_true")
+    ap.add_argument("--n-bins", type=int, default=1,
+                    help="local transfer: bins on (H, ux, uy) with partition-of-unity blending; 1 = one reference geometry")
+    ap.add_argument("--blend-px", type=float, default=8.0, help="Gaussian blend width of the bin weights (px)")
     ap.add_argument("--no-planes", action="store_true")
     ap.add_argument("--sigma-h", type=float, default=None, help="obs scale (thickness m); default = measured NMAD")
     ap.add_argument("--sigma-r", type=float, default=20.0,
@@ -83,13 +86,17 @@ def main() -> int:
     data = prepare_bpinn_data(H, x, y, t, vx, vy, a_dot=z["a_dot"], domain=dom,
                               rho_i=float(z["rho_i"]), rho_w=float(z["rho_w"]), vt_yr=vt)
     cfg = BPINNConfig(n_steps=args.steps, ensemble=args.ensemble, hmc_samples=args.hmc, sigma_h_m=sig,
-                      sigma_r_myr=args.sigma_r, transfer=not args.no_transfer, eta_bar=args.eta, alpha_scale=args.alpha,
+                      sigma_r_myr=args.sigma_r, transfer=not args.no_transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       batch_epochs=args.batch_epochs, epoch_planes=not args.no_planes, H_scale_m=args.H_scale, base_field=not args.no_base_field, b_scale_myr=args.b_scale, n_col_slices=args.col_slices, lr=args.lr,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")))
     t0 = time.time()
     res = fit_bpinn(data, cfg)
     print(f"fit time {time.time() - t0:.0f} s")
+    tb = np.asarray(res.extras["transfer_bins"], float).reshape(-1, 3)
+    print(f"transfer operator: {res.extras['n_bins_effective']} bin(s) built of {cfg.n_bins} requested"
+          + "".join(f"\n  bin {i}: H {b[0]:.0f} m, u ({b[1]:+.0f}, {b[2]:+.0f}) m/yr"
+                    for i, b in enumerate(tb)))
 
     fields = {"B-PINN": res.melt_mean, "Eulerian": z["bench_eulerian"], "Lagrangian": z["bench_lagrangian"],
               "monolithic v2": z["bench_monolithic_v2"], "restored local+Helm": z["bench_restored_local_helm"]}
@@ -106,7 +113,8 @@ def main() -> int:
         print(f"  posterior sd: median {np.nanmedian(res.melt_sd[common]):.1f} m/yr; |mean|>2sd on {(np.abs(res.melt_mean[common]) > 2*res.melt_sd[common]).mean()*100:.0f}% of pixels")
     stem = R / f"bpinn_trunk_{args.tag}_{args.half}{args.out_suffix}"
     np.savez_compressed(str(stem) + ".npz", mean=res.melt_mean, sd=res.melt_sd, samples=res.samples, map=res.map_melt,
-                        obs_rms=res.obs_rms_m, loss=res.loss_history, common=common)
+                        obs_rms=res.obs_rms_m, loss=res.loss_history, common=common,
+                        transfer_bins=tb, n_bins_effective=res.extras["n_bins_effective"])
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

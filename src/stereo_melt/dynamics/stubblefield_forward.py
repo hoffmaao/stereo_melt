@@ -257,42 +257,7 @@ class StubblefieldForward(torch.nn.Module):
         return dzs.real[:self.ny, :self.nx]
 
 
-def _kmeans_geometry(
-    feats: np.ndarray, n_bins: int, iters: int = 40
-) -> tuple[np.ndarray, np.ndarray]:
-    """Deterministic 1-D-seeded Lloyd clustering of standardized ``(H, ux, uy)``.
-
-    Seeded from evenly spaced quantiles along the first principal component (no
-    RNG), so a given geometry always yields the same bins -- a solver that
-    silently changed its operator between runs would be unusable for A/B work.
-    Returns the per-cell label and the ``(n_bins, 3)`` centroids in feature units.
-    """
-    mu = feats.mean(0)
-    sd = feats.std(0)
-    sd[sd <= 0] = 1.0
-    z = (feats - mu) / sd
-    # principal direction via the power method on the covariance (no scipy/sklearn)
-    C = np.cov(z.T) + 1e-12 * np.eye(z.shape[1])
-    v = np.ones(z.shape[1]) / math.sqrt(z.shape[1])
-    for _ in range(100):
-        v = C @ v
-        v /= max(np.linalg.norm(v), 1e-30)
-    proj = z @ v
-    qs = np.quantile(proj, (np.arange(n_bins) + 0.5) / n_bins)
-    cent = np.stack([z[np.argmin(np.abs(proj - q))] for q in qs])
-
-    lab = np.zeros(len(z), dtype=int)
-    for _ in range(iters):
-        d = ((z[:, None, :] - cent[None, :, :]) ** 2).sum(-1)
-        new = d.argmin(1)
-        if np.array_equal(new, lab):
-            break
-        lab = new
-        for b in range(n_bins):
-            sel = lab == b
-            if sel.any():
-                cent[b] = z[sel].mean(0)
-    return lab, cent * sd + mu
+from .geometry_bins import kmeans_geometry as _kmeans_geometry  # noqa: E402
 
 
 class BlendedStubblefieldForward(torch.nn.Module):
@@ -322,7 +287,7 @@ class BlendedStubblefieldForward(torch.nn.Module):
               \mathcal{F} m\big](x), \qquad \sum_b w_b(x) = 1.
 
     Geometry is clustered into ``n_bins`` groups of similar :math:`(H, u_x, u_y)`
-    (deterministically, see :func:`_kmeans_geometry`), each contributing one
+    (deterministically, see :func:`~.geometry_bins.kmeans_geometry`), each contributing one
     multiplier, and the hard bin indicators are Gaussian-smoothed over
     ``blend_px`` and renormalized so the weights are an exact partition of unity.
     With a spatially constant geometry every cell lands in one bin, so the result

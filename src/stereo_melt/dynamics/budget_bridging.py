@@ -712,7 +712,7 @@ def budget_bridging_melt_rate(
         ``flux_restored_guarded_bins``.
     n_bins, blend_px
         **Local operator.** With ``n_bins > 1`` the fit cells are clustered by
-        ``(H, u_x, u_y[, eta])`` (:func:`~.stubblefield_forward._kmeans_geometry`,
+        ``(H, u_x, u_y[, eta])`` (:func:`~.geometry_bins.kmeans_geometry`,
         deterministic), one transfer is built per bin from the bin centroid —
         its own thickness, advection and (with ``eta_field``) its own secant
         viscosity — each is applied to the WHOLE padded domain (the operator is

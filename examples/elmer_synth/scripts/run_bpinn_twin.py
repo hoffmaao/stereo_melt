@@ -115,6 +115,9 @@ def main() -> int:
     ap.add_argument("--eta", type=float, default=1e14)
     ap.add_argument("--alpha", type=float, default=0.34)
     ap.add_argument("--bg-sigma-H", type=float, default=3.0)
+    ap.add_argument("--n-bins", type=int, default=1,
+                    help="local transfer: bins on (H, ux, uy) with partition-of-unity blending; 1 = one reference geometry")
+    ap.add_argument("--blend-px", type=float, default=8.0, help="Gaussian blend width of the bin weights (px)")
     ap.add_argument("--batch-epochs", type=int, default=16)
     ap.add_argument("--no-planes", action="store_true")
     ap.add_argument("--H-scale", type=float, default=20.0)
@@ -131,13 +134,17 @@ def main() -> int:
                       n_col_slices=args.col_slices, hidden=args.hidden, layers=args.layers,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")),
-                      transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha,
+                      transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       transfer_bg_sigma_H=args.bg_sigma_H, batch_epochs=args.batch_epochs,
                       epoch_planes=not args.no_planes, H_scale_m=args.H_scale,
                       base_field=not args.no_base_field)
     t0 = time.time()
     res = fit_bpinn(data, cfg)
     print(f"fit time {time.time() - t0:.0f} s")
+    tb = np.asarray(res.extras["transfer_bins"], float).reshape(-1, 3)
+    print(f"transfer operator: {res.extras['n_bins_effective']} bin(s) built of {cfg.n_bins} requested"
+          + "".join(f"\n  bin {i}: H {b[0]:.0f} m, u ({b[1]:+.0f}, {b[2]:+.0f}) m/yr"
+                    for i, b in enumerate(tb)))
 
     def score(m, name, sd=None):
         fin = np.isfinite(m) & np.isfinite(truth) & data.domain
@@ -166,7 +173,8 @@ def main() -> int:
             print(f"  {name:12s} {_amp_at(m, x, y, data.domain, 1000, truth_axis):.1f} / "
                   f"{_amp_at(m, x, y, data.domain, 1500, truth_axis):.1f}")
     np.savez_compressed(f"{R}/bpinn_{args.tag}{args.out_suffix}.npz", mean=res.melt_mean, sd=res.melt_sd,
-                        samples=res.samples, map=res.map_melt, obs_rms=res.obs_rms_m, loss=res.loss_history)
+                        samples=res.samples, map=res.map_melt, obs_rms=res.obs_rms_m, loss=res.loss_history,
+                        transfer_bins=tb, n_bins_effective=res.extras["n_bins_effective"])
 
     import matplotlib
     matplotlib.use("Agg")

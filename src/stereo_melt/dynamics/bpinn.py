@@ -65,12 +65,40 @@ the field is reflect-padded to twice its size and multiplied in the FFT domain
 by :math:`M(k) = 1 + (T(k) - 1)\,(1 - L(k))` — ``T`` from
 :func:`~stereo_melt.dynamics.bridging_restoration._bridging_transfer` (the
 same advected Newtonian transfer the monolithic and restored-budget solvers
-use; ``eta_bar``, ``alpha_scale``, ``H_ref_m``, ``ux_ref_myr``/``uy_ref_myr``)
+use; ``eta_bar``, ``alpha_scale`` and, for the single-geometry operator only,
+``H_ref_m``, ``ux_ref_myr``/``uy_ref_myr``)
 and ``L`` a
 Gaussian low-pass at ``transfer_bg_sigma_H`` ice thicknesses that keeps the
 operator at unity on the long wavelengths where ``T`` is unity anyway — then
 cropped and compared to the hydrostatic thickness observations. Data
 mini-batches are then whole epochs (``batch_epochs``).
+
+One reference geometry cannot represent a shelf whose thickness, speed or
+flow direction varies across the window, so with ``n_bins > 1`` the operator
+is LOCAL: the domain is binned on ``(H, u_x, u_y)``
+(:func:`~stereo_melt.dynamics.geometry_bins.geometry_bins`, the monolithic
+solver's ``n_bins`` construction), one ``M_b`` is built and checked per bin from
+its centroid, each is applied to the whole padded field, and the responses are
+blended with Gaussian (``blend_px``) partition-of-unity weights
+(:func:`transfer_observation_operator`, :func:`apply_blended_operator` are the
+numpy reference of that path; :func:`local_bin_geometry` resolves which
+geometries get built). ``n_bins=1`` (default) is the single reference
+geometry.
+
+The local bins are read off the data, so ``n_bins > 1`` is mutually exclusive
+with the ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` overrides: they would never
+reach an operator, so :class:`BPINNConfig` rejects the pair up front rather
+than dropping them silently, and the reference-velocity line is not logged on
+the local path. The two paths also define the reference THICKNESS differently
+— ``n_bins=1`` uses ``data.H0``, the median of the whole unmasked stack, while
+a bin centroid is a mean over ``data.domain`` of the per-pixel temporal median
+— so when the domain is UNIFORM (one distinct geometry) the single-geometry
+reference is used instead of that centroid and the reduction to ``n_bins=1``
+is exact rather than merely close (:func:`fit_bpinn` documents both
+definitions). A domain with real structure never falls back that way: if the
+quantile seeding degenerates on a dominant geometry the cells are re-clustered
+from farthest-point seeds so the anomalous patch gets its own bin, and the log
+reports the effective bin count against the requested one with the reason.
 
 ``T`` is strongly anisotropic about the flow axis, so the reference velocity is
 passed as COMPONENTS, defaulting to the tile mean of ``data.vx``/``data.vy``
@@ -169,6 +197,11 @@ class BPINNConfig:
        observed median is under ``STEADY_TREND_MYR``, as on the steady twins;
     2. ``transfer=False`` must change the answer. If it does not, the observation
        operator is not informing the fit.
+
+    ``n_bins > 1`` (the LOCAL observation operator) takes its per-bin reference
+    geometry from the data, so it is mutually exclusive with the explicit
+    ``H_ref_m``/``ux_ref_myr``/``uy_ref_myr`` overrides; the combination raises
+    rather than silently discarding them.
     """
 
     hidden: int = 128
@@ -207,10 +240,25 @@ class BPINNConfig:
     eta_bar: float = 1e14
     alpha_scale: float = 0.34
     transfer_bg_sigma_H: float = 3.0
+    n_bins: int = 1              # > 1: LOCAL operator, one geometry per (H, ux, uy) bin
+    blend_px: float = 8.0        # Gaussian blend width (px) of the bin weights
     batch_epochs: int = 16
+    # Single reference geometry of the transfer, None = whole-stack median thickness
+    # (``data.H0``) and domain-mean velocity components. Mutually exclusive with
+    # n_bins > 1, which reads every bin's geometry off the data instead.
     H_ref_m: float | None = None
     ux_ref_myr: float | None = None
     uy_ref_myr: float | None = None
+
+    def __post_init__(self):
+        over = [n for n, v in (("H_ref_m", self.H_ref_m), ("ux_ref_myr", self.ux_ref_myr),
+                               ("uy_ref_myr", self.uy_ref_myr)) if v is not None]
+        if int(self.n_bins) > 1 and over:
+            raise ValueError(
+                f"n_bins={int(self.n_bins)} reads the reference geometry off the data, one bin at a "
+                f"time, so the override(s) {', '.join(over)} would never reach an operator: the two "
+                f"are mutually exclusive. Use n_bins=1 to set the reference geometry by hand, or "
+                f"drop the override(s) to bin it locally.")
 
 
 @dataclass
@@ -242,6 +290,90 @@ class BPINNResult:
     loss_history: np.ndarray
     config: BPINNConfig
     extras: dict = field(default_factory=dict)
+
+
+
+def transfer_observation_operator(ny, nx, dx_m, dy_m, H_ref, ux_myr, uy_myr, eta_bar=1e14,
+                                  alpha_scale=0.34, bg_sigma_H=3.0, rho_i=917.0, rho_w=1027.0):
+    """``(T, M)`` on the ``(2*ny, 2*nx)`` reflect-padded FFT lattice for ONE geometry.
+
+    ``M = 1 + (T - 1)(1 - L)`` with ``L`` the Gaussian low-pass at ``bg_sigma_H``
+    thicknesses. ``ux_myr, uy_myr`` are the PHYSICAL flow components (m/yr, y up);
+    ``y`` descends on the stacks, so the y component is mirrored into the lattice
+    here -- the orientation guard in :func:`fit_bpinn` checks exactly this.
+
+    ``dx_m``/``dy_m`` are the POSITIVE pixel PITCHES in metres: ``fit_bpinn``'s
+    spacings, NOT ``prepare_bpinn_data``'s signed (negative) y step, two
+    same-named quantities of opposite sign in this module. Both the low-pass
+    below and ``_bridging_transfer`` lay their lattices out with
+    ``fftfreq(N, pitch)``, so a negative ``dy_m`` flips ``ky`` and exactly
+    cancels the mirror applied here: the operator comes out y-mirrored, with the
+    along- and across-flow damping swapped, and nothing raises. Hence the check.
+    """
+    if not (float(dx_m) > 0.0 and float(dy_m) > 0.0):
+        raise ValueError(
+            f"transfer_observation_operator: dx_m and dy_m are the POSITIVE pixel pitches in "
+            f"metres, got ({dx_m}, {dy_m}). A negative y step -- prepare_bpinn_data's signed dy "
+            f"-- flips ky and silently y-mirrors the operator instead of raising.")
+    from .bridging_restoration import _bridging_transfer
+    Py, Px = 2 * ny, 2 * nx
+    T = np.asarray(_bridging_transfer(Py, Px, dx_m, dy_m, H_ref, float(ux_myr), -float(uy_myr), eta_bar,
+                                      alpha_scale, rho_i, rho_w, 9.81, 0.0, 0.0)[0])
+    kx = 2 * np.pi * np.fft.fftfreq(Px, dx_m)
+    ky = 2 * np.pi * np.fft.fftfreq(Py, dy_m)
+    K2 = kx[None, :] ** 2 + ky[:, None] ** 2
+    L = np.exp(-0.5 * K2 * (bg_sigma_H * H_ref) ** 2)
+    return T, 1.0 + (T - 1.0) * (1.0 - L)
+
+
+def apply_blended_operator(M, W, field):
+    """numpy reference of the observation operator the JAX path applies per epoch:
+    ``sum_b W_b * crop(ifft2(fft2(reflect_pad(field)) * M_b))``. ``M`` is ``(Py, Px)``
+    or ``(nb, Py, Px)`` from :func:`transfer_observation_operator` (so built on
+    POSITIVE pixel pitches, which is what carries the y mirror); ``W`` is
+    ``(nb, ny, nx)`` and sums to one over ``nb``, or ``None`` for a single operator."""
+    M = np.asarray(M)
+    field = np.asarray(field, float)
+    ny, nx = field.shape
+    if M.ndim == 2:
+        M = M[None]
+    W = np.ones((1, ny, nx)) if W is None else np.asarray(W)
+    if W.shape[0] != M.shape[0]:
+        raise ValueError(f"apply_blended_operator: {M.shape[0]} operator(s) but "
+                         f"{W.shape[0]} weight map(s)")
+    spec = np.fft.fft2(np.pad(field, ((0, ny), (0, nx)), mode="reflect"))
+    outs = np.real(np.fft.ifft2(spec[None] * M))[:, :ny, :nx]
+    return np.sum(W * outs, axis=0)
+
+
+def local_bin_geometry(H_pix, vx_myr, vy_myr, domain, n_bins, blend_px, ref_geom):
+    """``(bin_geom, W, info)``: the geometries the operator is built from, their weights, the outcome.
+
+    ``n_bins <= 1`` is the single ``ref_geom`` under a weight of ones. Otherwise
+    :func:`~stereo_melt.dynamics.geometry_bins.geometry_bins` bins
+    ``(H, u_x, u_y)`` over ``domain`` -- ``H_pix`` the per-pixel temporal median
+    thickness, the velocities in m/yr -- and returns one centroid per EFFECTIVE
+    bin plus the ``info`` the caller logs.
+
+    ``ref_geom`` replaces the lone centroid ONLY when the domain is genuinely
+    uniform (``info["uniform"]``, one distinct geometry), where the local path
+    should reduce EXACTLY to the ``n_bins=1`` operator rather than to a
+    differently-defined mean thickness (:func:`fit_bpinn` documents why the two
+    definitions differ). A domain with real structure that merely CLUSTERS into
+    one bin keeps its own domain-restricted centroid: substituting a whole-stack
+    statistic there would quietly hand back the global operator on exactly the
+    field localisation was asked for.
+    """
+    ny, nx = np.asarray(domain).shape
+    if int(n_bins) <= 1:
+        return ([tuple(float(c) for c in ref_geom)], np.ones((1, ny, nx)),
+                {"requested": int(n_bins), "n_unique": 1, "effective": 1,
+                 "uniform": True, "reseeded": False, "reason": ""})
+    from .geometry_bins import geometry_bins
+    geom, W, info = geometry_bins(H_pix, vx_myr, vy_myr, domain, int(n_bins), blend_px)
+    if info["uniform"]:
+        geom = [tuple(float(c) for c in ref_geom)]
+    return geom, W, info
 
 
 def prepare_bpinn_data(H_obs, x, y, t_yr, vx, vy, a_dot=None, domain=None,
@@ -350,7 +482,31 @@ def _features(B, u):
 
 
 def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BPINNResult:
-    """Fit the space-time B-PINN; see the module docstring for the model."""
+    """Fit the space-time B-PINN; see the module docstring for the model.
+
+    Reference geometry of the bridging observation operator (``transfer=True``).
+    With ``n_bins=1`` it is one ``(H_ref, ux_ref, uy_ref)``: ``H_ref`` is
+    ``cfg.H_ref_m`` or ``data.H0``, the median of the WHOLE unmasked stack, and
+    the velocity is ``cfg.ux_ref_myr``/``cfg.uy_ref_myr`` or the ``data.domain``
+    mean of the time-averaged velocity. With ``n_bins > 1`` those overrides are
+    rejected by :class:`BPINNConfig` and each bin's geometry is instead a k-means
+    centroid over ``data.domain`` of the per-pixel temporal median thickness and
+    the mean velocity components. The two thickness definitions differ on
+    purpose: ``data.H0`` is what every recorded single-geometry number was
+    produced with and stays bit-identical, while a bin centroid has to be
+    domain-restricted or an off-domain pixel (grounded ice, open ocean) would
+    pull that bin's operator away from the ice it is applied to. Because they do
+    differ, a local run over a UNIFORM domain falls back to the single-geometry
+    reference (:func:`local_bin_geometry`), so ``n_bins > 1`` there reproduces
+    the ``n_bins=1`` operator exactly rather than approximately -- and only
+    there, so a structured domain is never quietly handed the global operator.
+
+    ``extras["transfer_bins"]`` records the ``(H, ux, uy)`` geometries the
+    observation operator was actually built from and ``extras["n_bins_effective"]``
+    how many there were (empty and 0 without ``transfer``, one entry on the
+    reference path), so a stored run can be told apart from one that requested
+    the same ``cfg.n_bins`` and got fewer bins out of the data.
+    """
     import jax
     import jax.numpy as jnp
     import optax
@@ -449,155 +605,191 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     Xg, Yg = np.meshgrid(data.x_km, data.y_km)
     Xg_j, Yg_j = jnp.asarray(Xg), jnp.asarray(Yg)
     gx, gy = Xg_j.ravel(), Yg_j.ravel()
+    transfer_bins: list[tuple] = []
 
     # ---- bridging transfer as the observation operator (optional) ----
     if cfg.transfer:
         from .bridging_restoration import _bridging_transfer
+        # n_bins > 1 bins the geometry off the data; BPINNConfig has already rejected the
+        # overrides, so H_ref/ux_ref/uy_ref here are the single-geometry reference and are
+        # used only if the binning collapses to one bin (see local_bin_geometry).
+        is_local = int(cfg.n_bins) > 1
         H_ref = cfg.H_ref_m if cfg.H_ref_m is not None else float(data.H0)
         if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
             if not data.domain.any():
-                raise ValueError("empty domain: cannot default the reference velocity, "
-                                 "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
+                raise ValueError(
+                    f"empty domain: the local transfer (n_bins={int(cfg.n_bins)}) reads every bin's "
+                    f"geometry off the domain cells, and the ux_ref_myr/uy_ref_myr overrides are "
+                    f"not an option alongside it, so there is nothing to build an operator from"
+                    if is_local else
+                    "empty domain: cannot default the reference velocity, "
+                    "pass BPINNConfig(ux_ref_myr=..., uy_ref_myr=...)")
             ux_d = float(data.vx.mean(axis=0)[data.domain].mean() * 1e3)
             uy_d = float(data.vy.mean(axis=0)[data.domain].mean() * 1e3)
         else:
             ux_d = uy_d = 0.0
         ux_ref = float(cfg.ux_ref_myr) if cfg.ux_ref_myr is not None else ux_d
         uy_ref = float(cfg.uy_ref_myr) if cfg.uy_ref_myr is not None else uy_d
-        if cfg.ux_ref_myr is None or cfg.uy_ref_myr is None:
+        if not is_local and (cfg.ux_ref_myr is None or cfg.uy_ref_myr is None):
             how = ["override" if c is not None else "domain mean" for c
                    in (cfg.ux_ref_myr, cfg.uy_ref_myr)]
             print(f"  [bpinn] reference velocity = (ux {ux_ref:+.0f} [{how[0]}], "
                   f"uy {uy_ref:+.0f} [{how[1]}]) m/yr; the domain mean is over "
                   f"{int(data.domain.sum())} px", flush=True)
-        u_ref = float(np.hypot(ux_ref, uy_ref))
-        flow_deg = float(np.degrees(np.arctan2(uy_ref, ux_ref)))
-        # y_km descends, so fft2 of the row-indexed grid puts a physical (kx, ky)
-        # at lattice (kx, -ky): the flow must enter the operator y-mirrored for its
-        # anisotropy axis to land on the physical flow axis.
-        uy_lat = -uy_ref
-        flow_hat = (np.array([1.0, 0.0]) if u_ref <= 0
-                    else np.array([ux_ref, uy_lat]) / u_ref)
-        along_hat = (np.array([1.0, 0.0]) if u_ref <= 0
-                     else np.array([ux_ref, uy_ref]) / u_ref)
-        across_hat = np.array([-along_hat[1], along_hat[0]])
         Py, Px = 2 * ny, 2 * nx
-        T_np = _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_lat, cfg.eta_bar, cfg.alpha_scale,
-                                  data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
         kxp = 2 * np.pi * np.fft.fftfreq(Px, dx * 1e3)
         kyp = 2 * np.pi * np.fft.fftfreq(Py, dy * 1e3)
-        K2 = kxp[None, :] ** 2 + kyp[:, None] ** 2
-        sig_bg = cfg.transfer_bg_sigma_H * H_ref
-        L_np = np.exp(-0.5 * K2 * sig_bg ** 2)
-        M_np = 1.0 + (T_np - 1.0) * (1.0 - L_np)
-        M_op = jnp.asarray(M_np)
         Xd = np.stack([np.ones(ny * nx), (Xg.ravel() - xc), (Yg.ravel() - yc)], 1)
         P_pinv = jnp.asarray(np.linalg.pinv(Xd))          # (3, ny*nx)
         Xd_j = jnp.asarray(Xd)
+        rho_i, rho_w = data.extras.get("rho_i", 917.0), data.extras.get("rho_w", 1027.0)
 
-        # Probes must stay well inside the padded grid's Nyquist or they say nothing about
-        # the operator: snapping wraps, and the +ky/-ky bins stop being mirrors. Four pixels
-        # of the coarser axis is the floor; a shelf thinner than its own pixel is probed
-        # there instead of at 2H, and the physics assertion downgrades to a log line.
-        # There is an upper bound too: once the probe is an appreciable fraction of the tile,
-        # reflect-pad leakage swamps the projected gain and the along/across ordering is
-        # decided by the window rather than by the flow. A quarter of the shorter domain side
-        # is the ceiling; the packaged PIG trunk (164 x 154 at 250 m) probes 1120 m in a
-        # 1000-9625 m band, 8.6x under it.
-        lam_min = 4.0 * max(dx, dy) * 1e3
-        lam_max = 0.25 * min(nx * dx, ny * dy) * 1e3
-        lam_probe = max(2.0 * H_ref, lam_min)
-        unresolved = 2.0 * H_ref < lam_min or lam_probe > lam_max
+        def _build_checked_operator(H_ref, ux_ref, uy_ref, label=""):
+            """``(T, M)`` for ONE geometry (thickness, physical flow vector), with the
+            orientation guard and the physics assertion run on it."""
+            u_ref = float(np.hypot(ux_ref, uy_ref))
+            flow_deg = float(np.degrees(np.arctan2(uy_ref, ux_ref)))
+            uy_lat = -uy_ref
+            flow_hat = (np.array([1.0, 0.0]) if u_ref <= 0
+                        else np.array([ux_ref, uy_lat]) / u_ref)
+            along_hat = (np.array([1.0, 0.0]) if u_ref <= 0
+                         else np.array([ux_ref, uy_ref]) / u_ref)
+            across_hat = np.array([-along_hat[1], along_hat[0]])
+            T_np, M_np = transfer_observation_operator(
+                ny, nx, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref, cfg.eta_bar, cfg.alpha_scale,
+                cfg.transfer_bg_sigma_H, rho_i, rho_w)
+            sig_bg = cfg.transfer_bg_sigma_H * H_ref
 
-        def _lattice_idx(khat, lam):
-            kx_w, ky_w = (2 * np.pi / lam) * np.asarray(khat)
-            return (int(np.argmin(np.abs(kyp - ky_w))), int(np.argmin(np.abs(kxp - kx_w))))
+            # Probes must stay well inside the padded grid's Nyquist or they say nothing about
+            # the operator: snapping wraps, and the +ky/-ky bins stop being mirrors. Four pixels
+            # of the coarser axis is the floor; a shelf thinner than its own pixel is probed
+            # there instead of at 2H, and the physics assertion downgrades to a log line.
+            # There is an upper bound too: once the probe is an appreciable fraction of the tile,
+            # reflect-pad leakage swamps the projected gain and the along/across ordering is
+            # decided by the window rather than by the flow. A quarter of the shorter domain side
+            # is the ceiling; the packaged PIG trunk (164 x 154 at 250 m) probes 1120 m in a
+            # 1000-9625 m band, 8.6x under it.
+            lam_min = 4.0 * max(dx, dy) * 1e3
+            lam_max = 0.25 * min(nx * dx, ny * dy) * 1e3
+            lam_probe = max(2.0 * H_ref, lam_min)
+            unresolved = 2.0 * H_ref < lam_min or lam_probe > lam_max
 
-        def _mirror_idx(idx):
-            """Lattice index of the y-mirrored wavevector, by exact index arithmetic."""
-            m, n = idx
-            return ((Py - m) % Py, n)
+            def _lattice_idx(khat, lam):
+                kx_w, ky_w = (2 * np.pi / lam) * np.asarray(khat)
+                return (int(np.argmin(np.abs(kyp - ky_w))), int(np.argmin(np.abs(kxp - kx_w))))
 
-        def _T_along_flow(lam):
-            """|T| at the padded-lattice point nearest the along-flow wavevector of wavelength lam."""
-            return abs(T_np[_lattice_idx(flow_hat, lam)])
+            def _mirror_idx(idx):
+                """Lattice index of the y-mirrored wavevector, by exact index arithmetic."""
+                m, n = idx
+                return ((Py - m) % Py, n)
 
-        def _probe_gain(khat, lam):
-            """Gain the built operator applies to a unit plane wave of wavelength lam on PHYSICAL
-            direction khat: laid out on the real (x_km, y_km) coordinates, pushed through the
-            same path apparent_epoch uses, then projected back onto itself so that the
-            reflect-pad's spectral leakage (which swamps a peak-amplitude estimate) does not
-            bias it."""
-            k = (2 * np.pi / lam) * np.asarray(khat)
-            f = np.cos(k[0] * Xg * 1e3 + k[1] * Yg * 1e3)
-            ap = np.pad(f, ((0, ny), (0, nx)), mode="reflect")
-            out = np.real(np.fft.ifft2(np.fft.fft2(ap) * M_np))[:ny, :nx]
-            return float(abs(np.sum(out * f) / np.sum(f * f)))
+            def _T_along_flow(lam):
+                """|T| at the padded-lattice point nearest the along-flow wavevector of wavelength lam."""
+                return abs(T_np[_lattice_idx(flow_hat, lam)])
 
-        # Reference transfers on the PHYSICAL lattice: one with the real advection, one with
-        # it switched off. The first is the orientation guard's independent reference. The
-        # ratio of the two AT THE SAME LATTICE POINT is how much anisotropy the operator
-        # actually carries at the probe wavelength, which is what the physics assertion needs
-        # to be gated on -- the anisotropy is set by alpha_scale * u_ref * t_r / H, not by
-        # u_ref, so at alpha_scale = 0 the transfer is exactly isotropic at any speed and the
-        # two probes then differ only by lattice snapping and reflect-pad leakage. Reading
-        # both at one index is what makes this exact: an along/across pair snapped separately
-        # sits at different |k| and reports up to 187 % anisotropy on a small grid at
-        # alpha_scale = 0, which would re-enable the assertion in precisely the isotropic case
-        # it has to stand down for.
-        def _phys_transfer(alpha_scale):
-            return _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref,
-                                      cfg.eta_bar, alpha_scale, data.extras.get("rho_i", 917.0),
-                                      data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
+            def _probe_gain(khat, lam):
+                """Gain the built operator applies to a unit plane wave of wavelength lam on PHYSICAL
+                direction khat: laid out on the real (x_km, y_km) coordinates, pushed through the
+                same path apparent_epoch uses, then projected back onto itself so that the
+                reflect-pad's spectral leakage (which swamps a peak-amplitude estimate) does not
+                bias it."""
+                k = (2 * np.pi / lam) * np.asarray(khat)
+                f = np.cos(k[0] * Xg * 1e3 + k[1] * Yg * 1e3)
+                ap = np.pad(f, ((0, ny), (0, nx)), mode="reflect")
+                out = np.real(np.fft.ifft2(np.fft.fft2(ap) * M_np))[:ny, :nx]
+                return float(abs(np.sum(out * f) / np.sum(f * f)))
 
-        T_phys = _phys_transfer(cfg.alpha_scale)
-        idx_along = _lattice_idx(along_hat, lam_probe)
-        t_iso = abs(_phys_transfer(0.0)[idx_along])
-        aniso = abs(1.0 - abs(T_phys[idx_along]) / t_iso) if t_iso > 0 else 0.0
-        aniso_margin = 0.05
+            # Reference transfers on the PHYSICAL lattice: one with the real advection, one with
+            # it switched off. The first is the orientation guard's independent reference. The
+            # ratio of the two AT THE SAME LATTICE POINT is how much anisotropy the operator
+            # actually carries at the probe wavelength, which is what the physics assertion needs
+            # to be gated on -- the anisotropy is set by alpha_scale * u_ref * t_r / H, not by
+            # u_ref, so at alpha_scale = 0 the transfer is exactly isotropic at any speed and the
+            # two probes then differ only by lattice snapping and reflect-pad leakage. Reading
+            # both at one index is what makes this exact: an along/across pair snapped separately
+            # sits at different |k| and reports up to 187 % anisotropy on a small grid at
+            # alpha_scale = 0, which would re-enable the assertion in precisely the isotropic case
+            # it has to stand down for.
+            def _phys_transfer(alpha_scale):
+                return _bridging_transfer(Py, Px, dx * 1e3, dy * 1e3, H_ref, ux_ref, uy_ref,
+                                          cfg.eta_bar, alpha_scale, data.extras.get("rho_i", 917.0),
+                                          data.extras.get("rho_w", 1027.0), 9.81, 0.0, 0.0)[0]
 
-        a_along, a_across = _probe_gain(along_hat, lam_probe), _probe_gain(across_hat, lam_probe)
-        assert_aniso = not unresolved and aniso > aniso_margin
-        if unresolved and 2.0 * H_ref < lam_min:
-            gate_note = (f" (2H = {2 * H_ref:.0f} m is below this grid's {lam_min:.0f} m probe "
-                         f"floor, so the probe was raised to it: logged, not asserted)")
-        elif unresolved:
-            gate_note = (f" ({lam_probe:.0f} m probe is above this grid's {lam_max:.0f} m "
-                         f"ceiling: logged, not asserted)")
-        elif not assert_aniso:
-            gate_note = (f" (predicted anisotropy {aniso * 100:.1f}% is under the "
-                         f"{aniso_margin * 100:.0f}% margin: logged, not asserted)")
-        else:
-            gate_note = ""
-        print(f"  [bpinn] transfer ON: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
-              f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
-              f"|T| along-flow at {lam_probe:.0f}/{1.5 * lam_probe:.0f} m = "
-              f"{_T_along_flow(lam_probe):.2f}/{_T_along_flow(1.5 * lam_probe):.2f}; "
-              f"predicted anisotropy {aniso * 100:.0f}%; "
-              f"{lam_probe:.0f} m gain along/across flow = {a_along:.3f}/{a_across:.3f}{gate_note}; "
-              f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
-        # Orientation guard, against an INDEPENDENT reference: require the operator actually
-        # built (physical flow, y-mirrored into the lattice) to agree with T_phys at the same
-        # physical wavevectors. Comparing the two probes to each other cannot establish this
-        # -- flipping the y sign in both the operator and the probe leaves |T| untouched for
-        # any flow within 22.5 deg of a grid axis or diagonal, the PIG trunk azimuth among
-        # them -- so a shared-convention error is only caught outside that convention.
-        for name, khat in (("along-flow", along_hat), ("across-flow", across_hat)):
-            idx = _lattice_idx(khat, lam_probe)
-            built = abs(T_np[_mirror_idx(idx)])
-            want = abs(T_phys[idx])
-            if not np.isclose(built, want, rtol=1e-6, atol=1e-12):
+            T_phys = _phys_transfer(cfg.alpha_scale)
+            idx_along = _lattice_idx(along_hat, lam_probe)
+            t_iso = abs(_phys_transfer(0.0)[idx_along])
+            aniso = abs(1.0 - abs(T_phys[idx_along]) / t_iso) if t_iso > 0 else 0.0
+            aniso_margin = 0.05
+
+            a_along, a_across = _probe_gain(along_hat, lam_probe), _probe_gain(across_hat, lam_probe)
+            assert_aniso = not unresolved and aniso > aniso_margin
+            if unresolved and 2.0 * H_ref < lam_min:
+                gate_note = (f" (2H = {2 * H_ref:.0f} m is below this grid's {lam_min:.0f} m probe "
+                             f"floor, so the probe was raised to it: logged, not asserted)")
+            elif unresolved:
+                gate_note = (f" ({lam_probe:.0f} m probe is above this grid's {lam_max:.0f} m "
+                             f"ceiling: logged, not asserted)")
+            elif not assert_aniso:
+                gate_note = (f" (predicted anisotropy {aniso * 100:.1f}% is under the "
+                             f"{aniso_margin * 100:.0f}% margin: logged, not asserted)")
+            else:
+                gate_note = ""
+            print(f"  [bpinn] transfer ON{label}: H_ref {H_ref:.0f} m, flow {u_ref:.0f} m/yr at {flow_deg:+.0f}° "
+                  f"(ux {ux_ref:+.0f}, uy {uy_ref:+.0f} m/yr), eta {cfg.eta_bar:.1e}, alpha {cfg.alpha_scale}; "
+                  f"|T| along-flow at {lam_probe:.0f}/{1.5 * lam_probe:.0f} m = "
+                  f"{_T_along_flow(lam_probe):.2f}/{_T_along_flow(1.5 * lam_probe):.2f}; "
+                  f"predicted anisotropy {aniso * 100:.0f}%; "
+                  f"{lam_probe:.0f} m gain along/across flow = {a_along:.3f}/{a_across:.3f}{gate_note}; "
+                  f"background low-pass sigma {sig_bg/1e3:.1f} km; padded FFT {Py}x{Px}", flush=True)
+            # Orientation guard, against an INDEPENDENT reference: require the operator actually
+            # built (physical flow, y-mirrored into the lattice) to agree with T_phys at the same
+            # physical wavevectors. Comparing the two probes to each other cannot establish this
+            # -- flipping the y sign in both the operator and the probe leaves |T| untouched for
+            # any flow within 22.5 deg of a grid axis or diagonal, the PIG trunk azimuth among
+            # them -- so a shared-convention error is only caught outside that convention.
+            for name, khat in (("along-flow", along_hat), ("across-flow", across_hat)):
+                idx = _lattice_idx(khat, lam_probe)
+                built = abs(T_np[_mirror_idx(idx)])
+                want = abs(T_phys[idx])
+                if not np.isclose(built, want, rtol=1e-6, atol=1e-12):
+                    raise ValueError(
+                        f"bridging operator is misoriented: at the {lam_probe:.0f} m {name} wavevector "
+                        f"it applies |T| {built:.4f}, but the transfer built from the physical flow "
+                        f"({ux_ref:+.0f}, {uy_ref:+.0f}) m/yr gives {want:.4f}. y_km descends, so "
+                        f"the flow's y component must be mirrored into the FFT lattice.")
+            if assert_aniso and a_along > a_across:
                 raise ValueError(
-                    f"bridging operator is misoriented: at the {lam_probe:.0f} m {name} wavevector "
-                    f"it applies |T| {built:.4f}, but the transfer built from the physical flow "
-                    f"({ux_ref:+.0f}, {uy_ref:+.0f}) m/yr gives {want:.4f}. y_km descends, so "
-                    f"the flow's y component must be mirrored into the FFT lattice.")
-        if assert_aniso and a_along > a_across:
-            raise ValueError(
-                f"bridging operator does not damp along-flow structure: a {lam_probe:.0f} m plane "
-                f"wave along the flow ({flow_deg:+.0f}°) comes through at {a_along:.3f} but "
-                f"across-flow at {a_across:.3f}, where the transfer predicts {aniso * 100:.0f}% "
-                f"anisotropy. Check the reference velocity components.")
+                    f"bridging operator does not damp along-flow structure: a {lam_probe:.0f} m plane "
+                    f"wave along the flow ({flow_deg:+.0f}°) comes through at {a_along:.3f} but "
+                    f"across-flow at {a_across:.3f}, where the transfer predicts {aniso * 100:.0f}% "
+                    f"anisotropy. Check the reference velocity components.")
+            return T_np, M_np
+
+        # ---- local operator: bins on (H, u_x, u_y) with partition-of-unity blending (the
+        # monolithic solver's n_bins/blend_px construction); n_bins=1 is the reference geometry
+        bin_geom, W_np, geom_info = local_bin_geometry(
+            np.nanmedian(data.H_obs, axis=0) if is_local else None,
+            data.vx.mean(axis=0) * 1e3, data.vy.mean(axis=0) * 1e3,
+            data.domain, cfg.n_bins, cfg.blend_px, (H_ref, ux_ref, uy_ref))
+        if is_local:
+            if geom_info["uniform"]:
+                why = ("; the domain is uniform, so the single reference geometry is used and "
+                       "this run reduces exactly to n_bins=1")
+            else:
+                why = f"; {geom_info['reason']}" if geom_info["reason"] else ""
+                if geom_info["reseeded"]:
+                    why += ("; the quantile seeding degenerated on a dominant geometry, so the "
+                            "cells were re-clustered from farthest-point seeds")
+            print(f"  [bpinn] local transfer: {geom_info['effective']} effective of "
+                  f"{geom_info['requested']} (H, ux, uy) bins requested, "
+                  f"blend {cfg.blend_px:g} px{why}", flush=True)
+        M_list = []
+        for bi, (Hb, uxb, uyb) in enumerate(bin_geom):
+            lab_b = f" bin {bi} (area {W_np[bi].mean():.2f})" if len(bin_geom) > 1 else ""
+            M_list.append(_build_checked_operator(Hb, uxb, uyb, lab_b)[1])
+        transfer_bins = [tuple(float(c) for c in g) for g in bin_geom]
+        M_op = jnp.asarray(np.stack(M_list))          # (nb, Py, Px)
+        W_op = jnp.asarray(W_np)                      # (nb, ny, nx)
         H_dense = jnp.asarray(np.nan_to_num(data.H_obs))
         M_dense = jnp.asarray(np.isfinite(data.H_obs) & data.domain[None])
         t_epochs = jnp.asarray(data.t_yr)
@@ -609,7 +801,9 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
             pl = Xd_j @ coef
             a = (h - pl).reshape(ny, nx)
             ap = jnp.pad(a, ((0, ny), (0, nx)), mode="reflect")
-            out = jnp.real(jnp.fft.ifft2(jnp.fft.fft2(ap) * M_op))[:ny, :nx]
+            spec = jnp.fft.fft2(ap)
+            outs = jnp.real(jnp.fft.ifft2(spec[None] * M_op))[:, :ny, :nx]   # (nb, ny, nx)
+            out = jnp.sum(W_op * outs, axis=0)
             return out + pl.reshape(ny, nx)
 
         def apparent_many(theta, ts):
@@ -843,4 +1037,6 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                         "obs_trend": obs_trend, "trend_median_myr": fit_med,
                         "obs_trend_median_myr": obs_med,
                         "trend_median_domain_myr": dom_med, "n_trend_cmp_px": n_cmp,
-                        "collapse_check_stood_down": bool(steady)})
+                        "collapse_check_stood_down": bool(steady),
+                        "transfer_bins": transfer_bins,
+                        "n_bins_effective": len(transfer_bins)})
