@@ -37,14 +37,22 @@ from stereo_melt.dynamics.bpinn import BPINNConfig, fit_bpinn, prepare_bpinn_dat
 R = "/wd2/projects/stereo_melt/examples/elmer_synth/results/bpinn"
 
 
-def _amp_at(m, x, domain, lam):
-    """Along-x amplitude of the domain-masked field at wavelength ``lam`` (m)."""
+def _amp_at(m, x, y, domain, lam, axis="xy"):
+    """Amplitude of the domain-masked field at wavelength ``lam`` (m).
+
+    Measured along the axis the prescribed melt varies in, as recorded in the
+    npz: a ``y`` twin is averaged over x and projected onto y, anything else
+    over y and onto x. ``xy`` (the ``multicos`` twins, which superpose
+    components on both axes) keeps the x projection, where the 1.0 / 1.5 km
+    channels the caller asks about live.
+    """
     fin = np.isfinite(m) & domain
-    row = np.nanmean(np.where(fin, m, np.nan), axis=0)
-    row = row - np.nanmean(row)
-    ok = np.isfinite(row)
-    xx = x - x[0]
-    return 2 * np.abs(np.mean(row[ok] * np.exp(-1j * 2 * np.pi / lam * xx[ok])))
+    prof = np.nanmean(np.where(fin, m, np.nan), axis=(1 if axis == "y" else 0))
+    prof = prof - np.nanmean(prof)
+    coord = (y if axis == "y" else x)
+    ok = np.isfinite(prof)
+    cc = coord - coord[0]
+    return 2 * np.abs(np.mean(prof[ok] * np.exp(-1j * 2 * np.pi / lam * cc[ok])))
 
 
 def main() -> int:
@@ -112,11 +120,15 @@ def main() -> int:
     score(res.map_melt, "B-PINN MAP")
     if res.samples.shape[0] > 1:
         score(res.melt_mean, "B-PINN posterior mean", res.melt_sd)
-    print("along-flow amplitude at λ=1.0 km / 1.5 km (truth 15 / 10 m/yr):")
+    truth_axis = str(z["truth_axis"]) if "truth_axis" in z else "xy"
+    amp_axis = "y" if truth_axis == "y" else "x"
+    print(f"amplitude along {amp_axis} (the truth's axis, {truth_axis!r}) "
+          f"at λ=1.0 km / 1.5 km (truth 15 / 10 m/yr):")
     for name, m in (("Eulerian", z.get("bench_eulerian")), ("Lagrangian", z.get("bench_lagrangian")),
                     ("B-PINN mean", res.melt_mean)):
         if m is not None:
-            print(f"  {name:12s} {_amp_at(m, x, data.domain, 1000):.1f} / {_amp_at(m, x, data.domain, 1500):.1f}")
+            print(f"  {name:12s} {_amp_at(m, x, y, data.domain, 1000, truth_axis):.1f} / "
+                  f"{_amp_at(m, x, y, data.domain, 1500, truth_axis):.1f}")
     np.savez_compressed(f"{R}/bpinn_{args.tag}{args.out_suffix}.npz", mean=res.melt_mean, sd=res.melt_sd,
                         samples=res.samples, map=res.map_melt, obs_rms=res.obs_rms_m, loss=res.loss_history)
 

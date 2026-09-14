@@ -74,8 +74,9 @@ def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
         full_name="quarters", purpose="the count scaling", assume_tag=assume_tag,
         hint="re-run run_noise_floor --quarters with the halves' settings (its "
              "output carries both rungs) or pass a matching --half-nc")[0]
+    assumed = f", stack tag ASSUMED {assume_tag}" if assume_tag else ""
     print(f"  halves {half_nc or NC_HALF} + quarters {quarters_nc}: "
-          f"provenance agrees (common_epoch={ce}, velocity={vel!r})", flush=True)
+          f"provenance agrees (common_epoch={ce}, velocity={vel!r}{assumed})", flush=True)
     return half, q
 
 
@@ -152,7 +153,9 @@ def main() -> int:
     ax.set_title("PIG melt error vs DEM count — subset ladder (quarters → halves), "
                  "same pixels, same everything\nempirical trunk slope "
                  f"{sl:+.2f} (white −0.50) ⇒ trunk bridging band needs "
-                 f"~{need:.1f}× the strips (1/n assumption said 1.4×)", fontsize=11)
+                 f"~{need:.1f}× the strips (1/n assumption said 1.4×)"
+                 + (f"\nstack tag ASSUMED {args.assume_tag} (not stamped on the file)"
+                    if args.assume_tag else ""), fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_error_vs_dem_count.png")
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")

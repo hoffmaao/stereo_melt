@@ -20,10 +20,11 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     passed; matching provenance is returned for labelling; a velocity
     mismatch is refused; a missing velocity attr only warns. Halves solved
     from another stack/mask ``tag`` are refused even when the velocity
-    string is identical; a file carrying no ``tag`` at all states nothing
-    about its stack, so it is refused by name rather than read from that
-    name, and ``--assume-tag`` states it explicitly and is then checked
-    like a stamped tag.
+    string is identical; an untagged file states nothing about its stack
+    unless its name is the un-suffixed default that predates ``--tag``, so
+    it is refused by name rather than read from that name; ``--assume-tag``
+    states it explicitly and is then checked like a stamped tag, and it
+    stands in for one side only, so two untagged files stay refused.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -171,20 +172,25 @@ def main() -> int:
         return d
 
     # The pre-attr half-stacks on disk include runs of other stacks whose names
-    # begin with the canon tag, so no name is evidence of a stack.
-    for suffix in ("", "_ce", "_q", "_is2ctempo_sheltilt_qcey"):
+    # begin with the canon tag, so an out-suffix is no evidence of a stack; only
+    # the un-suffixed default name predates --tag and must be the canon stack.
+    default_half = named(["eulerian_A", "eulerian_B"],
+                         "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    check("the un-suffixed default half predates --tag, so it is the canon stack",
+          check_provenance(full_t, default_half, pair_def) == [(0, V)])
+    for suffix in ("_ce", "_q", "_is2ctempo_sheltilt_qcey"):
         name = f"pig_noise_floor_250m_is2ctempo_sheltilt{suffix}.nc"
         err, _ = system_exit(check_provenance, full_t,
                              named(["eulerian_A", "eulerian_B"], name), pair_def)
-        check(f"a half with no tag attr is refused, named: ...{suffix or '<none>'}",
+        check(f"an untagged half with an out-suffix is refused: ...{suffix}",
               err is not None and name in err and "--assume-tag" in err
               and "cannot be established" in err, f"SystemExit: {err!s:.60}")
-    legacy_half = named(["eulerian_A", "eulerian_B"],
-                        "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    qcey_half = named(["eulerian_A", "eulerian_B"],
+                      "pig_noise_floor_250m_is2ctempo_sheltilt_is2ctempo_sheltilt_qcey.nc")
     check("--assume-tag states the missing tag and the comparison proceeds",
-          check_provenance(full_t, legacy_half, pair_def,
+          check_provenance(full_t, qcey_half, pair_def,
                            assume_tag="is2ctempo_sheltilt") == [(0, V)])
-    err, _ = system_exit(check_provenance, full_t, legacy_half, pair_def,
+    err, _ = system_exit(check_provenance, full_t, qcey_half, pair_def,
                          assume_tag="is2ctempo_sheltilt_qcey")
     check("an assumed tag is checked like a stamped one, not trusted blindly",
           err is not None and "tag='is2ctempo_sheltilt_qcey'" in err, f"SystemExit: {err!s:.60}")
@@ -196,11 +202,17 @@ def main() -> int:
     check("with the tag assumed, tagged halves and an untagged quarters file compare",
           check_provenance(quarters, half_t, ladder, full_name="quarters",
                            assume_tag="is2ctempo_sheltilt") == [(0, V)])
-    err, _ = system_exit(check_provenance, ds(["eulerian"], attrs={"velocity": V}),
-                         ds(["eulerian_A", "eulerian_B"],
-                            attrs={"velocity": V, "common_epoch": 0}), pair_def)
-    check("neither side carrying a tag is refused, not passed over quietly",
-          err is not None and "cannot be established" in err, f"SystemExit: {err!s:.60}")
+    # The ladder pair that motivated the override: canon quarters, qcey halves,
+    # neither carrying a tag. One assertion cannot vouch for both sides.
+    err, _ = system_exit(check_provenance, quarters, qcey_half, ladder,
+                         full_name="quarters", assume_tag="is2ctempo_sheltilt")
+    check("--assume-tag cannot fill BOTH sides: two untagged files stay refused",
+          err is not None and "one side only" in err
+          and "is2ctempo_sheltilt_q.nc" in err and "qcey.nc" in err,
+          f"SystemExit: {err!s:.60}")
+    err, _ = system_exit(check_provenance, quarters, qcey_half, ladder, full_name="quarters")
+    check("...and are refused without the override too", err is not None,
+          f"SystemExit: {err!s:.60}")
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),
