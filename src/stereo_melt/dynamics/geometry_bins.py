@@ -7,6 +7,12 @@ B-PINN observation operator uses. Cells are binned on ``(H, u_x, u_y[, extra])``
 so every bin gets its own transfer -- keyed on the velocity VECTOR, so a shelf
 whose flow turns gets different operators on its limbs -- and the per-bin
 responses are recombined with Gaussian-smoothed weights that sum to one.
+
+Torch-free on purpose, and that is what this module is for: ``kmeans_geometry``
+used to live in :mod:`~stereo_melt.dynamics.stubblefield_forward`, which imports
+torch at module level, and the B-PINN runs in a JAX environment that has no
+torch. That module re-imports it from here under its old private name, so its
+own callers and gates are unchanged; do not fold this back into it.
 """
 from __future__ import annotations
 

@@ -82,7 +82,7 @@ its centroid, each is applied to the whole padded field, and the responses are
 blended with Gaussian (``blend_px``) partition-of-unity weights
 (:func:`transfer_observation_operator`, :func:`apply_blended_operator` are the
 numpy reference of that path; :func:`local_bin_geometry` resolves which
-geometries get built). ``n_bins=1`` (default) is the single domain-mean
+geometries get built). ``n_bins=1`` (default) is the single reference
 geometry.
 
 The local bins are read off the data, so ``n_bins > 1`` is mutually exclusive

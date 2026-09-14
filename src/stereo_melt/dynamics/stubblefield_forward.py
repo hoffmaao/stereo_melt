@@ -287,7 +287,7 @@ class BlendedStubblefieldForward(torch.nn.Module):
               \mathcal{F} m\big](x), \qquad \sum_b w_b(x) = 1.
 
     Geometry is clustered into ``n_bins`` groups of similar :math:`(H, u_x, u_y)`
-    (deterministically, see :func:`_kmeans_geometry`), each contributing one
+    (deterministically, see :func:`~.geometry_bins.kmeans_geometry`), each contributing one
     multiplier, and the hard bin indicators are Gaussian-smoothed over
     ``blend_px`` and renormalized so the weights are an exact partition of unity.
     With a spatially constant geometry every cell lands in one bin, so the result
