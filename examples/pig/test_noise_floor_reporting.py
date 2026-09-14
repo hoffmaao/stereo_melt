@@ -27,6 +27,12 @@ T3  ``check_provenance``: common-epoch halves against a default-path full
     stands in for one side only, so two untagged files stay refused. The
     check reports which side (if any) the assumption stood in for, so a
     caller labels its figure with the caveat only when one was needed.
+T5  ``ladder_stack_name``: the count ladder's DEM-count axis follows the
+    stack the ladder itself was solved from -- a stamped ``tag`` selects
+    ``pig_stack_250m_<tag>``, an attr-less file whose name is the un-suffixed
+    canon default is the canon stack, ``--assume-tag`` states it when neither
+    file carries it, and an attr-less ladder with an out-suffix still loads
+    the canon stack but reports that the tag was only assumed.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -57,7 +63,13 @@ sys.path.insert(0, str(ROOT / "examples"))
 import stereo_melt  # noqa: E402,F401
 import pig  # noqa: E402,F401
 from pig import config  # noqa: E402
-from pig.plot_noise_floor import available_pairs, check_provenance, crossing  # noqa: E402
+from pig.plot_error_vs_count import ladder_stack_name  # noqa: E402
+from pig.plot_noise_floor import (  # noqa: E402
+    CANON_TAG,
+    available_pairs,
+    check_provenance,
+    crossing,
+)
 from pig.run_melt import load_velocity_on_grid  # noqa: E402
 
 FAILS = []
@@ -222,6 +234,30 @@ def main() -> int:
     err, _ = system_exit(check_provenance, quarters, qcey_half, ladder, full_name="quarters")
     check("...and are refused without the override too", err is not None,
           f"SystemExit: {err!s:.60}")
+
+    print("T5  ladder_stack_name(): the DEM-count axis follows the ladder's own stack")
+    QT = "is2ctempo_sheltilt_qcey"
+    q_tagged = ds(["eulerian_Q0"], attrs={"velocity": V, "tag": QT})
+    h_tagged = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "tag": QT})
+    check("a stamped tag selects that tag's stack",
+          ladder_stack_name(q_tagged, h_tagged) == (f"pig_stack_250m_{QT}", QT),
+          f"{ladder_stack_name(q_tagged, h_tagged)}")
+    untagged_q = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("halves carry the tag when the quarters file does not",
+          ladder_stack_name(untagged_q, h_tagged) == (f"pig_stack_250m_{QT}", QT))
+    canon_default = named(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                          "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
+    check("the un-suffixed canon default resolves to the canon stack",
+          ladder_stack_name(canon_default) == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG))
+    untagged_h = named(["eulerian_A", "eulerian_B"],
+                       "pig_noise_floor_250m_is2ctempo_sheltilt_ce.nc")
+    check("an attr-less ladder still loads the canon stack, reported as assumed",
+          ladder_stack_name(untagged_q, untagged_h) == (f"pig_stack_250m_{CANON_TAG}", None),
+          f"{ladder_stack_name(untagged_q, untagged_h)}")
+    check("--assume-tag states the stack when neither file carries the tag",
+          ladder_stack_name(untagged_q, untagged_h, assume_tag=QT) == (f"pig_stack_250m_{QT}", QT))
+    check("a stamped tag is not overridden by --assume-tag",
+          ladder_stack_name(q_tagged, h_tagged, assume_tag=CANON_TAG)[1] == QT)
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),

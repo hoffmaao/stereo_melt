@@ -59,6 +59,11 @@ def half_path(tag=CANON_TAG, suffix=""):
     return config.PROCESSED_DIR / f"pig_noise_floor_250m_{tag}{suffix}.nc"
 
 
+def stack_name(tag=CANON_TAG):
+    """Name of the 250 m stack a product with this tag was solved from."""
+    return f"pig_stack_250m_{tag}"
+
+
 LAM_3H_SHELF_KM, LAM_3H_TRUNK_KM = 3 * 0.438, 3 * 1.015
 PAIRS = [("Eulerian", "eulerian", "eulerian_A", "eulerian_B", "#1f77b4"),
          ("restored budget + Helm", "restored_local_helm", "rb_A", "rb_B", "#2ca02c")]
@@ -397,7 +402,7 @@ def _stratified_figure(full, half, mask, xw, yw, r0, r1, c0, c1, pairs, args, su
     u = xr.DataArray(np.hypot(z["u_model_x"], z["u_model_y"]), dims=("y", "x"),
                      coords={"y": z["y"], "x": z["x"]})
     u = u.reindex_like(full.eulerian, method="nearest").values[r0:r1, c0:c1]
-    st = load_stack(f"pig_stack_250m_{args.tag}")
+    st = load_stack(stack_name(args.tag))
     H = freeboard_to_thickness(st.mean("time", skipna=True)).values[r0:r1, c0:c1]
 
     regions = [("fast trunk (|u| ≥ 1 km/yr)", mask & np.isfinite(u) & (u >= 1000.0), "#d62728"),

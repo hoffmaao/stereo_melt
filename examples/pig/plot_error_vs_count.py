@@ -9,7 +9,9 @@ scaling:
    writes both rungs from one run, and a halves file from another run is
    only accepted if its recorded solver settings match), the Eulerian melt
    is solved
-   from each, and pairwise differences give the noise at n/2 and n/4 over
+   from each, and the per-pixel DEM counts on the x axis come from that same
+   ladder's own stack (resolved from its stamped tag), and pairwise
+   differences give the noise at n/2 and n/4 over
    the SAME pixels: Var[A-B] = 2 sigma^2 at that count, so sigma_{n/2} =
    rms(A-B)/sqrt(2) and sigma_{n/4} = rms(Qi-Qj)/sqrt(2). Everything else
    (region, velocity, SMB, window) is
@@ -47,13 +49,34 @@ import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
 
 from pig import config  # noqa: E402
-from pig.plot_noise_floor import check_provenance  # noqa: E402
+from pig.plot_noise_floor import CANON_TAG, check_provenance, product_tag, stack_name  # noqa: E402
 from pig.run_melt import load_stack  # noqa: E402
 
 NC_HALF = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt.nc"
 NC_Q = config.PROCESSED_DIR / "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc"
 HALVES = ("eulerian_A", "eulerian_B")
 QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
+
+
+def ladder_stack_name(quarters, halves=None, assume_tag=None):
+    """``(stack_name, placed_tag)`` for the ladder's per-pixel DEM-count axis.
+
+    The counts must come from the stack the ladder was actually solved from:
+    ``run_noise_floor --tag`` writes a ladder for any stack, every 250 m PIG
+    stack shares the grid, so counts from another stack broadcast without
+    raising and quietly mislabel both rungs, the extrapolation marker and the
+    white-noise reference. The tag is the one :func:`check_provenance`
+    validates -- whichever ladder file stamps it, else ``assume_tag`` -- and an
+    attr-less file whose name is the un-suffixed canon default resolves to the
+    canon stack, as everywhere else. ``placed_tag`` is ``None`` when nothing
+    placed the ladder and the canon stack is only assumed, so the caller can
+    say so rather than asserting a provenance the files do not carry.
+    """
+    tag = product_tag(quarters)
+    if tag is None and halves is not None:
+        tag = product_tag(halves)
+    tag = tag or assume_tag
+    return stack_name(tag or CANON_TAG), tag
 
 
 def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
@@ -100,7 +123,14 @@ def main() -> int:
     args = ap.parse_args()
 
     half, q, assumed_for = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
-    st = load_stack("pig_stack_250m_is2ctempo_sheltilt")
+    st_name, placed_tag = ladder_stack_name(q, half, args.assume_tag)
+    if placed_tag is None:
+        print("  WARNING: no stack/mask tag on either ladder file, so the DEM-count axis "
+              "only ASSUMES the canon stack. Re-solve with run_noise_floor (which stamps "
+              "the tag) or state it with --assume-tag.", flush=True)
+    print(f"  DEM counts from stack: {st_name}"
+          f"{'' if placed_tag else ' (assumed)'}", flush=True)
+    st = load_stack(st_name)
     n_full = np.isfinite(st.values).sum(0).astype(float)
     z = np.load(config.PROCESSED_DIR / "pig_eta_field_250m_dual_20260730_t0era5.npz")
     u = xr.DataArray(np.hypot(z["u_model_x"], z["u_model_y"]), dims=("y", "x"),
