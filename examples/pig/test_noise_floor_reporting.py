@@ -32,7 +32,10 @@ T5  ``ladder_stack_name``: the count ladder's DEM-count axis follows the
     ``pig_stack_250m_<tag>``, an attr-less file whose name is the un-suffixed
     canon default is the canon stack, ``--assume-tag`` states it when neither
     file carries it, and an attr-less ladder with an out-suffix still loads
-    the canon stack but reports that the tag was only assumed.
+    the canon stack but reports that the tag was only assumed. The reported
+    ``stamped`` flag is what distinguishes a tag read off a file from one the
+    caller stated, so the single-run ladder -- one file, no provenance
+    comparison at all -- still labels a ``--assume-tag`` stack as assumed.
 T4  ``load_velocity_on_grid``: with PIG_VELOCITY unset it warns
     (RuntimeWarning naming the fallback and the production choice) before
     touching any velocity file; with it set, no warning is raised and the
@@ -240,24 +243,38 @@ def main() -> int:
     q_tagged = ds(["eulerian_Q0"], attrs={"velocity": V, "tag": QT})
     h_tagged = ds(["eulerian_A", "eulerian_B"], attrs={"velocity": V, "tag": QT})
     check("a stamped tag selects that tag's stack",
-          ladder_stack_name(q_tagged, h_tagged) == (f"pig_stack_250m_{QT}", QT),
+          ladder_stack_name(q_tagged, h_tagged) == (f"pig_stack_250m_{QT}", QT, True),
           f"{ladder_stack_name(q_tagged, h_tagged)}")
     untagged_q = named(["eulerian_Q0"], "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
     check("halves carry the tag when the quarters file does not",
-          ladder_stack_name(untagged_q, h_tagged) == (f"pig_stack_250m_{QT}", QT))
+          ladder_stack_name(untagged_q, h_tagged) == (f"pig_stack_250m_{QT}", QT, True))
     canon_default = named(["eulerian_Q0", "eulerian_A", "eulerian_B"],
                           "pig_noise_floor_250m_is2ctempo_sheltilt.nc")
     check("the un-suffixed canon default resolves to the canon stack",
-          ladder_stack_name(canon_default) == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG))
+          ladder_stack_name(canon_default) == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG, True))
     untagged_h = named(["eulerian_A", "eulerian_B"],
                        "pig_noise_floor_250m_is2ctempo_sheltilt_ce.nc")
     check("an attr-less ladder still loads the canon stack, reported as assumed",
-          ladder_stack_name(untagged_q, untagged_h) == (f"pig_stack_250m_{CANON_TAG}", None),
+          ladder_stack_name(untagged_q, untagged_h)
+          == (f"pig_stack_250m_{CANON_TAG}", CANON_TAG, False),
           f"{ladder_stack_name(untagged_q, untagged_h)}")
     check("--assume-tag states the stack when neither file carries the tag",
-          ladder_stack_name(untagged_q, untagged_h, assume_tag=QT) == (f"pig_stack_250m_{QT}", QT))
+          ladder_stack_name(untagged_q, untagged_h, assume_tag=QT)
+          == (f"pig_stack_250m_{QT}", QT, False))
     check("a stamped tag is not overridden by --assume-tag",
-          ladder_stack_name(q_tagged, h_tagged, assume_tag=CANON_TAG)[1] == QT)
+          ladder_stack_name(q_tagged, h_tagged, assume_tag=CANON_TAG)[1:] == (QT, True))
+    # Single-run ladder: one attr-less file carrying its own halves, so
+    # check_provenance is never reached and only this flag can report the
+    # assumption that --assume-tag makes load-bearing.
+    single = named(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                   "pig_noise_floor_250m_is2ctempo_sheltilt_q.nc")
+    check("single-run ladder: --assume-tag selects the stack and is reported as assumed",
+          ladder_stack_name(single, None, assume_tag=QT) == (f"pig_stack_250m_{QT}", QT, False),
+          f"{ladder_stack_name(single, None, assume_tag=QT)}")
+    check("single-run ladder with a stamped tag is not reported as assumed",
+          ladder_stack_name(ds(["eulerian_Q0", "eulerian_A", "eulerian_B"],
+                               attrs={"velocity": V, "tag": QT}))
+          == (f"pig_stack_250m_{QT}", QT, True))
 
     print("T4  load_velocity_on_grid(): PIG_VELOCITY unset warns; set is silent")
     dummy = xr.DataArray(np.zeros((2, 2)), dims=("y", "x"),

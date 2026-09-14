@@ -59,24 +59,30 @@ QUARTERS = ("eulerian_Q0", "eulerian_Q1", "eulerian_Q2", "eulerian_Q3")
 
 
 def ladder_stack_name(quarters, halves=None, assume_tag=None):
-    """``(stack_name, placed_tag)`` for the ladder's per-pixel DEM-count axis.
+    """``(stack_name, tag, stamped)`` for the ladder's per-pixel DEM-count axis.
 
     The counts must come from the stack the ladder was actually solved from:
     ``run_noise_floor --tag`` writes a ladder for any stack, every 250 m PIG
     stack shares the grid, so counts from another stack broadcast without
     raising and quietly mislabel both rungs, the extrapolation marker and the
     white-noise reference. The tag is the one :func:`check_provenance`
-    validates -- whichever ladder file stamps it, else ``assume_tag`` -- and an
-    attr-less file whose name is the un-suffixed canon default resolves to the
-    canon stack, as everywhere else. ``placed_tag`` is ``None`` when nothing
-    placed the ladder and the canon stack is only assumed, so the caller can
-    say so rather than asserting a provenance the files do not carry.
+    validates -- whichever ladder file stamps it, else ``assume_tag``, else the
+    canon stack -- and an attr-less file whose name is the un-suffixed canon
+    default resolves to the canon stack, as everywhere else.
+
+    ``stamped`` is ``False`` whenever the tag came from ``assume_tag`` or from
+    that last fallback rather than from a file's own attr. Both routes reach
+    this function on the single-run path, where the ladder is one file and
+    :func:`check_provenance` is never called, so this flag is the only thing
+    that can tell the caller the count axis rests on an assumption.
     """
     tag = product_tag(quarters)
     if tag is None and halves is not None:
         tag = product_tag(halves)
-    tag = tag or assume_tag
-    return stack_name(tag or CANON_TAG), tag
+    if tag is not None:
+        return stack_name(tag), tag, True
+    tag = assume_tag or CANON_TAG
+    return stack_name(tag), tag, False
 
 
 def open_ladder(quarters_nc, half_nc=None, assume_tag=None):
@@ -123,13 +129,19 @@ def main() -> int:
     args = ap.parse_args()
 
     half, q, assumed_for = open_ladder(args.quarters_nc, args.half_nc, args.assume_tag)
-    st_name, placed_tag = ladder_stack_name(q, half, args.assume_tag)
-    if placed_tag is None:
+    st_name, st_tag, st_stamped = ladder_stack_name(q, half, args.assume_tag)
+    # An assumption stated with --assume-tag is labelled wherever it is load-bearing,
+    # including the single-run path on which open_ladder compares nothing; falling back
+    # to the canon stack with nothing stated stays a stdout warning.
+    stack_assumed = (not st_stamped) and args.assume_tag is not None
+    if not st_stamped and not stack_assumed:
         print("  WARNING: no stack/mask tag on either ladder file, so the DEM-count axis "
               "only ASSUMES the canon stack. Re-solve with run_noise_floor (which stamps "
               "the tag) or state it with --assume-tag.", flush=True)
+    if stack_assumed:
+        print(f"  stack tag ASSUMED {st_tag} (not stamped on the file)", flush=True)
     print(f"  DEM counts from stack: {st_name}"
-          f"{'' if placed_tag else ' (assumed)'}", flush=True)
+          f"{'' if st_stamped else ' (assumed)'}", flush=True)
     st = load_stack(st_name)
     n_full = np.isfinite(st.values).sum(0).astype(float)
     z = np.load(config.PROCESSED_DIR / "pig_eta_field_250m_dual_20260730_t0era5.npz")
@@ -189,7 +201,9 @@ def main() -> int:
                  f"{sl:+.2f} (white −0.50) ⇒ trunk bridging band needs "
                  f"~{need:.1f}× the strips (1/n assumption said 1.4×)"
                  + (f"\nstack tag ASSUMED {args.assume_tag} (not stamped on {assumed_for})"
-                    if assumed_for else ""), fontsize=11)
+                    if assumed_for else
+                    f"\nstack tag ASSUMED {st_tag} (not stamped on the file)"
+                    if stack_assumed else ""), fontsize=11)
     out = args.out or (config.FIGURES_DIR / "melt_error_vs_dem_count.png")
     fig.tight_layout()
     fig.savefig(out, dpi=args.dpi, bbox_inches="tight")

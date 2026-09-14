@@ -28,6 +28,12 @@ scorer applies, because the inverse recovers a window-representative melt. It is
 exactly 1.0 for the constant-melt runs (``tmod: none``), which the validated twin
 is; for a time-varying melt it leaves correlation untouched (scale-invariant)
 while shifting nrmse, bias and the amplitude line. It is recorded as ``truth_fac``.
+
+The benchmark velocity is the time mean over that same window (the frames with
+``t_lo <= t_truth_yr <= t_hi``), as the scorer takes it, so the packaged Eulerian
+and Lagrangian rows are the numbers the production driver reports rather than a
+mean contaminated by the run's pre-window spin-up. The window is recorded as
+``t_lo`` / ``t_hi`` (NaN when the run is constant-melt and no sidecar was read).
 """
 from __future__ import annotations
 
@@ -82,18 +88,6 @@ def main() -> int:
     truth, meta = rds.load_run(pert, None)
     p = rds.p
     dens = dict(rho_i=p.RHO_I, rho_w=p.RHO_W)
-    vx = truth.vx.mean("time")
-    vy = truth.vy.mean("time")
-    if not (vx.x.equals(h.x) and vx.y.equals(h.y)):
-        vx, vy = vx.interp(x=h.x, y=h.y), vy.interp(x=h.x, y=h.y)
-    a_dot = xr.zeros_like(vx)
-    floating = xr.DataArray(np.ones((h.sizes["y"], h.sizes["x"]), bool),
-                            coords={"y": h.y, "x": h.x}, dims=("y", "x"))
-    print(f"stack {dict(h.sizes)} median surface {float(h.median()):.1f} m "
-          f"(freeboard of H0={p.H0:.0f} m would be {p.H0 * (1 - p.RHO_I / p.RHO_W):.1f})")
-    H_obs = freeboard_to_thickness(h, d=0.0, rho_w=p.RHO_W, rho_i=p.RHO_I)
-    t = pd.to_datetime(h.time.values)
-    t_yr = t.year + (t.dayofyear - 1) / 365.25
     melt_meta = meta["melt"]
     axis = melt_meta.get("axis", "x")
     if melt_meta.get("kind") == "multicos":
@@ -108,6 +102,7 @@ def main() -> int:
         fac = float(rds.window_mean_modulation(melt_meta, t_lo, t_hi - t_lo))
         window = f"model years [{t_lo:g}, {t_hi:g}]"
     elif tmod == "none":
+        t_lo = t_hi = float("nan")
         fac, window = 1.0, "constant melt, no window needed"
     else:
         raise SystemExit(
@@ -118,6 +113,31 @@ def main() -> int:
         )
     print(f"truth axis {axis} (melt kind {melt_meta.get('kind')!r}); window-mean melt factor "
           f"{fac:.4f} (tmod {tmod!r}, {window})")
+    tyr = np.asarray(truth["time_yr"].values, float)
+    if np.isfinite(t_lo):
+        sel = ((tyr >= t_lo) & (tyr <= t_hi)).nonzero()[0]
+        if sel.size == 0:
+            raise SystemExit(
+                f"no truth frame of {pert!r} falls inside the packaged window "
+                f"[{t_lo:g}, {t_hi:g}] (the run spans [{tyr.min():g}, {tyr.max():g}]), so the "
+                f"benchmark velocity would average nothing. Check that tag {tag!r} and pert "
+                f"{pert!r} belong to the same experiment."
+            )
+    else:
+        sel = np.arange(tyr.size)
+    vx = truth.vx.isel(time=sel).mean("time")
+    vy = truth.vy.isel(time=sel).mean("time")
+    print(f"benchmark velocity: mean of {sel.size}/{tyr.size} truth frames ({window})")
+    if not (vx.x.equals(h.x) and vx.y.equals(h.y)):
+        vx, vy = vx.interp(x=h.x, y=h.y), vy.interp(x=h.x, y=h.y)
+    a_dot = xr.zeros_like(vx)
+    floating = xr.DataArray(np.ones((h.sizes["y"], h.sizes["x"]), bool),
+                            coords={"y": h.y, "x": h.x}, dims=("y", "x"))
+    print(f"stack {dict(h.sizes)} median surface {float(h.median()):.1f} m "
+          f"(freeboard of H0={p.H0:.0f} m would be {p.H0 * (1 - p.RHO_I / p.RHO_W):.1f})")
+    H_obs = freeboard_to_thickness(h, d=0.0, rho_w=p.RHO_W, rho_i=p.RHO_I)
+    t = pd.to_datetime(h.time.values)
+    t_yr = t.year + (t.dayofyear - 1) / 365.25
     truth2d = rds.truth_field2d(h.x.values, h.y.values, melt_meta, axis, fac)
     bench = {}
     for name, key in SOLVERS.items():
@@ -136,7 +156,7 @@ def main() -> int:
     np.savez_compressed(out, H_obs=np.asarray(H_obs.values, np.float32), x=h.x.values, y=h.y.values,
                         t_yr=np.asarray(t_yr, float), vx=np.asarray(vx.values, float),
                         vy=np.asarray(vy.values, float), truth=truth2d, truth_axis=axis,
-                        truth_fac=fac,
+                        truth_fac=fac, t_lo=t_lo, t_hi=t_hi,
                         H0=float(p.H0), rho_i=p.RHO_I, rho_w=p.RHO_W, **bench)
     print(f"wrote {out} | obs finite {int(np.isfinite(H_obs.values).sum())}")
     return 0
