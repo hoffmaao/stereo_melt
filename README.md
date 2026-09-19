@@ -1,11 +1,9 @@
 # stereo_melt workspace
 
-Monorepo for DEM-based basal melt-rate work in Antarctica (Shean et al.
-2019). The architecture is **one library, applied many times**: a single
-basin-agnostic library plus one thin driver directory per ice-shelf
-application. The canonical stage sequence lives in
-[`PIPELINE.md`](./PIPELINE.md); per-shelf decisions live in each driver's
-local decision record (untracked).
+Repository for DEM-based basal melt-rate estimates in Antarctica. 
+The architecture is **one library** plus one thin driver directory per ice-shelf application. 
+The canonical stage sequence lives in
+[`PIPELINE.md`](./PIPELINE.md); per-shelf decisions live in each driver's local decision record which is untracked.
 
 ## Layout
 
