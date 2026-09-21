@@ -128,7 +128,7 @@ def main() -> None:
                    help="variant tag matching a `--tag` build/tilt run "
                         "(e.g. is2ctempo); carried into output names")
     p.add_argument("--replot", action="store_true",
-                   help="skip the solve; rebuild melt_path_<tag>.png from the "
+                   help="skip the solve; rebuild melt_path_<tag>_<start>_<end>.png from the "
                         "saved product with the current colormap")
     args = p.parse_args()
     tag = f"{args.res}m" + (f"_{args.tag}" if args.tag else "")
@@ -143,7 +143,7 @@ def main() -> None:
             raise SystemExit(f"--replot: missing product {out_nc}")
         print(f"Replot from: {out_nc.name}")
         ds = xr.open_dataset(out_nc)
-        out_png = config.FIGURES_DIR / f"melt_path_{tag}.png"
+        out_png = config.FIGURES_DIR / f"melt_path_{tag}_{config.START_TIME}_{config.END_TIME}.png"
         _render_path_figure(
             ds["melt_rate_lagrangian"].values, ds["lagrangian_count"].values,
             np.asarray(ds["floating_mask"].values, bool), tag, out_png,
@@ -213,7 +213,7 @@ def main() -> None:
     out.to_netcdf(out_nc, encoding=comp)
     print(f"Saved -> {out_nc}")
 
-    out_png = config.FIGURES_DIR / f"melt_path_{tag}.png"
+    out_png = config.FIGURES_DIR / f"melt_path_{tag}_{config.START_TIME}_{config.END_TIME}.png"
     _render_path_figure(mr.values, lagr["count"].values, floating.values,
                         tag, out_png)
     print(f"DONE in {(time.time() - t0) / 60:.1f} min")
