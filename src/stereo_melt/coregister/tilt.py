@@ -338,10 +338,10 @@ def build_static_control_mask(
         intermediate result.
     detrended_residual_thresh : float
         Maximum allowed std of (z - linear_fit(t)) residuals (m).
-        Default ``3.0`` (Shean PIG).
+        Default ``3.0`` (PIG value, Shean et al. 2019).
     abs_trend_thresh_myr : float
         Maximum allowed magnitude of the per-pixel linear trend (m/yr).
-        Default ``2.0`` (Shean PIG).
+        Default ``2.0`` (PIG value, Shean et al. 2019).
 
     Returns
     -------
@@ -482,13 +482,16 @@ def fit_tilt_stack(
         well-posed even on noisy floating pixels.
     Eint : float
         Prior std. dev. on per-pixel intercepts (meters). Larger =
-        weaker regularization. Default ``10.0``.
+        weaker regularization. Default ``10.0`` (PIG value, Shean et al.
+        2019).
     Edhdt : float
         Prior std. dev. on per-pixel trends (m / day). Default ``1.0``
-        (effectively unregularized; the input mask excludes dynamic pixels).
+        (PIG value, Shean et al. 2019; effectively unregularized, the input
+        mask excludes dynamic pixels).
     Ex, Ey : float
         Prior std. dev. on per-epoch tilt slopes (m/m). Defaults
-        ``2e-6`` and ``2e-6/3``.
+        ``2e-6`` and ``2e-6/3`` (PIG values, Shean et al. 2019: along-track
+        Ex, ~3x tighter cross-track Ey).
     Ez : float or numpy.ndarray, dims ``(time,)``
         Prior std. dev. on per-epoch offsets (meters). Default ``0.1``
         (IS2/ATM/LVIS control). Pass a per-epoch array to loosen it where

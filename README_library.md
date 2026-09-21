@@ -34,7 +34,8 @@ Several upstream datasets are required. Some need credentials:
 - **ICESat-2 ATL06** — account with [NASA EarthData](https://urs.earthdata.nasa.gov/) (used by `sliderule` and `pdemtools` coregistration).
 - **ERA5** mean-sea-level pressure (for IBE; MSL, not surface pressure) — account with the [Copernicus CDS](https://cds.climate.copernicus.eu/) and a `~/.cdsapirc` token.
 - **RACMO2.4p1** SMB (11 km, Zenodo [19255213](https://zenodo.org/records/19255213)) — public.
-- **MEaSUREs** (NSIDC-0754) and **ITS_LIVE** velocity — public.
+- **MEaSUREs** velocity (NSIDC-0754) — [NSIDC/Earthdata account](https://nsidc.org/data/nsidc-0754).
+- **ITS_LIVE** velocity — public.
 - **BedMachine Antarctica** — [NSIDC account](https://nsidc.org/data/nsidc-0756).
 - **CATS2008** tide model — public.
 

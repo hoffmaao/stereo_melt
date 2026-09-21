@@ -343,8 +343,8 @@ def _fan_map_walk(
     if not return_pairs:
         return fan_map
     # Sparse per-pair contributions (finite cells only) for the global
-    # cross-pair pooled median. Each row of pair_maps is already Shean's
-    # level-1 "one mean value per pair per cell".
+    # cross-pair pooled median. Each row of pair_maps is already level 1
+    # ("one mean value per pair per cell").
     pairs_sparse = []
     for row in pair_maps:
         idx = np.flatnonzero(np.isfinite(row))
@@ -502,7 +502,7 @@ def _irls_ensemble_kernel_solve(
 
 
 def _pool_pairs(idx_chunks, val_chunks, n_cells, ny, nx, R_hydro):
-    """Cross-pair pooled median — Shean / ``melt.py`` ``pair_median`` level 2.
+    """Cross-pair pooled median — ``melt.py`` ``pair_median`` level 2.
 
     The per-fan two-level median (median WITHIN each start's fan, then median
     ACROSS fans) makes a cell's estimate depend on how many *fans* reached it,

@@ -90,9 +90,10 @@ EZ_PER_SOURCE_M: dict[str, float] = {
     "glas": 0.3,
     "rock": 2.0,   # rock outcrops anchor x/y but loose on αz (sparse coverage)
     # "nocorr" strips: no control overlap, no pc_align, only the class-mean
-    # vertical offset. Ez=1.0 lets the joint tilt LSQ set their datum from
-    # cross-epoch self-consistency over the
-    # observation domain, with a 3.3x looser leash than controlled strips.
+    # vertical offset. Ez=1.0 (vs 0.3 for coregistered DEMs in Shean et al.
+    # 2019) lets the joint tilt LSQ set their datum from cross-epoch
+    # self-consistency over the observation domain, 10x looser than
+    # laser-controlled strips (0.1 m).
     "nocorr": 1.0,
 }
 

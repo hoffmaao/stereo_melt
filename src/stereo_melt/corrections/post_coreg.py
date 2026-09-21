@@ -86,7 +86,7 @@ def apply_tide_ibe_to_stack(
     fwidth_m : float
         Spatial width (m) of the ``uniform_filter`` used to feather
         the floating-ice mask across the grounding zone. Default
-        ``3000`` (Shean PIG).
+        ``3000`` (PIG value, Shean et al. 2019).
 
     Returns
     -------

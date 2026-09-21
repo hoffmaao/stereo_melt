@@ -323,14 +323,16 @@ def lagrangian_melt_rate(
         Minimum pair baseline. Pairs with :math:`t_j - t_i < \text{min\_dt\_yr}`
         are skipped. Short baselines amplify per-epoch coregistration
         residuals into bogus :math:`\partial h/\partial t` (noise / dt);
-        the basin pipelines use a 1.5 yr floor. Set to a value comparable to the
-        expected coregistration-error / melt-signal ratio.
+        the basin pipelines use a 1.5 yr floor (Shean et al. 2019 use
+        :math:`1.5 \le \Delta t \le 2.5` yr). Set to a value comparable to
+        the expected coregistration-error / melt-signal ratio.
     max_dt_yr : float or None
         Maximum pair baseline. Pairs with :math:`t_j - t_i > \text{max\_dt\_yr}`
         are skipped (``None`` = no cap). The companion upper bound to
         ``min_dt_yr``: on fast-flowing shelves long baselines advect particles
         tens of km on a *time-mean* velocity field, accumulating trajectory
-        error and walking seeds out of the domain (production: 2.5 yr). Without it,
+        error and walking seeds out of the domain (production: 2.5 yr, the
+        Shean et al. 2019 upper bound). Without it,
         ``pairs="all"`` on a multi-year stack is O(T^2) in epoch count and the
         step budget is dominated by long, low-quality trajectories.
     seed_stride : int
@@ -342,8 +344,8 @@ def lagrangian_melt_rate(
         step (distributed product); with sparse ``seed_stride`` it
         under-samples slow ice into a grid-scale checkerboard. ``"origin"``
         averages the
-        contribution along the trajectory into one value, assign it to the
-        parcel's seed (origin) cell, and drop parcels that never leave that
+        contribution along the trajectory into one value, assigns it to the
+        parcel's seed (origin) cell, and drops parcels that never leave that
         cell. With dense seeding this is checkerboard-free — the published
         PIG scheme.
     progress_interval_s : float
@@ -960,7 +962,7 @@ def lagrangian_parcel_lsq_melt_rate(
     dt_yr : float
         Trajectory integration sub-step, years.
     vel_smooth_sigma_m : float or None
-        NaN-aware Gaussian smoothing of ``vx, vy`` before divergence
+        NaN-aware Gaussian smoothing of ``vx, vy`` before divergence.
         Default 3000 m; ``None``/``<=0`` disables.
     vdiv_clip : float or None
         Hard clip on :math:`\nabla\cdot u` (e.g. ±0.2 /yr).
