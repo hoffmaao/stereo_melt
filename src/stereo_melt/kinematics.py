@@ -510,7 +510,7 @@ def gaussian_smooth_nan(
     smear zeros into. This normalizes by the smoothed validity mask
     (Knutsson-Westin style) so smoothing borrows only from finite neighbours,
     then (by default) restores the original NaN footprint. Used to apply
-    Shean-style velocity smoothing (~1-3.5 km) before the flux-divergence
+    velocity smoothing (~1-3.5 km) before the flux-divergence
     term, which tames the near-grounding-line :math:`\nabla\!\cdot(H u)`
     overshoot.
 

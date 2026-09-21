@@ -21,7 +21,7 @@ lock that epoch. We diagnose this from three signals:
 - ``frac_static`` (per-epoch valid pixels in the static-control region,
   divided by the total static-control population)
 
-Following Shean 2019, :func:`suggest_bad_epochs` rejects DEMs by
+:func:`suggest_bad_epochs` rejects DEMs by
 **coregistration quality** -- the pc_align post-alignment residual
 ``end_p50`` (coverage-independent) -- backed by a catastrophic-blunder
 backstop and an IRLS-failure net. The legacy coverage-coupled gate
@@ -212,7 +212,7 @@ def score_tilt_residuals(
             # Exact per-strip join: each stack slice gets ITS strip's
             # pc_align quality, not the worst strip sharing its day. This is
             # what lets suggest_bad_epochs flag the one bad strip on a mixed
-            # day instead of the whole date (Shean 2019 per-DEM rejection).
+            # day instead of the whole date.
             aq_strip = aq[["dem_id", *qcols]].drop_duplicates("dem_id")
             df = df.merge(aq_strip, on="dem_id", how="left")
         else:
@@ -363,9 +363,8 @@ def suggest_bad_epochs(
 ) -> pd.DataFrame:
     """Return the subset of epochs that fail the bad-epoch filter.
 
-    Shean 2019 rejects DEMs by **coregistration quality**, not by how
-    much of the DEM happens to overlap the static-control region. This
-    function follows that: the primary gate is the pc_align
+    Rejects DEMs by **coregistration quality**, not by how much of the
+    DEM overlaps the static-control region: the primary gate is the pc_align
     post-alignment residual ``end_p50`` (coverage-independent), backed
     by two narrow safety nets. An epoch is flagged if ANY of:
 
@@ -374,8 +373,7 @@ def suggest_bad_epochs(
     :func:`stereo_melt.coregister.alignment_quality.aggregate_basin_quality`
     and pass via ``score_tilt_residuals(..., alignment_quality=...)``).
     Catches strips where pc_align could not converge or carries
-    non-rigid distortion the 6-DOF transform cannot remove. This is the
-    Shean-faithful primary criterion. Default ``10.0`` m -- well above
+    non-rigid distortion the 6-DOF transform cannot remove. Default ``10.0`` m -- well above
     the clean population (PIG median ``end_p50`` ~0.3 m, CS2-era ~0.6 m)
     and above the offset-only demote band (``PIG_OFFSET_ONLY_END_P50_M``
     ~3 m), so 3-10 m strips are demoted to an offset-only (alpha_z) tilt
@@ -394,7 +392,7 @@ def suggest_bad_epochs(
     step could not run for that epoch at all. Toggled by
     ``drop_irls_failed`` (default ``True``).
 
-    **Legacy coverage-coupled gate (opt-in, Shean-INfaithful).** When
+    **Legacy coverage-coupled gate (opt-in).** When
     ``resid_threshold_m`` is set (e.g. ``0.5``), additionally flags
     ``|med_resid_m| > resid_threshold_m`` AND (``frac_static <
     frac_static_threshold`` OR ``weight_mean`` NaN OR ``weight_mean <
@@ -409,7 +407,7 @@ def suggest_bad_epochs(
     """
     bad = np.zeros(len(df), dtype=bool)
 
-    # (a) pc_align coregistration-quality gate -- the Shean-faithful primary.
+    # (a) pc_align coregistration-quality gate (primary).
     if end_p50_threshold_m is not None and "end_p50" in df.columns:
         bad |= (df["end_p50"].fillna(0.0) > end_p50_threshold_m).to_numpy()
 

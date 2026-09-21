@@ -10,14 +10,13 @@ logarithmic decades outward (ticks +/- 0.1, 0.3, 1, 3, 10 m ice/yr).
 The warm half is matplotlib ``inferno``; the cool half is an
 ``cmocean.ice``-like ramp built here (cmocean is not a dependency).
 
-Sign convention.  This workspace is Shean throughout: **negative = melt,
-positive = accretion** (see ``feedback_shean_convention``).  So the
+Sign convention.  **negative = melt, positive = accretion** throughout.  So the
 default orientation (``melt_cmap()`` / ``laddie_cmap("shean")``) is the
 LADDIE palette *reversed along the value axis*: melt (negative) reads
 warm, accretion (positive) reads cool, zero is black.  Pass
 ``orient="laddie"`` for the native positive-is-melt orientation.
 
-Typical use on a Shean-sign melt field ``v`` (m ice/yr)::
+Typical use on a melt field ``v`` (m ice/yr, negative = melt)::
 
     from stereo_melt.colormaps import melt_cmap, melt_norm, add_melt_colorbar
     im = ax.imshow(v, cmap=melt_cmap(), norm=melt_norm(vmax=10),

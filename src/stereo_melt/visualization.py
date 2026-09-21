@@ -226,7 +226,7 @@ def plot_alignment_diagnostics(
     ylim=(0.05, 60.0),
     dpi=130,
 ):
-    """Shean 2019 Fig 4 analog: pc_align ICP translation + pre/post residual.
+    """pc_align ICP translation + pre/post residual diagnostic figure.
 
     The uniform alignment-diagnostic figure deployed across every basin (thin
     ``<basin>/plot_fig4_alignment.py`` drivers call this). Three rows:

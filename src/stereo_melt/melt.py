@@ -6,23 +6,22 @@
 # under the terms of the MIT License. See the LICENSE file in the project
 # root for full terms.
 
-r"""Basal melt-rate solvers: Eulerian and Lagrangian forms of Shean 2019.
+r"""Basal melt-rate solvers: Eulerian and Lagrangian mass-budget forms.
 
 Mass conservation for an ice column of ice-equivalent thickness :math:`H`
 with column-averaged velocity :math:`u`, surface mass balance
-:math:`\dot a`, and basal mass balance :math:`\dot b` (Shean 2019
-convention: **positive = accretion, negative = melt**) is
+:math:`\dot a`, and basal mass balance :math:`\dot b` (**positive =
+accretion, negative = melt**, as in Shean et al. 2019) is
 
 .. math::
     \frac{\partial H}{\partial t} = -\nabla\!\cdot(H u) + \dot a + \dot b
 
-which is Shean 2019 Eq. 4. Two solvers for :math:`\dot b` are provided.
-The output variable is named ``melt_rate`` for legibility but carries
-Shean's basal-mass-balance sign convention; **negate when comparing to
+(Shean et al. 2019, Eq. 4). ``melt_rate`` carries this basal-mass-balance
+sign; **negate when comparing to
 datasets that publish a positive=melt convention** (e.g. Davison 2023,
 Adusumilli 2020, Paolo 2024).
 
-The **Eulerian** form (Shean 2019 Eq. 10), implemented by
+The **Eulerian** form (their Eq. 10), implemented by
 :func:`eulerian_melt_rate`:
 
 .. math::
@@ -34,7 +33,7 @@ stack against time and evaluates :math:`\nabla\!\cdot(H_f u)` on the
 time-mean field (or, with ``common_epoch=True``, on that mean referred to
 one epoch by :func:`~stereo_melt.kinematics.common_epoch_mean`).
 
-The **Lagrangian** form (Shean 2019 Eq. 7), implemented by
+The **Lagrangian** form (their Eq. 7), implemented by
 :func:`lagrangian_melt_rate`:
 
 .. math::
@@ -90,14 +89,11 @@ __all__ = [
 
 
 def _smooth_velocity_da(v: xr.DataArray, sigma_m: float | None) -> xr.DataArray:
-    """Shean-style NaN-aware Gaussian smoothing of a velocity component.
+    """NaN-aware Gaussian smoothing of a velocity component before differencing.
 
-    Shean's reference (``stack_melt_path_lsq.py`` L191) applies
-    ``gauss_fltr_astropy(vel, 7)`` before differencing velocity into a
-    divergence; unsmoothed mosaics put grid-scale derivative noise into
-    :math:`\\nabla\\cdot u`, which the solvers multiply by ``H`` (300-1000 m).
-    ``sigma_m`` is meters; ``None``/``<=0`` is a no-op. Time-sliced when a
-    ``time`` dim is present.
+    Unsmoothed mosaics put grid-scale noise into :math:`\\nabla\\cdot u`,
+    which the solvers multiply by ``H``. ``sigma_m`` in metres;
+    ``None``/``<=0`` is a no-op. Time-sliced when a ``time`` dim is present.
     """
     if sigma_m is None or sigma_m <= 0:
         return v
@@ -126,7 +122,7 @@ def eulerian_melt_rate(
 ) -> xr.Dataset:
     r"""Return the basal melt-rate field from a repeat-DEM stack (Eulerian).
 
-    Solves (Shean 2019 sign convention, positive = accretion)
+    Solves (positive = accretion)
 
     .. math::
         \dot b = \frac{\partial H_f}{\partial t}
@@ -265,8 +261,7 @@ def lagrangian_melt_rate(
 ) -> xr.Dataset:
     r"""Return the basal melt-rate field via Lagrangian path integration.
 
-    Implements the scalar-endpoint scheme of Shean's
-    ``stack_melt_path_lsq.py``. For each epoch pair :math:`(i, j)`:
+    Scalar-endpoint scheme. For each epoch pair :math:`(i, j)`:
 
     1. Seed a particle at every pixel (or every ``seed_stride``-th
        pixel) of the earlier DEM.
@@ -275,8 +270,7 @@ def lagrangian_melt_rate(
     3. Sample the later DEM at the endpoint positions and assign a
        scalar material derivative :math:`D H_f / D t = \Delta H_f /
        \Delta t` to each trajectory.
-    4. At every step, contribute (Shean sign convention,
-       positive = accretion)
+    4. At every step, contribute (positive = accretion)
        :math:`D H_f/D t + H_f(t)\,\nabla\!\cdot u - \dot a` to the
        visited cell, where :math:`H_f(t)` evolves linearly along the
        path.
@@ -314,8 +308,7 @@ def lagrangian_melt_rate(
         Per-cell reduction. ``"mean"`` and ``"median"`` pool every path
         contribution (in ``"path"`` mode, every visited step of every parcel);
         ``"median"`` gathers to CPU via :func:`pandas.DataFrame.groupby`.
-        ``"pair_median"`` is Shean's two-level mosaic scheme
-        (``mos_month_year.sh`` / ``dem_mosaic --median``): reduce each epoch
+        ``"pair_median"`` is a two-level mosaic: reduce each epoch
         pair to one mean value per cell, then take the median across pairs --
         robust to per-pair / per-strip outliers, and memory-bounded (one value
         per pair-cell, not per step, so it is feasible for dense ``"path"`` runs
@@ -330,17 +323,14 @@ def lagrangian_melt_rate(
         Minimum pair baseline. Pairs with :math:`t_j - t_i < \text{min\_dt\_yr}`
         are skipped. Short baselines amplify per-epoch coregistration
         residuals into bogus :math:`\partial h/\partial t` (noise / dt);
-        Shean's reference enforces :math:`1.5 \le \Delta t \le 2.5` yr
-        for the same reason, and the basin pipelines default to that
-        1.5 yr floor (2026-06-15). Set to a value comparable to the
+        the basin pipelines use a 1.5 yr floor. Set to a value comparable to the
         expected coregistration-error / melt-signal ratio.
     max_dt_yr : float or None
         Maximum pair baseline. Pairs with :math:`t_j - t_i > \text{max\_dt\_yr}`
         are skipped (``None`` = no cap). The companion upper bound to
         ``min_dt_yr``: on fast-flowing shelves long baselines advect particles
         tens of km on a *time-mean* velocity field, accumulating trajectory
-        error and walking seeds out of the domain. Shean's
-        :math:`\Delta t \le 2.5` yr cap is the precedent; without it,
+        error and walking seeds out of the domain (production: 2.5 yr). Without it,
         ``pairs="all"`` on a multi-year stack is O(T^2) in epoch count and the
         step budget is dominated by long, low-quality trajectories.
     seed_stride : int
@@ -349,9 +339,9 @@ def lagrangian_melt_rate(
     output : {"path", "origin"}
         Where each trajectory's melt is deposited. ``"path"`` (default)
         scatters every step's contribution into the cell visited at that
-        step — Shean's distributed product; with sparse ``seed_stride`` it
+        step (distributed product); with sparse ``seed_stride`` it
         under-samples slow ice into a grid-scale checkerboard. ``"origin"``
-        reproduces Shean's ``init_dhdt=True`` product: average the
+        averages the
         contribution along the trajectory into one value, assign it to the
         parcel's seed (origin) cell, and drop parcels that never leave that
         cell. With dense seeding this is checkerboard-free — the published
@@ -382,7 +372,7 @@ def lagrangian_melt_rate(
         Variables on the ``(y, x)`` grid:
 
         - ``melt_rate`` — basal mass balance, m ice yr\ :sup:`-1`
-          (Shean convention: negative = melt, positive = accretion)
+          (negative = melt, positive = accretion)
         - ``H_f_mean`` — time-mean ice-equivalent thickness, m
         - ``dHdt`` — Lagrangian :math:`D H_f/D t`, m ice yr\ :sup:`-1`
         - ``flux_div`` — :math:`\nabla\!\cdot(H_f u)` on the time-mean
@@ -421,7 +411,7 @@ def lagrangian_melt_rate(
             f"aggregator={aggregator!r}"
         )
 
-    # Input hygiene (Shean stack_melt_path_lsq.py L191/L262): NaN-aware
+    # Input hygiene: NaN-aware
     # Gaussian velocity smoothing before any differencing, and a hard clip
     # on the divergence before it multiplies H. Both default OFF for
     # back-compat with existing production runs.
@@ -455,8 +445,7 @@ def lagrangian_melt_rate(
     vy_arr = asarray(np.asarray(vy_mean_xr.values, dtype=np.float64))
     vdiv_arr = asarray(np.asarray(vdiv_xr.values, dtype=np.float64))
     if vdiv_clip is not None:
-        # Shean L262-265: "Mask clearly bogus values in the velocity
-        # divergence" (his bounds ±0.2 /yr). NaN propagates through clip.
+        # Clip implausible divergence (e.g. ±0.2 /yr). NaN propagates.
         vdiv_arr = xp.clip(vdiv_arr, -float(vdiv_clip), float(vdiv_clip))
 
     if isinstance(a_dot, (int, float)):
@@ -511,8 +500,7 @@ def lagrangian_melt_rate(
     else:
         epoch_pairs = [(i, j) for i in range(T) for j in range(i + 1, T)]
 
-    # Group dt-valid epoch pairs by START epoch. Shean's stack_melt_path_lsq.py
-    # iterates over each start DEM (his dem1, L287): seed it once, integrate ONE
+    # Group dt-valid epoch pairs by START epoch: seed each start DEM once, integrate ONE
     # trajectory out to its farthest partner, and reuse that trajectory for every
     # partner DEM (they share all but the tail). That is ~T fewer integrations
     # than a per-(i,j)-pair loop, so the step budget is the sum over starts of the
@@ -529,7 +517,7 @@ def lagrangian_melt_rate(
         starts[i].sort(key=lambda jt: jt[0])  # partners ascending in epoch -> dt
     start_list = sorted(starts)
 
-    # Integration on a fixed dt_yr grid (Shean L331). Budget = sum over starts of
+    # Integration on a fixed dt_yr grid. Budget = sum over starts of
     # the steps to that start's farthest partner.
     n_steps_far = {i: max(1, int(np.ceil(starts[i][-1][1] / dt_yr))) for i in start_list}
     total_steps = sum(n_steps_far.values())
@@ -537,7 +525,7 @@ def lagrangian_melt_rate(
     n_pairs = sum(len(v) for v in starts.values())
 
     # Strided seed-candidate grid. Per start we keep only the finite-thickness
-    # pixels of THAT start DEM (Shean L304: np.nonzero(~getmaskarray(dem1))) --
+    # pixels of THAT start DEM --
     # dense per-pixel seeding, with each start's trajectory-history arrays sized
     # to one DEM's live cells rather than the full grid.
     y_cand, x_cand = xp.mgrid[0:ny:seed_stride, 0:nx:seed_stride]
@@ -555,7 +543,7 @@ def lagrangian_melt_rate(
     # Optional CPU gather for median / pair_median aggregators
     median_bucket_idx: list = []
     median_bucket_val: list = []
-    # Per-pair scratch for aggregator="pair_median" (Shean's two-level mosaic:
+    # Per-pair scratch for aggregator="pair_median" (two-level mosaic:
     # mean within a pair -> one value per pair per cell -> median across pairs).
     # Reused across pairs; reset only at each pair's touched cells.
     pair_sum = xp.zeros(n_cells, dtype=xp.float64) if aggregator == "pair_median" else None
@@ -596,7 +584,7 @@ def lagrangian_melt_rate(
         # Charge the budget up front so empty-seed starts still carry the meter.
         steps_done += nsf
 
-        # Seed this start DEM's finite-thickness pixels (Shean L304).
+        # Seed this start DEM's finite-thickness pixels.
         keep = xp.isfinite(H_f_stack[i])[y_cand, x_cand]
         y_seed_flat = y_cand[keep]
         x_seed_flat = x_cand[keep]
@@ -686,8 +674,7 @@ def lagrangian_melt_rate(
 
         # Each partner DEM reuses the shared trajectory, sliced at its own step.
         for j, dt_total in partners:
-            # Shean rounds DEM times to the fixed dt grid (get_closest_dt_idx):
-            # the endpoint is sampled at the nearest step, DhDt uses the actual dt.
+            # DEM times round to the fixed dt grid: the endpoint is sampled at the nearest step, DhDt uses the actual dt.
             h_idx = max(1, min(nsf, int(round(dt_total / dt_yr))))
             H_end = map_coordinates(
                 H_f_stack[j],
@@ -700,15 +687,10 @@ def lagrangian_melt_rate(
             valid_end = xp.isfinite(DhDt) & valid_cum_hist[h_idx - 1]
 
             # Deposit the trajectory's melt contribution(s). Two schemes:
-            #   "path"   — Shean's distributed form: scatter each step's bdot into
-            #              the cell visited at that step (per-cell mean over all
-            #              path-steps that cross it). Shean's path product also
-            #              drops never-moving parcels (L627); we keep them -- a
-            #              sub-cell-displacement parcel still has a valid bilinear
-            #              endpoint DH/Dt, and the production basins run the
-            #              1.5-2.5 yr window where parcels advect many cells, so
-            #              that filter would be inert there anyway.
-            #   "origin" — Shean's init_dhdt=True form: average bdot along the
+            #   "path"   — scatter each step's bdot into the cell visited at that
+            #              step (per-cell mean); never-moving parcels are kept
+            #              (valid bilinear endpoint DH/Dt).
+            #   "origin" — average bdot along the
             #              trajectory into ONE value at the parcel's ORIGIN (seed)
             #              cell, dropping never-moving parcels (degenerate Eulerian
             #              dh/dt). Dense seeding keeps coverage complete, so there
@@ -965,8 +947,7 @@ def lagrangian_parcel_lsq_melt_rate(
     and per-strip elevation blunders are downweighted by Tukey IRLS
     instead of entering endpoint pair differences.
 
-    This is the estimator counterpart of Shean's ``stack_melt_path_lsq``
-    intent (regress along the path) without the per-pair endpoint
+    Regresses along the path instead of the per-pair endpoint
     differencing of :func:`lagrangian_melt_rate`. The recovered
     :math:`\dot b` is attributed to the parcel's **seed cell at the window
     start** (origin product; no path smearing).
@@ -980,16 +961,16 @@ def lagrangian_parcel_lsq_melt_rate(
         Trajectory integration sub-step, years.
     vel_smooth_sigma_m : float or None
         NaN-aware Gaussian smoothing of ``vx, vy`` before divergence
-        (Shean L191). Default 3000 m; ``None``/``<=0`` disables.
+        Default 3000 m; ``None``/``<=0`` disables.
     vdiv_clip : float or None
-        Hard clip on :math:`\nabla\cdot u` (Shean L262: ±0.2 /yr).
+        Hard clip on :math:`\nabla\cdot u` (e.g. ±0.2 /yr).
     min_epochs : int
         Minimum finite thickness observations along the trajectory.
     min_span_yr : float
         Minimum time span (first-to-last valid observation).
     min_thickness_m : float
         Observations with :math:`H \le` this are masked (open water /
-        blunders; Shean masks ``dem_final < 10 m`` freeboard similarly).
+        blunders).
     robust : bool
         Tukey-biweight IRLS on the per-parcel regression residuals.
     seed_stride, seed_block : int
@@ -1000,7 +981,7 @@ def lagrangian_parcel_lsq_melt_rate(
     Returns
     -------
     xarray.Dataset
-        ``melt_rate`` (m ice/yr, Shean sign), ``count`` (epochs used),
+        ``melt_rate`` (m ice/yr, negative = melt), ``count`` (epochs used),
         ``span_yr``, ``rmse`` (residual std, m), ``stderr`` (slope
         standard error, m ice/yr — a principled per-pixel quality gate),
         ``H_f_mean``, ``flux_div``, ``a_dot``.

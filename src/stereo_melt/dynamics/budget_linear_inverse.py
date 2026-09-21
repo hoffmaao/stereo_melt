@@ -1300,7 +1300,7 @@ def linear_inverse_budget_melt_rate(
             "dt_yr": float(dt_yr),
             "attribution": (
                 "seed (fan-start position), one map per start fan; two-level "
-                "median mirrors Shean's pair_median mosaic"
+                "median (pair_median mosaic)"
                 if attribution == "seed" else
                 "path (deposited along visited cells per sub-step, non-melt "
                 "terms re-localized; melt.py output='path' parity), per-pair "

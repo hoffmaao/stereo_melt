@@ -8,7 +8,7 @@
 
 r"""Joint least-squares tilt optimizer for DEM stacks.
 
-Following Shean 2019 (``ndinterp.py``), jointly estimates per-pixel
+Jointly estimates per-pixel
 intercept, per-pixel linear trend, and per-epoch planar tilt
 :math:`(\alpha_x, \alpha_y, \alpha_z)` from a stack of coregistered
 DEMs. The observation model for pixel :math:`p` at epoch :math:`k` is
@@ -20,15 +20,13 @@ DEMs. The observation model for pixel :math:`p` at epoch :math:`k` is
              + \alpha_{z,k}
 
 where :math:`\tilde t_k = t_k - \bar t` is the **mean-centered** time
-in **days** (matches Shean's normalization for numerical conditioning)
-and :math:`(\bar x_k, \bar y_k)` is the centroid of the valid pixels at
+in **days** (for conditioning) and :math:`(\bar x_k, \bar y_k)` is the centroid of the valid pixels at
 epoch :math:`k`. With this convention the recovered :math:`z^0_p` is
 elevation at the mean epoch and :math:`\dot h_p` is in **m / day**.
 
 A per-pixel temporal-median reference :math:`\hat z_p =
 \mathrm{median}_k(z_{p,k})` is subtracted from the observations
-before the LSQ and added back to :math:`z^0_p` afterwards (mirrors
-Shean ``ndinterp.py``). This is what lets the ``Eint`` Tikhonov prior
+before the LSQ and added back to :math:`z^0_p` afterwards. This lets the ``Eint`` Tikhonov prior
 on :math:`z^0_p` carry sensible meters-of-residual semantics across
 domains with kilometers of topographic relief: without the
 subtraction the prior pulls the absolute intercept toward zero and
@@ -45,15 +43,13 @@ regularization on each parameter block:
 
 where :math:`E` holds the prior standard deviation of each unknown
 (``Eint`` on intercepts, ``Edhdt`` on trends, ``Ex``, ``Ey``, ``Ez`` on
-tilt coefficients). Default magnitudes mirror Shean's PIG values; the
-trend prior is intentionally loose (1 m/day) so the work of separating
+tilt coefficients). The trend prior is intentionally loose (1 m/day) so the work of separating
 static control from dynamic ice falls on the input mask -- see
 :func:`build_static_control_mask`.
 
 Two solvers are exposed: ``"lsmr"`` (default) runs LSMR directly on the
 augmented sparse system and scales to full-AOI joint problems;
-``"spsolve"`` matches Shean's UMFPACK normal-equations path and is
-faster at moderate sizes.
+``"spsolve"`` (UMFPACK normal equations) is faster at moderate sizes.
 
 A stack of :math:`T=2` is a valid degenerate case: the per-pixel trend
 collapses to a finite difference and the solver behaves as a pair-wise
@@ -128,9 +124,7 @@ def build_static_area_polygon_mask(
 ) -> xr.DataArray:
     r"""BedMachine rock + grounded-ice polygon resampled onto the stack grid.
 
-    Used as the polygon-style restriction Shean's ``ndinterp.py`` calls
-    ``pig_mainshelfmargins_upstreamtrunk_mask_for_tiltcorr.shp``: it
-    zeros out the floating shelf and ocean before the temporal-stat
+    Polygon restriction that zeros out the floating shelf and ocean before the temporal-stat
     filter in :func:`build_static_control_mask` runs. Pass the result as
     that function's ``shapefile_mask`` argument.
 
@@ -145,8 +139,7 @@ def build_static_area_polygon_mask(
     hydrostatic gain -> fake -1.6 m/yr "freeze" in the recovered melt
     rate.
 
-    The fix mirrors what Shean's hand-digitized PIG shapefile
-    accomplished naturally: back grounded-ice pixels away from the
+    The fix backs grounded-ice pixels away from the
     non-grounded (ocean/floating/lake) boundary by ``erode_grounded_m``
     meters. **Rock outcrops are preserved as-is** — they are static
     regardless of where they sit, and they provide most of the spatial
@@ -305,12 +298,11 @@ def build_static_control_mask(
     detrended_residual_thresh: float = 3.0,
     abs_trend_thresh_myr: float = 2.0,
 ) -> xr.DataArray:
-    r"""Stack-based mask of static-control pixels (Shean ``ndinterp.py``).
+    r"""Stack-based mask of static-control pixels.
 
     Selects pixels whose elevation time series is well-observed and
     behaves like a static surface, so they can anchor the per-epoch
-    planar tilt fit. Mirrors Shean 2019 ``ndinterp.py``: a pixel passes
-    iff
+    planar tilt fit. A pixel passes iff
 
     1. it has at least ``min_count`` finite observations,
     2. the temporal span between first and last observation is
@@ -427,7 +419,7 @@ def build_static_control_mask(
         coords={"y": stack["y"], "x": stack["x"]},
         name="control_mask",
         attrs={
-            "source": "Shean ndinterp.py-style stack-based static-control filter",
+            "source": "stack-based static-control filter",
             "min_count": min_count,
             "min_ptp_years": min_ptp_years,
             "max_std_m": max_std,
@@ -482,8 +474,7 @@ def fit_tilt_stack(
         the legacy "static-control-only" mode that constrains the
         per-strip tilts using rock+grounded observations alone.
         Setting this to a wider mask (e.g. ``static | floating`` or the
-        full grid where observations are finite) matches Shean 2019 /
-        Smith ``ndinterp.py``: the per-pixel ``intercept`` and
+        full grid where observations are finite) includes the shelf: the per-pixel ``intercept`` and
         ``dhdt`` parameters become nuisance variables that absorb the
         real basal-melt time trend on floating ice while the
         per-strip tilt parameters get strong leverage from every
@@ -491,74 +482,27 @@ def fit_tilt_stack(
         well-posed even on noisy floating pixels.
     Eint : float
         Prior std. dev. on per-pixel intercepts (meters). Larger =
-        weaker regularization. Default ``10.0`` (Shean PIG).
+        weaker regularization. Default ``10.0``.
     Edhdt : float
         Prior std. dev. on per-pixel trends (m / day). Default ``1.0``
-        (Shean PIG -- effectively unregularized; the input mask is
-        expected to do the heavy lifting of excluding dynamic pixels).
+        (effectively unregularized; the input mask excludes dynamic pixels).
     Ex, Ey : float
         Prior std. dev. on per-epoch tilt slopes (m/m). Defaults
-        ``2e-6`` and ``2e-6/3`` (Shean PIG: along-track Ex, ~3x
-        tighter cross-track Ey).
+        ``2e-6`` and ``2e-6/3``.
     Ez : float or numpy.ndarray, dims ``(time,)``
         Prior std. dev. on per-epoch offsets (meters). Default ``0.1``
-        (tightened from Shean PIG's 0.3 after the Nansen 2026-05-05
-        dh/dt diagnosis showed a +0.07 m/yr static-control bias survived
-        Ez=0.3; appropriate for IS2/ATM/LVIS-controlled strips). Pass a
-        per-epoch array to loosen the prior for epochs whose ASP control
-        was CryoSat-2-only — e.g. ``Ez=2.0`` for pre-IS2 (pre-Oct 2018)
-        epochs and ``0.1`` for IS2-era epochs. Tight Ez over-shrinks the
-        recovered :math:`\alpha_z` when the real coregistration residual
-        is meter-scale (so loosen it for CS2-only epochs).
+        (IS2/ATM/LVIS control). Pass a per-epoch array to loosen it where
+        control is coarser (e.g. ``2.0`` for CryoSat-2-only epochs).
     min_width : float
-        Minimum spatial spread (meters) required to fit the slope
-        components :math:`\alpha_x, \alpha_y` at an epoch. Narrower
-        epochs fit :math:`\alpha_z` only. Default ``0`` — no spread
-        gate; every epoch fits slopes unless ``offset_only_epochs``
-        says otherwise, and ill-conditioned slopes are damped
-        continuously by the ``Ex``/``Ey`` Tikhonov prior rather than by
-        a cliff. The old default was ``40000`` (inherited from Shean
-        PIG), which all seven basin drivers already overrode with
-        ``10000`` because 40 km disabled slope fitting almost
-        everywhere; it was never a value production ran at, which is why
-        the default change leaves PIG's published numbers untouched.
-        Three call sites, in two non-production files, do NOT pass
-        ``min_width`` and so take the new default.
-        ``scripts/test_gpu_tilt_fit.py`` is a GPU segfault/timing smoke
-        script that asserts nothing. ``tests/gate_tilt_stack.py``
-        (both of its fits) takes the new default DELIBERATELY and DOES
-        assert on slopes -- tightly, at ``atol`` 1e-9 mean-removed and
-        1e-6 for the T=2 case, since slope recovery is the whole point
-        of that file. Its 10 km synthetic gives ``dist_ptp`` ~4.7 km,
-        so under the old ``40000`` default ``fit_xy`` was False for
-        every epoch and the slope columns solved to exactly 0. Those
-        assertions therefore FAILED -- ``allclose(0, 1e-4, atol=1e-6)``
-        is False -- against a solver that had not fitted anything; the
-        stale 40 km default was the cause, and finding that is what
-        prompted this change. Raising the default again would break
-        that registered gate. NOTE the gate still bites hard
-        at the drivers' 10 km: 52.8 % of PIG's 513 epochs fit
-        :math:`\alpha_z` only. Changing what the *drivers* pass is a
-        science change that moves published melt numbers -- do it
-        deliberately, with a re-run, not by editing this default.
+        Minimum spatial spread (m) to fit :math:`\alpha_x, \alpha_y` at an
+        epoch; narrower epochs fit :math:`\alpha_z` only. Default ``0`` (no
+        gate; the ``Ex``/``Ey`` prior damps ill-conditioned slopes). Basin
+        drivers pass ``10000``.
     dhdt_smoothness : float, optional
-        Weight of the Shean ``ndinterp.py`` spatial-smoothness
-        constraint on the per-pixel trend field (his L574+ "Smoothness
-        Constraint" block, ported 2026-07-11). For every observed pixel
-        with both vertical (up/down) and/or both horizontal
-        (left/right) observed neighbours, appends a second-difference
-        row on the ``dhdt`` unknowns (center ``+2`` per direction pair,
-        neighbours ``-1``; RHS 0), scaled by this weight. ``1.0``
-        reproduces Shean's unit-weight rows. These rows are appended to
-        the fixed (never IRLS-reweighted) regularization block. This is
-        what stabilizes the per-pixel trend on sparsely-observed
-        floating pixels and makes the shelf-inclusive observation
-        domain solvable — without it, per-epoch tilt/offset trades
-        against per-pixel trend wherever the temporal sampling is thin
-        (the 2026-06-29 "manufactured shelf-front accretion" revert,
-        and the 2026-07-11 nocorr αz≈0 failure, are the two faces of
-        running Shean's domain without Shean's stabilizer).
-        ``None``/``0`` (default) = off, bit-exact legacy system.
+        Weight of second-difference rows on the per-pixel ``dhdt`` field
+        (fixed, never IRLS-reweighted). Required with a shelf-inclusive
+        ``observation_mask``: without it per-epoch tilt trades against
+        per-pixel trend where sampling is thin. ``None``/``0`` (default) = off.
     solver : {"lsmr", "spsolve"}
         Linear solver. ``"spsolve"`` uses sparse LU via UMFPACK on the
         normal equations; can run out of memory when every valid pixel
@@ -647,7 +591,7 @@ def fit_tilt_stack(
     x_coords = stack["x"].values
     y_coords = stack["y"].values
 
-    # Time in days, mean-centered (matches Shean ``ndinterp.py``: ``tn = t - t_ref``).
+    # Time in days, mean-centered.
     t_days = (times - times[0]).astype("timedelta64[s]").astype(float) / 86400.0
     t_centered = t_days - t_days.mean()
 
@@ -674,7 +618,7 @@ def fit_tilt_stack(
                 f"observation_mask shape {obs_mask.shape} != stack (y, x) {(ny, nx)}"
             )
 
-    # Per-pixel temporal-median reference (Shean ``ndinterp.py``):
+    # Per-pixel temporal-median reference:
     #
     #     test_ref = median(test, axis=0); testn = test - test_ref
     #
@@ -709,7 +653,7 @@ def fit_tilt_stack(
     xrefs = np.zeros(T)
     yrefs = np.zeros(T)
     fit_tilt_xy = np.zeros(T, dtype=bool)
-    # Pixels contributing >=1 observation row (Shean's Aidx key set);
+    # Pixels contributing >=1 observation row;
     # the smoothness constraint is built over this support.
     pix_seen = np.zeros((ny, nx), dtype=bool)
 
@@ -799,7 +743,7 @@ def fit_tilt_stack(
     E[2 * n_pix + 2 :: 3] = Ez_arr
     rA = sp.diags(1.0 / E, 0, shape=(N, N))
 
-    # Shean ndinterp.py smoothness constraint on the per-pixel trend
+    # Smoothness constraint on the per-pixel trend
     # field: one row per observed pixel with an observed up/down and/or
     # left/right neighbour pair; center +2 per direction pair (so 4 when
     # both), neighbours -1, RHS 0. Rows live in the fixed (non-IRLS)
@@ -838,7 +782,7 @@ def fit_tilt_stack(
             ).tocsr()
             print(
                 f"  dh/dt smoothness constraint: {n_sc:,} rows "
-                f"(weight {w_sc:g}, Shean ndinterp L574+)",
+                f"(weight {w_sc:g})",
                 flush=True,
             )
 

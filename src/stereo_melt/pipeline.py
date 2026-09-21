@@ -20,9 +20,8 @@ stacked DEMs live here:
 * :func:`apply_geoid_to_stack` removes the WGS84-ellipsoid →
   orthometric reference difference (Shean 2019 Eq. 1) at every pixel.
 
-Both static-field corrections run **before the per-epoch tilt fit**,
-matching Shean 2019's ``stack_tidecorr.py`` -> ``ndinterp.py`` ordering:
-tide -> IBE -> MDT -> geoid -> tilt fit. With static fields removed
+Both static-field corrections run **before the per-epoch tilt fit**
+(tide -> IBE -> MDT -> geoid -> tilt fit). With static fields removed
 first, the tilt LSQ's per-pixel intercept block carries only residual
 elevation around the orthometric / MSL surface, so the
 ``Ez=0.3 m`` Tikhonov prior on per-epoch :math:`\alpha_z` is correctly
@@ -31,8 +30,7 @@ absolute geoid offset.
 
 Tide and IBE are applied at the 25 m analysis-grid stage (see
 :mod:`stereo_melt.corrections.post_coreg`), gated by a 3 km
-``uniform_filter``-feathered floating-ice mask, mirroring Shean 2019
-``stack_tidecorr.py``.
+``uniform_filter``-feathered floating-ice mask.
 
 Firn air content (FAC) is *not* a vertical bias correction at all; it
 converts surface elevation into ice-equivalent thickness via the
@@ -79,10 +77,7 @@ from .io.mdt import load_dtu10_mdt
 # Pre-tilt static-field corrections (MDT, geoid)
 # ---------------------------------------------------------------------------
 #
-# Order: MDT first, then geoid. Matches Shean 2019 ``stack_tidecorr.py``.
-# The two corrections are commutative (both static, both subtractive),
-# so the explicit ordering is for fidelity to Shean's pipeline rather
-# than numerical necessity.
+# Order: MDT first, then geoid (commutative: both static and subtractive).
 # ---------------------------------------------------------------------------
 
 def apply_mdt_to_stack(
@@ -157,8 +152,7 @@ def apply_geoid_to_stack(stack, *, bedmachine_path):
 
     Removes the WGS84-ellipsoid → orthometric reference difference at
     every pixel. The geoid is a static spatial field, so this step
-    runs before the per-epoch tilt LSQ to match Shean's ordering and
-    leave :math:`\alpha_z` to absorb only per-strip coregistration
+    runs before the per-epoch tilt LSQ to leave :math:`\alpha_z` to absorb only per-strip coregistration
     drift.
 
     Parameters
