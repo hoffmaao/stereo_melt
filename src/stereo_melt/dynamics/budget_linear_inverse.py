@@ -15,7 +15,7 @@ Why the older linear-inverse entry points cannot match
 
 1. They feed the raw surface anomaly to the kernel, so the spatially-
    varying strain thinning :math:`H_f\,\nabla\!\cdot u(x,y)` and the SMB
-   pattern :math:`\dot a(x,y)` — first-order terms of the Shean budget on a
+   pattern :math:`\dot a(x,y)` — first-order terms of the mass budget on a
    fast shelf — are attributed to melt. Only their *tile means* were ever
    handled (uniform :math:`\gamma`, scalar DC splice).
 2. They anchor one Lagrangian frame at the start of the whole record, so
@@ -25,8 +25,8 @@ Why the older linear-inverse entry points cannot match
 This module fixes both by keeping the production path solver's *sampling
 structure* and adding the kernel physics on top:
 
-- **Pair fans, Shean banding.** For every start epoch, partners within the
-  1.5–2.5 yr baseline band are warped into a Lagrangian frame anchored at
+- **Pair fans, 1.5–2.5 yr baseline band.** For every start epoch, partners
+  within that band are warped into a Lagrangian frame anchored at
   the start; each pair gives a per-cell slope sample; fans reduce by
   median, then cells reduce by median across fans (the two-level
   ``pair_median`` mosaic).
@@ -904,7 +904,7 @@ def linear_inverse_budget_melt_rate(
             ).mean("time", skipna=True)
         return H_w.fillna(H_f_mean).fillna(H_ref_val)
 
-    # --- pair fans (Shean banding, two-level median) -------------------------
+    # --- pair fans (1.5–2.5 yr baseline band, two-level median) --------------
     t_yr = _times_to_years(h_stack["time"].values)
     n_t = len(t_yr)
     starts = []
@@ -1335,7 +1335,7 @@ def linear_inverse_eulerian_budget_melt_rate(
     r"""Basal melt rate via the budget-corrected EULERIAN Stubblefield inverse.
 
     The Eulerian twin of :func:`linear_inverse_budget_melt_rate`. Instead of
-    warping Shean-banded pair fans, the hydrostatic channel here IS the
+    warping baseline-banded pair fans, the hydrostatic channel here IS the
     production Eulerian estimator — :func:`stereo_melt.melt.eulerian_melt_rate`
     called directly, so ``melt_rate_hydro`` is bit-identical to the production
     Eulerian melt rate (per-cell dh/dt regression over ALL epochs, plus the
