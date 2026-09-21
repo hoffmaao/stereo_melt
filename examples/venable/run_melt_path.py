@@ -177,7 +177,7 @@ def main() -> None:
     fig.colorbar(im2, ax=axes[1], shrink=0.8)
     for ax in axes:
         ax.set_xticks([]); ax.set_yticks([])
-    out_png = config.FIGURES_DIR / f"melt_path_{tag}.png"
+    out_png = config.FIGURES_DIR / f"melt_path_{tag}_{config.START_TIME}_{config.END_TIME}.png"
     fig.savefig(out_png, dpi=110)
     plt.close(fig)
     print(f"  wrote {out_png}")
