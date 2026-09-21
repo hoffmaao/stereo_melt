@@ -7,8 +7,6 @@
 #
 #   stage 1: tilt_fit               -> processed/beardmore_stack_tilt_corrected_*.nc
 #                                      processed/beardmore_tilt_params_*.nc
-#   stage 2: compare_five_methods   -> results/beardmore_five_methods_*.nc
-#                                      figures/five_methods_comparison.png
 #
 # Skips build_stack -- the raw stack beardmore_stack_2013-01-01_2023-03-01.nc
 # is fine; only the tilt-corrected derivative was stale.
@@ -46,8 +44,7 @@ run_stage() {
 
 echo "[$(stamp)] === Beardmore rebuild-compare chain start ==="
 
-run_stage "1/2 tilt_fit"             beardmore.tilt_fit              rebuild_tilt_fit_v3.log
-run_stage "2/2 compare_five_methods" beardmore.compare_five_methods  compare_five_methods_v6.log
+run_stage "1/1 tilt_fit" beardmore.tilt_fit rebuild_tilt_fit_v3.log
 
 echo
 echo "[$(stamp)] === Beardmore rebuild-compare chain done ==="

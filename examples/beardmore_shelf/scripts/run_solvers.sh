@@ -8,9 +8,7 @@
 # Solver verdict (2026-07-02, see feedback_keep_lagrangian_path_solver): the
 # production melt product is the Lagrangian PATH solver
 # (run_melt_path -> lagrangian_melt_rate output=path pair_median pairs=all
-# 1.5-2.5yr, PIG config). The pseudospectral FFT inverse (run_pseudospectral)
-# and the linear inverse (run_stationary) are RETIRED as melt products; the
-# old combined run_melt bundles an out-of-date Lagrangian config
+# 1.5-2.5yr, PIG config). The old combined run_melt bundles an out-of-date Lagrangian config
 # (seed_stride=2, mean aggregator) plus the retired linear-inverse call, so it
 # is NOT in this chain. Use `(cd examples && python -m beardmore_shelf.run_melt)`
 # by hand only for an Eulerian cross-check.

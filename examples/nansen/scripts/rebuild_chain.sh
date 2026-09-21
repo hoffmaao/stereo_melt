@@ -7,8 +7,6 @@
 #   stage 2: tilt_fit             -> processed/nansen_stack_tilt_corrected_*.nc
 #                                    processed/nansen_tilt_params_*.nc
 #   stage 3: run_melt             -> results/nansen_melt_<window>.nc
-#   stage 4: run_stationary       -> results/nansen_stationary_<window>.nc
-#   stage 5: run_pseudospectral   -> results/nansen_pseudospectral_<window>.nc
 #
 # Each stage logs separately. Chain aborts on first non-zero exit.
 #
@@ -46,11 +44,9 @@ run_stage() {
 
 echo "[$(stamp)] === Nansen rebuild chain start ==="
 
-run_stage "1/5 build_stack"        nansen.build_stack        rebuild_build_stack.log
-run_stage "2/5 tilt_fit"           nansen.tilt_fit           rebuild_tilt_fit.log
-run_stage "3/5 run_melt"           nansen.run_melt           rebuild_run_melt.log
-run_stage "4/5 run_stationary"     nansen.run_stationary     rebuild_run_stationary.log
-run_stage "5/5 run_pseudospectral" nansen.run_pseudospectral rebuild_run_pseudospectral.log
+run_stage "1/3 build_stack"        nansen.build_stack        rebuild_build_stack.log
+run_stage "2/3 tilt_fit"           nansen.tilt_fit           rebuild_tilt_fit.log
+run_stage "3/3 run_melt"           nansen.run_melt           rebuild_run_melt.log
 
 echo
 echo "[$(stamp)] === Nansen rebuild chain done ==="

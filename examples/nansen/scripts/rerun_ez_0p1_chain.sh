@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nansen Ez=0.1 re-run chain: tilt_fit -> diagnose_dhdt -> run_melt -> compare_five_methods.
+# Nansen Ez=0.1 re-run chain: tilt_fit -> diagnose_dhdt -> run_melt.
 # Tests whether tightening the IS2 Ez prior 0.3 -> 0.1 m closes the +0.07 m/yr static-control
 # bias diagnosed on 2026-05-05 (project_nansen_dhdt_bias.md).
 #
@@ -35,10 +35,9 @@ run_stage() {
 
 echo "[$(stamp)] === Nansen Ez=0.1 re-run start ==="
 
-run_stage "1/4 tilt_fit"            nansen.tilt_fit            tilt_fit_ez_0p1.log
-run_stage "2/4 diagnose_dhdt"       nansen.diagnose_dhdt       diagnose_dhdt_ez_0p1.log
-run_stage "3/4 run_melt"            nansen.run_melt            run_melt_ez_0p1.log
-run_stage "4/4 compare_five_methods" nansen.compare_five_methods compare_five_methods_ez_0p1.log
+run_stage "1/3 tilt_fit"            nansen.tilt_fit            tilt_fit_ez_0p1.log
+run_stage "2/3 diagnose_dhdt"       nansen.diagnose_dhdt       diagnose_dhdt_ez_0p1.log
+run_stage "3/3 run_melt"            nansen.run_melt            run_melt_ez_0p1.log
 
 echo
 echo "[$(stamp)] === Nansen Ez=0.1 re-run done ==="

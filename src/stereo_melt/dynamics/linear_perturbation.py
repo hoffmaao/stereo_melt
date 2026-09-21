@@ -129,23 +129,6 @@ operator                                            ``k = 0`` bin
                                                     ``inverse_dhdt``);
                                                     ``recover_dc=False`` keeps
                                                     the kernel's own DC.
-:class:`~.pseudospectral.PerturbationForwardOp` and everything built on it
-(:func:`~.pseudospectral.pseudospectral_eulerian_inverse`,
-:mod:`~.parcel_frame_inverse`)                      genuinely DC-blind: it uses
-                                                    ``transfer_functions``
-                                                    DIRECTLY, where ``B = 0`` at
-                                                    DC makes :math:`K_h(0)=0`.
-                                                    This is the row the
-                                                    stationary inverses above
-                                                    are often confused with --
-                                                    the two families differ
-                                                    because they build from
-                                                    different kernels.
-:class:`~.perturbation_dct.PerturbationForwardOpDCT`  same as the FFT parent --
-                                                    it only swaps the wavenumber
-                                                    lattice, and DCT bin 0 is
-                                                    :math:`k=0` exactly as
-                                                    ``fftfreq`` bin 0 is.
 :func:`~.stubblefield_forward.stubblefield_forward_multiplier`  pinned to **0**:
                                                     DC-blind BY POLICY, because
                                                     the variational inverse it
@@ -170,12 +153,11 @@ operator                                            ``k = 0`` bin
 The four ``pinned`` entries are the ones that intentionally override the
 kernel: three because unity is what a *ratio* or a *filter* tends to in the
 hydrostatic limit, one because the operator's own input has had its mean
-deleted. The rest split into two families that are easy to conflate: anything
-built on ``kernel_time_integral_stationary`` (the stationary inverses) carries
-the physical DC limit and is NOT blind, while anything built on
-``transfer_functions`` directly (the pseudospectral operators) is blind because
-``B = 0`` there. A DC splice on top of the first family is a deliberate
-preference for a mass-balance estimate, not a repair of a missing mode.
+deleted. Anything built on ``kernel_time_integral_stationary`` carries the
+physical DC limit and is NOT blind, whereas an operator built on
+``transfer_functions`` directly is blind because ``B = 0`` there. A DC splice
+on the stationary inverses is a preference for a mass-balance estimate, not a
+repair of a missing mode.
 
 Implementation notes
 --------------------

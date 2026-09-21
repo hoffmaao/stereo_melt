@@ -1,6 +1,6 @@
 """5-method melt-rate comparison + Davison overlay on Dotson + Crosson IS2 stack.
 
-Mirrors :mod:`nansen.compare_five_methods`: runs all currently-implemented
+Runs all currently-implemented
 stationary inversions on the same tilt-corrected stack, regrids Davison
 2023 onto the same 25 m grid, plots seven panels side by side, and writes
 a single NetCDF.

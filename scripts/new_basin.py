@@ -16,8 +16,8 @@ What it stamps (thin wrappers, ~40-70 lines each):
   cache_icesat2.py, cache_cryotempo.py, cache_atm.py, cache_lvis.py,
   cache_glas.py, align_strips.py, NOTES.md
 plus the phase-2 heavies copied verbatim-with-renames from the template
-basin (build_stack.py, tilt_fit.py, run_melt.py, run_pseudospectral.py,
-run_stationary.py, scripts/find_bad_epochs.py) — review those before
+basin (build_stack.py, tilt_fit.py, run_melt_path.py, run_melt.py,
+scripts/find_bad_epochs.py) — review those before
 trusting them; they still carry per-basin science choices.
 
 Template sources: ``venable`` (freshest complete IS2-era basin) for most
@@ -54,8 +54,6 @@ TEMPLATE_FILES: list[tuple[str, str]] = [
     ("venable", "tilt_fit.py"),
     ("venable", "run_melt_path.py"),
     ("venable", "run_melt.py"),
-    ("venable", "run_pseudospectral.py"),
-    ("venable", "run_stationary.py"),
     ("venable", "scripts/find_bad_epochs.py"),
 ]
 

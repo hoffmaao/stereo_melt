@@ -296,9 +296,7 @@ def load_basin_stack(
 ) -> tuple[xr.DataArray, Path]:
     r"""Resolve and load a basin's DEM stack with ``BAD_EPOCHS`` applied.
 
-    Replaces the per-driver loader logic that diverged across
-    ``run_melt``, ``tilt_fit``, ``run_pseudospectral``, and
-    ``run_stationary`` (three of which bypassed the bad-epoch filter).
+    Shared by every basin stage that loads a stack.
 
     Search order, given ``basin_prefix = "beardmore_stack"``:
       1. ``{prefix}_tilt_corrected_{start}_{end}.nc`` (window-matched, tilt-corrected)

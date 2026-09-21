@@ -1,7 +1,7 @@
 """Replot the 5-method comparison from the saved NetCDF.
 
-Reads ``beardmore/results/beardmore_five_methods_<window>.nc`` (produced by
-:mod:`beardmore.compare_five_methods`) and builds a 2x3 figure with all six
+Reads ``beardmore/results/beardmore_five_methods_<window>.nc`` (produced by the retired
+``beardmore.compare_five_methods``) and builds a 2x3 figure with all six
 melt-rate fields on a single ±5 m/yr RdBu scale, so panels are directly
 comparable to the rest of the Beardmore figures.
 

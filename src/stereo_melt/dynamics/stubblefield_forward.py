@@ -75,8 +75,7 @@ library constants — the residual is a forward-model-accuracy problem, calibrat
 per geometry against truth, not a code defect (the machinery self-test recovers
 1.0; see ``tests/gate_stubblefield_forward.py``).
 
-``torch`` note: like :mod:`stereo_melt.dynamics.streamline_pinn`, this module
-imports ``torch`` at top level and is therefore **not** re-exported from
+``torch`` note: this module imports ``torch`` at top level and is therefore **not** re-exported from
 ``stereo_melt.dynamics.__init__`` — import it explicitly to keep a bare
 ``import stereo_melt.dynamics`` free of the ``torch`` dependency.
 """

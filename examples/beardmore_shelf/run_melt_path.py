@@ -1,10 +1,6 @@
-"""Beardmore_Shelf production-config Lagrangian PATH melt rate (Shean pair_median).
+"""Beardmore_Shelf production Lagrangian PATH melt rate (pair_median).
 
-Port of ``venable/run_melt_path.py`` (itself the PIG production config): the
-old ``run_melt`` / ``run_pseudospectral`` drivers predate the 2026-07-02
-solver verdict (keep the path solver as production; the pseudospectral
-linear-perturbation inverses are retired as melt products). This driver runs
-ONLY the production Lagrangian path solver on the curated stack:
+Runs only the production path solver (PIG configuration) on the curated stack:
 
     lagrangian_melt_rate(output="path", seed_stride=1,
                          aggregator="pair_median", pairs="all",

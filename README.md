@@ -14,7 +14,7 @@ stereo_melt/                ← workspace root (pip-installable from here)
 │   │                         per-epoch Ez, tilt LSQ + QC, per-strip control
 │   │                         residual planes, Nuth & Kääb shift (diagnostic)
 │   ├── corrections/        ← geoid, tides, IBE, MDT, post-coreg pipeline
-│   ├── dynamics/           ← budget linear inverses, pseudospectral solvers,
+│   ├── dynamics/           ← budget linear inverses, bridging solvers,
 │   │                         velocity fusion, B-PINN assimilation (JAX, optional)
 │   ├── io/                 ← REMA, BedMachine, velocity, RACMO, masks
 │   ├── validation/         ← CS2 vs IS2 cross-checks

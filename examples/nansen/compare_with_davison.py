@@ -1,7 +1,7 @@
 """Compare our 5-method Nansen melt-rate inversions against Davison 2023.
 
-Loads ``results/nansen_five_methods_<window>.nc`` (produced by
-:mod:`nansen.compare_five_methods`) and the Davison 2023 gridded TIFF +
+Loads ``results/nansen_five_methods_<window>.nc`` (produced by the retired
+``nansen.compare_five_methods``) and the Davison 2023 gridded TIFF +
 per-shelf time series, then plots an 8-panel figure (2x4):
 
   Row 1 — our melt rates: Eulerian / Lagrangian / closed-DCT / dh/dt-DCT

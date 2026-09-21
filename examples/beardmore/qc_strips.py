@@ -51,7 +51,7 @@ import numpy as np
 import pandas as pd
 
 from beardmore import config
-from beardmore.compare_v2_vs_v3 import VARIANTS
+from beardmore.compare_geodiff import VARIANTS
 
 DEFAULT_GEODIFF_CSV = (
     Path(config.BASIN_DIR) / "results" / "geodiff_comparison_per_strip.csv"
