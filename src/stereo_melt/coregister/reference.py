@@ -81,12 +81,13 @@ def _filter_is2_by_sampled_fields(
         BedMachine NetCDF with categorical ``mask`` variable.
     max_speed_myr, vel_smooth_sigma_m, grounded_mask_value : tuning.
     dem_center_date : str, optional
-        Strip date ``YYYY-MM-DD``. Required for the Shean displacement
+        Strip date ``YYYY-MM-DD``. Required for the displacement-budget
         filter; ignored otherwise.
     displacement_budget_m : float, optional
         Per-photon advection budget in meters. When supplied (and
-        ``dem_center_date`` is also given), activates the Shean filter
-        and the ``max_speed_myr`` gate is treated as a soft outer cap.
+        ``dem_center_date`` is also given), activates the
+        displacement-budget filter and the ``max_speed_myr`` gate is
+        treated as a soft outer cap.
 
     Returns
     -------

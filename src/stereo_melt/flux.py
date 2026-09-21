@@ -55,8 +55,8 @@ def grounding_buffer(
     zone: the ice is partly grounded, the velocity field has its sharpest
     gradients, and the finite-difference :math:`\nabla\!\cdot(H u)` overshoots
     there (on clean Shean DEMs this alone drives the deepest "melt" to
-    -1300 m/yr and inflates the PIG integral past 140 Gt/yr). Shean buffers the
-    grounding line before integrating; this reproduces that.
+    -1300 m/yr and inflates the PIG integral past 140 Gt/yr). Excluding a
+    buffer band inward from the grounding line before integrating removes this.
 
     The buffer is measured as Euclidean distance from the nearest grounded-ice
     cell, so it follows the true grounding line rather than eroding every edge
