@@ -614,6 +614,9 @@ def fit_tilt_stack(
           mostly downweighted by the robust loss.
         - ``weight_frac_kept`` — per-epoch fraction of observations
           with non-zero IRLS weight (dims ``(time,)``).
+        - ``obs_support`` — boolean, True where the pixel contributed
+          at least one observation row (dims ``(y, x)``). Elsewhere
+          ``intercept``/``dhdt`` are prior-only.
     stack_corrected : xarray.DataArray
         The input stack with the per-epoch tilt subtracted.
     """
@@ -1098,6 +1101,7 @@ def fit_tilt_stack(
             "weight_mean": (("time",), weight_mean),
             "weight_frac_kept": (("time",), weight_frac_kept),
             "Ez_per_epoch": (("time",), Ez_arr),
+            "obs_support": (("y", "x"), pix_seen),
         },
         coords={"time": stack["time"], "y": y_coords, "x": x_coords},
         attrs={

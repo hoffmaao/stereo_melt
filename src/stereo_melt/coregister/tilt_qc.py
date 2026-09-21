@@ -259,7 +259,9 @@ def screen_unrescued_epochs(
         Companion ``tilt_params``; without ``intercept``/``dhdt`` the
         reference falls back to the temporal median.
     domain_mask : numpy.ndarray of bool, dims ``(y, x)``, optional
-        Pixels to score (default: where the fitted model is finite).
+        Pixels to score, intersected with the default: the fit's
+        ``obs_support`` where the fitted model is finite. Pass one for
+        params without ``obs_support``.
     screen_variants : tuple of str
         ``source_variant`` values eligible to be flagged.
     nmad_max_m, blunder_m, blunder_frac_max, min_px
@@ -291,6 +293,13 @@ def screen_unrescued_epochs(
     else:
         intercept2d, dhdt2d, t_centered = temporal
         default_domain = np.isfinite(intercept2d) & np.isfinite(dhdt2d)
+    if "obs_support" in tilt_params:
+        default_domain = default_domain & np.asarray(
+            tilt_params["obs_support"].values, dtype=bool
+        )
+    elif temporal is not None and domain_mask is None:
+        print("  tilt_params lacks obs_support -- pixels outside the fit's "
+              "observation mask may be scored in the median frame; pass domain_mask")
     domain = default_domain if domain_mask is None else (
         np.asarray(domain_mask, dtype=bool) & default_domain
     )

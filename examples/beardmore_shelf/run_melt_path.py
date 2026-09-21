@@ -128,7 +128,7 @@ def main() -> None:
                    help="variant tag matching a `--tag` build/tilt run "
                         "(e.g. is2ctempo); carried into output names")
     p.add_argument("--replot", action="store_true",
-                   help="skip the solve; rebuild melt_path_<tag>.png from the "
+                   help="skip the solve; rebuild melt_path_<tag>_<start>_<end>.png from the "
                         "saved product with the current colormap")
     args = p.parse_args()
     tag = f"{args.res}m" + (f"_{args.tag}" if args.tag else "")

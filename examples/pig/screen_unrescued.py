@@ -18,6 +18,7 @@ import time
 import numpy as np
 import xarray as xr
 
+from stereo_melt.coregister.tilt import build_ice_domain_mask
 from stereo_melt.coregister.tilt_qc import screen_unrescued_epochs
 
 from pig import config
@@ -60,8 +61,15 @@ def main() -> None:
     print(f"screening {src.name}: {stack.sizes['time']} slices "
           f"({int((stack['source_variant'] == 'nocorr').sum())} nocorr)")
 
+    domain = None
+    if "obs_support" not in params:
+        domain = build_ice_domain_mask(stack, config.BEDMACHINE_NC).values
+        print(f"  params lack obs_support: scoring over the BedMachine ice domain "
+              f"(PIG_TILT_DOMAIN=full observation mask), {int(domain.sum())} px")
+
     df = screen_unrescued_epochs(
-        stack, params, nmad_max_m=args.nmad_max_m, blunder_m=args.blunder_m,
+        stack, params, domain_mask=domain,
+        nmad_max_m=args.nmad_max_m, blunder_m=args.blunder_m,
         blunder_frac_max=args.blunder_frac_max, min_px=args.min_px,
     )
     df.to_csv(table, index=False)

@@ -3,7 +3,8 @@
 U1 clean nocorr kept · U2 NMAD > 5 m flagged · U3 20 % blunders flagged ·
 U4 30 m offset flagged · U5 < min_px flagged · U6 controlled slice never
 flagged · U7 thinning not flagged (fit frame) · U8 domain_mask honoured ·
-U9 missing source_variant refused.
+U9 missing source_variant refused · U10 obs_support keeps prior-only pixels
+unscored · U11 fit_tilt_stack reports its obs_support.
 
 Run::
 
@@ -19,6 +20,7 @@ import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from stereo_melt.coregister.tilt import fit_tilt_stack  # noqa: E402
 from stereo_melt.coregister.tilt_qc import screen_unrescued_epochs  # noqa: E402
 
 rng = np.random.default_rng(7)
@@ -102,5 +104,43 @@ try:
 except ValueError as e:
     check("U9 missing source_variant refused", "source_variant" in str(e))
 
-print(f"\n{len(fails)} failure(s)" if fails else "\nALL PASS (9/9)")
+# Prior-only band (outside the fit's support: dhdt = 0, intercept = temporal
+# median) with real 15 m/yr change; the median frame misreads it as blunders.
+band = np.zeros((ny, nx), bool)
+band[:, 40:] = True
+z_band = z.copy()
+z_band[:, band] += (-13.0 / 365.25) * t_c[:, None]
+stack_band = stack.copy(data=z_band)
+icpt_b, dhdt_b = intercept.copy(), dhdt.copy()
+icpt_b[band] = np.nanmedian(z_band, axis=0)[band]
+dhdt_b[band] = 0.0
+params_nosup = params.assign(intercept=(("y", "x"), icpt_b), dhdt=(("y", "x"), dhdt_b))
+params_sup = params_nosup.assign(obs_support=(("y", "x"), ~band))
+df_nosup = screen_unrescued_epochs(stack_band, params_nosup)
+df_sup = screen_unrescued_epochs(stack_band, params_sup)
+check("U10 obs_support keeps prior-only pixels unscored",
+      bool(df_nosup.loc[0, "unrescued"]) and not df_sup.loc[0, "unrescued"]
+      and not df_sup.loc[9, "unrescued"]
+      and int(df_sup.loc[0, "n_px"]) == int((~band).sum()),
+      f"without support: {df_nosup.loc[0, 'reason'] or 'kept'}; "
+      f"with: n_px {int(df_sup.loc[0, 'n_px'])} of {int((~band).sum())}")
+
+fy, fx = 12, 15
+ft = pd.to_datetime(["2013-01-01", "2014-01-01", "2015-01-01", "2016-01-01"])
+fz = 100.0 + rng.normal(0.0, 0.2, (len(ft), fy, fx))
+obs = np.ones((fy, fx), bool)
+obs[:, 11:] = False                                # data, but outside the mask
+fz[:, :2, :2] = np.nan                             # no data at any epoch
+fz[1:, 5, 5] = np.nan                              # observed at one epoch only
+fstack = xr.DataArray(fz, dims=("time", "y", "x"),
+                      coords={"time": ft, "y": np.arange(fy)[::-1] * 250.0,
+                              "x": np.arange(fx) * 250.0})
+fparams, _ = fit_tilt_stack(fstack, observation_mask=obs, robust=False)
+sup = fparams["obs_support"].values
+expected = obs & np.isfinite(fz).any(axis=0)
+check("U11 fit_tilt_stack obs_support = observed pixels",
+      sup.dtype == bool and np.array_equal(sup, expected),
+      f"{int(sup.sum())} px vs {int(expected.sum())} expected")
+
+print(f"\n{len(fails)} failure(s)" if fails else "\nALL PASS (11/11)")
 sys.exit(1 if fails else 0)
