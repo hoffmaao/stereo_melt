@@ -20,8 +20,8 @@ DEMs. The observation model for pixel :math:`p` at epoch :math:`k` is
              + \alpha_{z,k}
 
 where :math:`\tilde t_k = t_k - \bar t` is the **mean-centered** time
-in **days** (for conditioning) and :math:`(\bar x_k, \bar y_k)` is the centroid of the valid pixels at
-epoch :math:`k`. With this convention the recovered :math:`z^0_p` is
+in **days** (for conditioning) and :math:`(\bar x_k, \bar y_k)` is the
+centroid of the valid pixels at epoch :math:`k`. With this convention the recovered :math:`z^0_p` is
 elevation at the mean epoch and :math:`\dot h_p` is in **m / day**.
 
 A per-pixel temporal-median reference :math:`\hat z_p =

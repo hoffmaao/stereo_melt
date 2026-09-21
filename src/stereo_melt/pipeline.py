@@ -24,7 +24,7 @@ Both static-field corrections run **before the per-epoch tilt fit**
 (tide -> IBE -> MDT -> geoid -> tilt fit). With static fields removed
 first, the tilt LSQ's per-pixel intercept block carries only residual
 elevation around the orthometric / MSL surface, so the
-``Ez=0.3 m`` Tikhonov prior on per-epoch :math:`\alpha_z` is correctly
+``Ez`` Tikhonov prior on per-epoch :math:`\alpha_z` is correctly
 calibrated to per-strip coregistration drift rather than to the
 absolute geoid offset.
 
@@ -152,8 +152,8 @@ def apply_geoid_to_stack(stack, *, bedmachine_path):
 
     Removes the WGS84-ellipsoid → orthometric reference difference at
     every pixel. The geoid is a static spatial field, so this step
-    runs before the per-epoch tilt LSQ to leave :math:`\alpha_z` to absorb only per-strip coregistration
-    drift.
+    runs before the per-epoch tilt LSQ to leave :math:`\alpha_z` to absorb
+    only per-strip coregistration drift.
 
     Parameters
     ----------

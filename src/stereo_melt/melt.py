@@ -676,7 +676,8 @@ def lagrangian_melt_rate(
 
         # Each partner DEM reuses the shared trajectory, sliced at its own step.
         for j, dt_total in partners:
-            # DEM times round to the fixed dt grid: the endpoint is sampled at the nearest step, DhDt uses the actual dt.
+            # DEM times round to the fixed dt grid: the endpoint is sampled at
+            # the nearest step, DhDt uses the actual dt.
             h_idx = max(1, min(nsf, int(round(dt_total / dt_yr))))
             H_end = map_coordinates(
                 H_f_stack[j],
