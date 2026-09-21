@@ -8,11 +8,9 @@
 
 r"""Post-coregistration tide + IBE correction on the 25 m analysis stack.
 
-Mirrors Shean 2019 ``stack_tidecorr.py``: per-epoch tide (spatially
-varying, CATS2008) plus IBE (scalar from the ARCO point cube),
-multiplied by a 3 km feathered floating-ice mask, subtracted from each
-epoch of the stacked DEM. First step in the post-coreg correction
-chain (Shean order: ``tide -> IBE -> MDT -> geoid -> tilt fit``).
+Per-epoch tide (spatially varying, CATS2008) plus IBE (scalar from the
+ARCO point cube), times a 3 km feathered floating-ice mask, subtracted
+from each epoch. First step of ``tide -> IBE -> MDT -> geoid -> tilt fit``.
 
 ASP ``pc_align`` is anchored on grounded IS2 + rock GCPs, which are
 tide-free by construction, so no pre-ASP tide / IBE correction is
@@ -88,7 +86,7 @@ def apply_tide_ibe_to_stack(
     fwidth_m : float
         Spatial width (m) of the ``uniform_filter`` used to feather
         the floating-ice mask across the grounding zone. Default
-        ``3000`` (Shean PIG).
+        ``3000`` (PIG value, Shean et al. 2019).
 
     Returns
     -------

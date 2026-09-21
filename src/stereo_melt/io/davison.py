@@ -14,8 +14,8 @@ Two products:
   monthly + yearly time series with errors. 55 named shelves; Beardmore is
   not in this list (Davison's mask catalog is Greene 2022 named shelves).
 
-**Sign convention divergence.** Davison publishes positive = melt. The
-rest of this package follows Shean 2019: ``melt_rate`` carries basal
+**Sign convention divergence.** Davison publishes positive = melt. This
+package's ``melt_rate`` carries basal
 mass balance with positive = accretion, negative = melt. To compare,
 **negate** Davison values (or our ``melt_rate``) so both are on the
 same convention. Loaders here keep Davison's native sign and document

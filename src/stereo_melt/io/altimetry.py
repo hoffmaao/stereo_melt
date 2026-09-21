@@ -188,8 +188,8 @@ def _read_lvis_txt(path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray
     r"""Parse an ILVIS2 v002 TXT and return ``(lat, lon, elev, sec_of_day)``.
 
     Whitespace-separated, ``#``-prefixed header. Reads the
-    ``CENTROID`` columns (the canonical Shean/Smith default for ice-sheet
-    GCPs) and ``TIME`` as seconds-of-day.
+    ``CENTROID`` columns (the standard choice for ice-sheet GCPs) and
+    ``TIME`` as seconds-of-day.
     """
     arr = np.loadtxt(str(path), comments="#")
     if arr.ndim == 1:

@@ -1,6 +1,6 @@
 # stereo_melt
 
-stereo_melt is a pipeline for computing basal melt rates beneath Antarctic ice shelves from repeat stereo DEMs, following [Shean et al. 2019](https://tc.copernicus.org/articles/13/2633/2019/) and [Chartrand 2024](https://doi.org/10.5281/zenodo.13667120).
+stereo_melt computes basal melt rates beneath Antarctic ice shelves from repeat stereo DEMs, surface velocity and altimetry.
 
 ## Installation
 
@@ -34,7 +34,8 @@ Several upstream datasets are required. Some need credentials:
 - **ICESat-2 ATL06** — account with [NASA EarthData](https://urs.earthdata.nasa.gov/) (used by `sliderule` and `pdemtools` coregistration).
 - **ERA5** mean-sea-level pressure (for IBE; MSL, not surface pressure) — account with the [Copernicus CDS](https://cds.climate.copernicus.eu/) and a `~/.cdsapirc` token.
 - **RACMO2.4p1** SMB (11 km, Zenodo [19255213](https://zenodo.org/records/19255213)) — public.
-- **ITS_LIVE** velocity mosaics — public.
+- **MEaSUREs** velocity (NSIDC-0754) — [NSIDC/Earthdata account](https://nsidc.org/data/nsidc-0754).
+- **ITS_LIVE** velocity — public.
 - **BedMachine Antarctica** — [NSIDC account](https://nsidc.org/data/nsidc-0756).
 - **CATS2008** tide model — public.
 

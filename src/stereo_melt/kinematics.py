@@ -510,7 +510,7 @@ def gaussian_smooth_nan(
     smear zeros into. This normalizes by the smoothed validity mask
     (Knutsson-Westin style) so smoothing borrows only from finite neighbours,
     then (by default) restores the original NaN footprint. Used to apply
-    Shean-style velocity smoothing (~1-3.5 km) before the flux-divergence
+    velocity smoothing (~1-3.5 km) before the flux-divergence
     term, which tames the near-grounding-line :math:`\nabla\!\cdot(H u)`
     overshoot.
 
@@ -557,11 +557,10 @@ def clean_temporal_outliers(
 
     For each pixel, NaN the time samples that deviate more than
     ``n_sigma * NMAD`` from the per-pixel temporal median, then NaN whole pixels
-    left with fewer than ``min_count`` finite samples. This is Shean
-    ``make_stack``-style blunder removal: individual bad strip pixels (cloud,
-    blunder, mis-registered tile edge) corrupt the dh/dt regression and the
-    Lagrangian path residual, inflating melt-rate noise through the ~9.4
-    hydrostatic gain. Removing them lets more of the shelf clear a downstream
+    left with fewer than ``min_count`` finite samples. Individual bad strip
+    pixels (cloud, blunder, mis-registered tile edge) otherwise corrupt the
+    dh/dt regression and the Lagrangian path residual, inflating melt-rate
+    noise through the ~9.4 hydrostatic gain. Removing them lets more of the shelf clear a downstream
     melt quality gate.
 
     Parameters

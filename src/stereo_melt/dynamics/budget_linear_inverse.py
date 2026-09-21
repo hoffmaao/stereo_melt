@@ -15,7 +15,7 @@ Why the older linear-inverse entry points cannot match
 
 1. They feed the raw surface anomaly to the kernel, so the spatially-
    varying strain thinning :math:`H_f\,\nabla\!\cdot u(x,y)` and the SMB
-   pattern :math:`\dot a(x,y)` — first-order terms of the Shean budget on a
+   pattern :math:`\dot a(x,y)` — first-order terms of the mass budget on a
    fast shelf — are attributed to melt. Only their *tile means* were ever
    handled (uniform :math:`\gamma`, scalar DC splice).
 2. They anchor one Lagrangian frame at the start of the whole record, so
@@ -25,8 +25,8 @@ Why the older linear-inverse entry points cannot match
 This module fixes both by keeping the production path solver's *sampling
 structure* and adding the kernel physics on top:
 
-- **Pair fans, Shean banding.** For every start epoch, partners within the
-  1.5–2.5 yr baseline band are warped into a Lagrangian frame anchored at
+- **Pair fans, 1.5–2.5 yr baseline band.** For every start epoch, partners
+  within that band are warped into a Lagrangian frame anchored at
   the start; each pair gives a per-cell slope sample; fans reduce by
   median, then cells reduce by median across fans (the two-level
   ``pair_median`` mosaic).
@@ -343,8 +343,8 @@ def _fan_map_walk(
     if not return_pairs:
         return fan_map
     # Sparse per-pair contributions (finite cells only) for the global
-    # cross-pair pooled median. Each row of pair_maps is already Shean's
-    # level-1 "one mean value per pair per cell".
+    # cross-pair pooled median. Each row of pair_maps is already level 1
+    # ("one mean value per pair per cell").
     pairs_sparse = []
     for row in pair_maps:
         idx = np.flatnonzero(np.isfinite(row))
@@ -502,7 +502,7 @@ def _irls_ensemble_kernel_solve(
 
 
 def _pool_pairs(idx_chunks, val_chunks, n_cells, ny, nx, R_hydro):
-    """Cross-pair pooled median — Shean / ``melt.py`` ``pair_median`` level 2.
+    """Cross-pair pooled median — ``melt.py`` ``pair_median`` level 2.
 
     The per-fan two-level median (median WITHIN each start's fan, then median
     ACROSS fans) makes a cell's estimate depend on how many *fans* reached it,
@@ -904,7 +904,7 @@ def linear_inverse_budget_melt_rate(
             ).mean("time", skipna=True)
         return H_w.fillna(H_f_mean).fillna(H_ref_val)
 
-    # --- pair fans (Shean banding, two-level median) -------------------------
+    # --- pair fans (1.5–2.5 yr baseline band, two-level median) --------------
     t_yr = _times_to_years(h_stack["time"].values)
     n_t = len(t_yr)
     starts = []
@@ -1300,7 +1300,7 @@ def linear_inverse_budget_melt_rate(
             "dt_yr": float(dt_yr),
             "attribution": (
                 "seed (fan-start position), one map per start fan; two-level "
-                "median mirrors Shean's pair_median mosaic"
+                "median (pair_median mosaic)"
                 if attribution == "seed" else
                 "path (deposited along visited cells per sub-step, non-melt "
                 "terms re-localized; melt.py output='path' parity), per-pair "
@@ -1335,7 +1335,7 @@ def linear_inverse_eulerian_budget_melt_rate(
     r"""Basal melt rate via the budget-corrected EULERIAN Stubblefield inverse.
 
     The Eulerian twin of :func:`linear_inverse_budget_melt_rate`. Instead of
-    warping Shean-banded pair fans, the hydrostatic channel here IS the
+    warping baseline-banded pair fans, the hydrostatic channel here IS the
     production Eulerian estimator — :func:`stereo_melt.melt.eulerian_melt_rate`
     called directly, so ``melt_rate_hydro`` is bit-identical to the production
     Eulerian melt rate (per-cell dh/dt regression over ALL epochs, plus the

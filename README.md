@@ -59,7 +59,7 @@ into it editable:
 ## Running a pipeline
 
 The staged sequence (climate/strip/control caches → per-era ASP align →
-nocorr ingest → stack → Shean corrections + tilt LSQ → `BAD_STRIPS` QC →
+nocorr ingest → stack → corrections + tilt LSQ → `BAD_STRIPS` QC →
 solvers) is documented stage-by-stage in [`PIPELINE.md`](./PIPELINE.md).
 Run stages as modules from `examples/`, which is where the basin driver
 packages are importable from:
@@ -74,7 +74,7 @@ Production melt products are `run_melt_path` (Lagrangian path solver) and
 
 ## References
 
-- Shean et al. 2019, *The Cryosphere* — [DOI](https://doi.org/10.5194/tc-13-2633-2019) · [reference code](https://github.com/dshean/pig_dem_meltrate)
+- Shean et al. 2019, *The Cryosphere* — [DOI](https://doi.org/10.5194/tc-13-2633-2019) · [code](https://github.com/dshean/pig_dem_meltrate)
 - Chartrand 2024, Thwaites — [Zenodo 13667120](https://doi.org/10.5281/zenodo.13667120)
 - Stubblefield 2023, linear non-hydrostatic inverse — referenced in `src/stereo_melt/dynamics/`
 - Chudley & Howat 2024, *pdemtools* — [repo](https://github.com/trchudley/pdemtools)

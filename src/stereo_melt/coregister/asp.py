@@ -431,9 +431,9 @@ def align_strip_with_asp(
         )
     print(f"✅ Aligned point cloud produced at {candidates[0]}")
 
-    # Shean 2019 sanity gate. pc_align is invoked with
-    # `--max-displacement {max_displacement}` (Shean's PIG-paper value of
-    # 100 m by default). A converged alignment must therefore stay inside
+    # Displacement sanity gate. pc_align is invoked with
+    # `--max-displacement {max_displacement}` (default 100 m, PIG value of
+    # Shean et al. 2019). A converged alignment must therefore stay inside
     # that cap; if pc_align reports `|Δ| > max_displacement` the input
     # clouds didn't actually overlap (typically a CRS/datum mismatch) and
     # pc_align wrote out a transform anyway. Quarantine the run rather
@@ -453,8 +453,8 @@ def align_strip_with_asp(
         quarantine = _quarantine_alignment(
             alignment_dir, asp_root, file_name_no_ext,
             reason=(
-                f"|Δ|={delta_m:.1f} m > max_displacement={max_displacement} m "
-                f"(Shean threshold). pc_align did not converge -- likely a "
+                f"|Δ|={delta_m:.1f} m > max_displacement={max_displacement} m. "
+                f"pc_align did not converge -- likely a "
                 f"CRS/datum mismatch on input clouds."
             ),
         )
@@ -907,17 +907,13 @@ def align_strip(
 
 
 def ingest_strip_nocorr(dem_path, asp_root, z_offset_m, overwrite=False):
-    r"""Shean-style ingestion of a strip with NO static-control overlap.
+    r"""Ingest a strip with no control overlap ("nocorr") at a-priori geolocation.
 
-    Shean 2019 kept DEMs without control-surface coverage ("nocorr") at
-    their a-priori geolocation rather than dropping them: one class-mean
-    vertical bias is applied (``stack_nocorr_adjust.py``, −3.1 m for PIG —
-    the mean vertical translation ``pc_align`` gave the co-registered DEMs
-    of the same sensor class), and the joint tilt LSQ then estimates each
-    DEM's residual offset/tilt with a loosened prior (``ndinterp.py``
-    Ez=1.0 vs 0.3 for trans DEMs), anchored by cross-epoch self-consistency
-    over the observation domain. Only DEMs the LSQ could not adjust are
-    removed afterwards (``stack_filter.py remove_nocorr``).
+    Applies one class-mean vertical offset (−3.1 m on PIG in Shean et al.
+    2019); the joint tilt LSQ then sets each strip's datum with a loose
+    prior (Ez = 1.0 m, vs 0.3 m for coregistered DEMs in that study) from
+    cross-epoch consistency; strips it cannot adjust are dropped after the
+    fit.
 
     This function is the ingestion step of that recipe: **no pc_align, no
     geodiff** — it writes

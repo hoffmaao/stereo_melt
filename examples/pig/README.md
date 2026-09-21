@@ -4,7 +4,7 @@ Driver scripts for the **Pine Island Glacier** (Amundsen Sea Embayment,
 ~−75°S / −101°E) application of the [`stereo_melt`](../../src/stereo_melt/)
 library — the Shean 2019 reference basin, used for parity/benchmark work.
 
-The full production chain runs here (per-era ASP align → stack → Shean
+The full production chain runs here (per-era ASP align → stack →
 corrections + tilt LSQ → path + Eulerian solvers, time-varying fused
 velocity, budget linear-inverse diagnostics). The canonical stage sequence is
 [`PIPELINE.md`](../../PIPELINE.md); PIG-specific decisions and caveats are

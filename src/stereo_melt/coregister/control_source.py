@@ -89,13 +89,11 @@ EZ_PER_SOURCE_M: dict[str, float] = {
     # accuracy to the 0.2-0.3 m class — laser tier, but not IS2-tight.
     "glas": 0.3,
     "rock": 2.0,   # rock outcrops anchor x/y but loose on αz (sparse coverage)
-    # Shean-style "nocorr" ingestion: strips with NO control overlap (fully
-    # floating) that skipped pc_align entirely and carry only the class-mean
-    # vertical bias correction (stack_nocorr_adjust.py analog). Ez=1.0 is
-    # Shean's exact ndinterp.py value for DEMs without ICP co-registration
-    # (E[...nocorr_idx...]=1.0 vs 0.3 for trans DEMs): the joint tilt LSQ
-    # supplies their datum from cross-epoch self-consistency over the
-    # observation domain, with a 3.3x looser leash than controlled strips.
+    # "nocorr" strips: no control overlap, no pc_align, only the class-mean
+    # vertical offset. Ez=1.0 (vs 0.3 for coregistered DEMs in Shean et al.
+    # 2019) lets the joint tilt LSQ set their datum from cross-epoch
+    # self-consistency over the observation domain, 10x looser than
+    # laser-controlled strips (0.1 m).
     "nocorr": 1.0,
 }
 
