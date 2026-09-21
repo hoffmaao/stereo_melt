@@ -1,7 +1,7 @@
 """Plot 6-panel five-methods + Davison comparison from a saved NetCDF.
 
 Decouples replotting (cheap) from re-running the full 5-method inversion
-(expensive). Reads ``beardmore_five_methods_<R>m_*.nc`` produced by
+(expensive). Reads ``beardmore_five_methods_<R>m_*.nc`` produced by the retired
 ``compare_five_methods`` and emits the same 6-panel layout, with a
 tunable color range.
 

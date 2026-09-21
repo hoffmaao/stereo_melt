@@ -5,7 +5,7 @@ solvers. Reuses the floating mask and ``_imshow_xr`` helper from ``run_melt``.
 
 Sources:
   Eulerian, Lagrangian → ``beardmore_melt_<window>.nc`` (run_melt)
-  closed-FFT, closed-DCT → ``beardmore_dct_vs_fft_<window>_tk*_L*.nc`` (compare_dct_vs_fft)
+  closed-FFT, closed-DCT → ``beardmore_dct_vs_fft_<window>_tk*_L*.nc`` (retired compare_dct_vs_fft)
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _resolve_dct_fft_path(explicit: str | None) -> Path:
     if not candidates:
         raise SystemExit(
             f"No beardmore_dct_vs_fft_*.nc in {config.RESULTS_DIR}; "
-            "run beardmore.compare_dct_vs_fft first or pass --dct-fft-nc."
+            "pass --dct-fft-nc."
         )
     return candidates[-1]
 

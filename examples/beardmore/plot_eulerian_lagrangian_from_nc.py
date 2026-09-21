@@ -1,7 +1,7 @@
 """Plot 2-panel Eulerian vs Lagrangian melt rate (Nansen-style) from a saved NetCDF.
 
 Reads any NetCDF that contains ``melt_rate_eulerian``, ``melt_rate_lagrangian``,
-and ``floating_mask`` (currently: ``beardmore_five_methods_<R>m_*.nc`` from
+and ``floating_mask`` (currently: ``beardmore_five_methods_<R>m_*.nc`` from the retired
 ``compare_five_methods``, or ``beardmore_eulerian_lagrangian_<R>m_*.nc`` from
 ``plot_eulerian_lagrangian``) and emits the standardized 2-panel figure.
 

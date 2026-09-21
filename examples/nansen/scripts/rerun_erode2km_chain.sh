@@ -37,10 +37,9 @@ run_stage() {
 
 echo "[$(stamp)] === Nansen erode-2km re-run start ==="
 
-run_stage "1/4 tilt_fit"            nansen.tilt_fit            tilt_fit_erode2km.log
-run_stage "2/4 diagnose_dhdt"       nansen.diagnose_dhdt       diagnose_dhdt_erode2km.log
-run_stage "3/4 run_melt"            nansen.run_melt            run_melt_erode2km.log
-run_stage "4/4 compare_five_methods" nansen.compare_five_methods compare_five_methods_erode2km.log
+run_stage "1/3 tilt_fit"            nansen.tilt_fit            tilt_fit_erode2km.log
+run_stage "2/3 diagnose_dhdt"       nansen.diagnose_dhdt       diagnose_dhdt_erode2km.log
+run_stage "3/3 run_melt"            nansen.run_melt            run_melt_erode2km.log
 
 echo
 echo "[$(stamp)] === Nansen erode-2km re-run done ==="

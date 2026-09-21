@@ -6,8 +6,6 @@
 #   2. run_melt  -> results/beardmore_melt_*.nc + figures/melt_comparison.png
 #                   (standardized 6-panel set: Eulerian, Lagrangian, dh/dt FFT,
 #                    dh/dt DCT, D-masked CG DCT λ=1e-1 L=H_ref/2, Davison)
-#   3. compare_five_methods -> results/beardmore_five_methods_*.nc +
-#                              figures/five_methods_comparison.png  (same 6-panel set)
 #
 # Usage:
 #   nohup bash examples/beardmore/scripts/rerun_ez_0p1_chain.sh \
@@ -42,9 +40,8 @@ run_stage() {
 
 echo "[$(stamp)] === Beardmore mixed-GCP Ez=0.1 re-run start ==="
 
-run_stage "1/3 tilt_fit"             beardmore.tilt_fit             tilt_fit_ez_0p1.log
-run_stage "2/3 run_melt"             beardmore.run_melt             run_melt_ez_0p1.log
-run_stage "3/3 compare_five_methods" beardmore.compare_five_methods compare_five_methods_ez_0p1.log
+run_stage "1/2 tilt_fit" beardmore.tilt_fit tilt_fit_ez_0p1.log
+run_stage "2/2 run_melt" beardmore.run_melt run_melt_ez_0p1.log
 
 echo
 echo "[$(stamp)] === Beardmore mixed-GCP Ez=0.1 re-run done ==="
