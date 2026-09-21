@@ -31,6 +31,10 @@ opt-in (``resid_threshold_m``): on thin-static-control basins (PIG at
 epoch, so that rule degenerates to a flat residual drop that discards
 cleanly-coregistered shelf DEMs -- flagging shelf strips for having
 noisy *rock-margin* pixels, not bad shelf data.
+
+:func:`screen_unrescued_epochs` is a separate post-fit screen for
+uncontrolled (nocorr) slices, scored against the fit's own per-pixel
+intercept + dhdt model (backend for ``pig/screen_unrescued.py``).
 """
 from __future__ import annotations
 
