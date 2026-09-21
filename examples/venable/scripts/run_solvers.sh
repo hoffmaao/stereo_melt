@@ -6,11 +6,10 @@
 #
 # Stages (each logs separately; aborts on first non-zero exit):
 #   1 tilt_fit           -> processed/venable_stack_tilt_corrected_*.nc (curated)
-#   2 run_melt           -> Eulerian melt map      (Shean Eq. 10)        [PRODUCT]
-#   3 run_pseudospectral -> Lagrangian melt map    (FFT pseudospectral)  [PRODUCT]
-#   4 run_stationary     -> linear-inverse          (diagnostic, NOT a melt product)
+#   2 run_melt           -> Eulerian melt map                  [PRODUCT]
+#   3 run_melt_path      -> Lagrangian path melt map           [PRODUCT]
 #
-# Melt-rate sign (Shean): negative = melt, positive = accretion.
+# Melt-rate sign: negative = melt, positive = accretion.
 # Outputs: arrays in venable/processed/*.nc, maps/figures in venable/figures/.
 #
 # Usage (disconnect-safe):
@@ -51,14 +50,12 @@ run_stage() {
 echo "[$(stamp)] === Venable Stage B (solvers -> melt maps) start ==="
 echo "[$(stamp)] VENABLE_VELOCITY=$VENABLE_VELOCITY"
 
-run_stage "1/4 tilt_fit(curated)"  tilt_fit_curated.log    "$PY" -u -m venable.tilt_fit
-run_stage "2/4 run_melt"           run_melt.log            "$PY" -u -m venable.run_melt
-run_stage "3/4 run_pseudospectral" run_pseudospectral.log  "$PY" -u -m venable.run_pseudospectral
-run_stage "4/4 run_stationary"     run_stationary.log      "$PY" -u -m venable.run_stationary
+run_stage "1/3 tilt_fit(curated)"  tilt_fit_curated.log    "$PY" -u -m venable.tilt_fit
+run_stage "2/3 run_melt"           run_melt.log            "$PY" -u -m venable.run_melt
+run_stage "3/3 run_melt_path"      run_melt_path.log       "$PY" -u -m venable.run_melt_path
 
 echo
 echo "[$(stamp)] === Venable Stage B done ==="
 echo "Melt maps + figures in venable/figures/ ; arrays in venable/processed/."
-echo "Eulerian (run_melt) + Lagrangian (run_pseudospectral) are the melt products;"
-echo "run_stationary is diagnostic. Sanity-check magnitudes vs the Bellingshausen"
-echo "literature (e.g. Davison 2023) -- negative = melt in Shean convention."
+echo "Eulerian (run_melt) + Lagrangian path (run_melt_path) are the melt products."
+echo "Sanity-check magnitudes vs Davison 2023 (negative = melt here)."

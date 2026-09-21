@@ -10,7 +10,7 @@
 #   3. pig.align_strips --parallel 8
 #   4. pig.build_stack
 #   5. pig.tilt_fit
-#   6. pig.run_melt + pig.run_pseudospectral in parallel
+#   6. pig.run_melt
 #
 # Aborts on first failure (set -e). Each stage's full log is in
 # pig/logs/<stage>.log; this top-level log carries the chain summary
@@ -59,24 +59,10 @@ banner "Stage 5/6: pig.tilt_fit"
 $PY -u -m pig.tilt_fit >> "$LOG_DIR/tilt_fit.log" 2>&1
 echo "[$(stamp)] tilt_fit OK"
 
-# --- Stage 6: solvers in parallel -----------------------------------------
-banner "Stage 6/6: pig.run_melt + pig.run_pseudospectral (parallel)"
-$PY -u -m pig.run_melt          >> "$LOG_DIR/run_melt.log"          2>&1 &
-PID_MELT=$!
-$PY -u -m pig.run_pseudospectral >> "$LOG_DIR/run_pseudospectral.log" 2>&1 &
-PID_PS=$!
-echo "[$(stamp)] run_melt PID=$PID_MELT  run_pseudospectral PID=$PID_PS"
-
-set +e
-wait $PID_MELT;  RC_MELT=$?
-wait $PID_PS;    RC_PS=$?
-set -e
-echo "[$(stamp)] run_melt rc=$RC_MELT  run_pseudospectral rc=$RC_PS"
-
-if [ "$RC_MELT" -ne 0 ] || [ "$RC_PS" -ne 0 ]; then
-    echo "[$(stamp)] !! one or both solvers failed; check stage logs"
-    exit 1
-fi
+# --- Stage 6: solver --------------------------------------------------
+banner "Stage 6/6: pig.run_melt"
+$PY -u -m pig.run_melt >> "$LOG_DIR/run_melt.log" 2>&1
+echo "[$(stamp)] run_melt OK"
 
 banner "Pipeline complete"
 echo "[$(stamp)] Outputs:"

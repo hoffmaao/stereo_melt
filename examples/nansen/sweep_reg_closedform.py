@@ -1,7 +1,6 @@
 """Sweep Tikhonov regularization for the closed-form FFT/DCT linear inverse.
 
-Companion to ``run_stationary.py`` (which sweeps the iterative CG-LSQ
-solver). The closed-form path through ``inverse_stationary`` has its
+The closed-form path through ``inverse_stationary`` has its
 own conditioning, so its plateau in ``reg`` is not the same number as
 the CG ``tikhonov`` plateau. Production currently uses ``reg=1e-1``,
 which is two orders of magnitude above the function default of

@@ -1,10 +1,6 @@
-"""Venable production-config Lagrangian PATH melt rate (Shean pair_median).
+"""Venable production Lagrangian PATH melt rate (pair_median).
 
-The old ``venable.run_melt`` / ``venable.run_pseudospectral`` drivers predate
-the 2026-07-02 solver verdict (keep the path solver as production; the
-pseudospectral linear-perturbation inverses are retired as melt products).
-This driver runs ONLY the production Lagrangian path solver with the exact
-PIG configuration on the curated stack:
+Runs only the production path solver (PIG configuration) on the curated stack:
 
     lagrangian_melt_rate(output="path", seed_stride=1,
                          aggregator="pair_median", pairs="all",

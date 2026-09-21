@@ -58,4 +58,4 @@ echo
 echo "[$(stamp)] === McMurdo chain done ==="
 echo "Next: review mcmurdo/logs/find_bad_epochs.log, populate"
 echo "mcmurdo.config.BAD_EPOCHS, re-run tilt_fit, then run the solvers"
-echo "(run_melt, run_stationary, run_pseudospectral)."
+echo "(run_melt, run_melt_path)."
