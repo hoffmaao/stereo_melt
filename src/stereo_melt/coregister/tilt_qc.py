@@ -43,10 +43,51 @@ import xarray as xr
 
 __all__ = [
     "score_tilt_residuals",
+    "screen_unrescued_epochs",
     "suggest_bad_epochs",
     "print_bad_epoch_report",
     "plot_static_mask_and_strip_count",
 ]
+
+
+def _align_tilt_params(
+    tc_stack: xr.DataArray, tilt_params: xr.Dataset
+) -> "tuple[xr.Dataset, np.ndarray]":
+    """Rows of ``tilt_params`` matching the slices of ``tc_stack``, by date.
+
+    Handles params written before later epoch drops and duplicate dates.
+    """
+    if len(tilt_params["time"]) == len(tc_stack["time"]):
+        return tilt_params, np.arange(len(tilt_params["time"]))
+    tc_dates = set(pd.to_datetime(tc_stack["time"].values).normalize())
+    params_dt = pd.to_datetime(tilt_params["time"].values).normalize()
+    keep_idx = np.where(np.array([d in tc_dates for d in params_dt]))[0]
+    aligned = tilt_params.isel(time=keep_idx)
+    if len(aligned["time"]) != len(tc_stack["time"]):
+        raise ValueError(
+            f"date-set alignment failed: tc has {len(tc_stack['time'])} "
+            f"epochs, aligned params has {len(aligned['time'])}. "
+            "Re-run tilt_fit so its params match the current BAD_EPOCHS."
+        )
+    return aligned, keep_idx
+
+
+def _fit_temporal_model(
+    tilt_params: xr.Dataset, keep_idx: np.ndarray
+) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | None":
+    """The fit's per-pixel ``intercept``, ``dhdt`` (m/day) and centred times (days).
+
+    Times are centred on the params' full epoch axis, then subset to
+    ``keep_idx``. Returns ``None`` if the params lack the temporal model.
+    """
+    if not ("intercept" in tilt_params and "dhdt" in tilt_params):
+        return None
+    p_times = tilt_params["time"].values
+    p_days = (
+        (p_times - p_times[0]).astype("timedelta64[s]").astype(float) / 86400.0
+    )
+    t_centered = (p_days - p_days.mean())[keep_idx]
+    return tilt_params["intercept"].values, tilt_params["dhdt"].values, t_centered
 
 
 def score_tilt_residuals(
@@ -107,43 +148,14 @@ def score_tilt_residuals(
         warnings.simplefilter("ignore", category=RuntimeWarning)
         z_ref = np.nanmedian(z, axis=0)
 
-    # Align IRLS weights by date-set, not row index. ``tilt_params`` may
-    # carry the un-dropped epoch list (e.g. when ``BAD_EPOCHS`` has been
-    # extended after the tilt-fit was last written) so a positional
-    # lookup would mis-pair weights with residuals once the lists
-    # diverge. Date-set alignment also handles the duplicate-date case
-    # (multiple strips per acquisition date) that breaks ``reindex``.
-    if len(tilt_params["time"]) == len(tc_stack["time"]):
-        keep_idx = np.arange(len(tilt_params["time"]))
-        aligned = tilt_params
-    else:
-        tc_dates = set(pd.to_datetime(tc_stack["time"].values).normalize())
-        params_dt = pd.to_datetime(tilt_params["time"].values).normalize()
-        keep = np.array([d in tc_dates for d in params_dt])
-        keep_idx = np.where(keep)[0]
-        aligned = tilt_params.isel(time=keep_idx)
-        if len(aligned["time"]) != len(tc_stack["time"]):
-            raise ValueError(
-                f"date-set alignment failed: tc has {len(tc_stack['time'])} "
-                f"epochs, aligned params has {len(aligned['time'])}. "
-                "Re-run tilt_fit so its params match the current BAD_EPOCHS."
-            )
+    aligned, keep_idx = _align_tilt_params(tc_stack, tilt_params)
     wm_arr = aligned["weight_mean"].values
     wf_arr = aligned["weight_frac_kept"].values
 
-    # Per-pixel temporal model from the fit itself, when available.
-    # Reproduce the fit's time centering from the params' FULL epoch
-    # axis (the epochs the LSQ saw), then subset to the aligned rows.
-    detrended = "intercept" in tilt_params and "dhdt" in tilt_params
+    temporal = _fit_temporal_model(tilt_params, keep_idx)
+    detrended = temporal is not None
     if detrended:
-        p_times = tilt_params["time"].values
-        p_days = (
-            (p_times - p_times[0]).astype("timedelta64[s]").astype(float)
-            / 86400.0
-        )
-        t_centered = (p_days - p_days.mean())[keep_idx]
-        intercept2d = tilt_params["intercept"].values
-        dhdt2d = tilt_params["dhdt"].values  # m/day
+        intercept2d, dhdt2d, t_centered = temporal
         print(
             "  scoring against per-pixel intercept + dhdt model "
             "(dhdt-aware screen)"
@@ -217,6 +229,107 @@ def score_tilt_residuals(
     return df.sort_values(
         "med_resid_m", key=lambda s: s.abs(), ascending=False
     ).reset_index(drop=True)
+
+
+def screen_unrescued_epochs(
+    tc_stack: xr.DataArray,
+    tilt_params: xr.Dataset,
+    *,
+    domain_mask: "np.ndarray | None" = None,
+    screen_variants: "tuple[str, ...]" = ("nocorr",),
+    nmad_max_m: float = 5.0,
+    blunder_m: float = 20.0,
+    blunder_frac_max: float = 0.10,
+    min_px: int = 200,
+) -> pd.DataFrame:
+    """Flag uncontrolled slices the joint tilt fit left unadjusted.
+
+    Slices whose ``source_variant`` is in ``screen_variants`` are scored
+    against the fit's per-pixel ``intercept + dhdt * t`` model over
+    ``domain_mask`` and flagged if they have fewer than ``min_px`` pixels,
+    residual NMAD above ``nmad_max_m``, or more than ``blunder_frac_max``
+    of pixels off by more than ``blunder_m``. Other slices are scored but
+    never flagged.
+
+    Parameters
+    ----------
+    tc_stack : xarray.DataArray, dims ``(time, y, x)``
+        Tilt-corrected stack with a per-slice ``source_variant`` coord.
+    tilt_params : xarray.Dataset
+        Companion ``tilt_params``; without ``intercept``/``dhdt`` the
+        reference falls back to the temporal median.
+    domain_mask : numpy.ndarray of bool, dims ``(y, x)``, optional
+        Pixels to score (default: where the fitted model is finite).
+    screen_variants : tuple of str
+        ``source_variant`` values eligible to be flagged.
+    nmad_max_m, blunder_m, blunder_frac_max, min_px
+        Rejection thresholds.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per slice in stack order with ``n_px``, ``med_resid_m``,
+        ``nmad_m``, ``frac_blunder``, ``screened``, ``unrescued`` and
+        ``reason``.
+    """
+    if "source_variant" not in tc_stack.coords:
+        raise ValueError(
+            "screen_unrescued_epochs needs the stack's per-slice "
+            "'source_variant' coord; rebuild the stack with build_stack."
+        )
+    variants = np.asarray(tc_stack["source_variant"].values, dtype=str)
+    _, keep_idx = _align_tilt_params(tc_stack, tilt_params)
+    temporal = _fit_temporal_model(tilt_params, keep_idx)
+    z = tc_stack.values
+    if temporal is None:
+        print("  tilt_params lacks intercept/dhdt -- scoring against the "
+              "time-static median (legacy frame)")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            z_ref = np.nanmedian(z, axis=0)
+        default_domain = np.isfinite(z_ref)
+    else:
+        intercept2d, dhdt2d, t_centered = temporal
+        default_domain = np.isfinite(intercept2d) & np.isfinite(dhdt2d)
+    domain = default_domain if domain_mask is None else (
+        np.asarray(domain_mask, dtype=bool) & default_domain
+    )
+
+    rows = []
+    for k in range(z.shape[0]):
+        model = z_ref if temporal is None else intercept2d + dhdt2d * t_centered[k]
+        finite = np.isfinite(z[k]) & domain
+        n = int(finite.sum())
+        if n:
+            r = z[k][finite] - model[finite]
+            med = float(np.median(r))
+            nmad = 1.4826 * float(np.median(np.abs(r - med)))
+            frac = float(np.mean(np.abs(r) > blunder_m))
+        else:
+            med = nmad = frac = np.nan
+        screened = variants[k] in screen_variants
+        reasons = []
+        if screened:
+            if n < min_px:
+                reasons.append(f"n_px {n} < {min_px}")
+            else:
+                if nmad > nmad_max_m:
+                    reasons.append(f"nmad {nmad:.1f} m > {nmad_max_m:g}")
+                if frac > blunder_frac_max:
+                    reasons.append(
+                        f"{100 * frac:.0f}% > {blunder_m:g} m off "
+                        f"(max {100 * blunder_frac_max:.0f}%)"
+                    )
+        rows.append((pd.Timestamp(tc_stack["time"].values[k]), variants[k], n,
+                     med, nmad, frac, screened, bool(reasons), "; ".join(reasons)))
+
+    df = pd.DataFrame(rows, columns=[
+        "epoch", "source_variant", "n_px", "med_resid_m", "nmad_m",
+        "frac_blunder", "screened", "unrescued", "reason",
+    ])
+    if "dem_id" in tc_stack.coords:
+        df.insert(1, "dem_id", np.asarray(tc_stack["dem_id"].values, dtype=str))
+    return df
 
 
 def suggest_bad_epochs(
