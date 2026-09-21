@@ -4,7 +4,8 @@ U1 clean nocorr kept · U2 NMAD > 5 m flagged · U3 20 % blunders flagged ·
 U4 30 m offset flagged · U5 < min_px flagged · U6 controlled slice never
 flagged · U7 thinning not flagged (fit frame) · U8 domain_mask honoured ·
 U9 missing source_variant refused · U10 obs_support keeps prior-only pixels
-unscored · U11 fit_tilt_stack reports its obs_support.
+unscored · U11 fit_tilt_stack reports its obs_support · U12 fitted 1-2 epoch
+pixels not scored.
 
 Run::
 
@@ -142,5 +143,28 @@ check("U11 fit_tilt_stack obs_support = observed pixels",
       sup.dtype == bool and np.array_equal(sup, expected),
       f"{int(sup.sum())} px vs {int(expected.sum())} expected")
 
-print(f"\n{len(fails)} failure(s)" if fails else "\nALL PASS (11/11)")
+# Fitted low-overlap case: seven ctrl epochs on cols < 15, one ctrl epoch and a
+# nocorr strip with 15 m non-planar error everywhere. At the 2-epoch pixels the
+# fit's per-pixel intercept + dhdt absorbs that error.
+ly, lx = 20, 40
+lt = pd.to_datetime([f"{yr}-01-01" for yr in range(2012, 2020)])
+lvar = np.array(["ctrl"] * 7 + ["nocorr"])
+lz = (200.0 + rng.normal(0.0, 20.0, (ly, lx)))[None] \
+    - (lt - lt[0]).days.to_numpy(float)[:, None, None] / 365.25
+lz += rng.normal(0.0, 0.3, lz.shape)
+lz[:6, :, 15:] = np.nan
+lz[7] += rng.normal(0.0, 15.0, (ly, lx))
+lstack = xr.DataArray(lz, dims=("time", "y", "x"),
+                      coords={"time": lt, "y": np.arange(ly)[::-1] * 250.0,
+                              "x": np.arange(lx) * 250.0,
+                              "source_variant": ("time", lvar)})
+lpar, ltc = fit_tilt_stack(lstack, Ez=np.where(lvar == "nocorr", 10.0, 0.1), robust=False)
+lo = screen_unrescued_epochs(ltc, lpar, min_epochs_px=1).iloc[7]
+hi = screen_unrescued_epochs(ltc, lpar).iloc[7]
+check("U12 fitted 1-2 epoch pixels not scored",
+      not lo["unrescued"] and bool(hi["unrescued"]) and int(hi["n_px"]) == 15 * ly,
+      f"all px: nmad {lo['nmad_m']:.1f} m, kept; >= 3 epochs: {int(hi['n_px'])} px, "
+      f"{hi['reason']}")
+
+print(f"\n{len(fails)} failure(s)" if fails else "\nALL PASS (12/12)")
 sys.exit(1 if fails else 0)

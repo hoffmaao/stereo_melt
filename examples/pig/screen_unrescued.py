@@ -36,6 +36,7 @@ def main() -> None:
     p.add_argument("--blunder-m", type=float, default=20.0)
     p.add_argument("--blunder-frac-max", type=float, default=0.10)
     p.add_argument("--min-px", type=int, default=200)
+    p.add_argument("--min-epochs-px", type=int, default=3)
     args = p.parse_args()
     out_tag = args.out_tag or f"{args.tag}scr"
     if out_tag == args.tag:
@@ -71,6 +72,7 @@ def main() -> None:
         stack, params, domain_mask=domain,
         nmad_max_m=args.nmad_max_m, blunder_m=args.blunder_m,
         blunder_frac_max=args.blunder_frac_max, min_px=args.min_px,
+        min_epochs_px=args.min_epochs_px,
     )
     df.to_csv(table, index=False)
     bad = df[df["unrescued"]]
@@ -91,7 +93,8 @@ def main() -> None:
         "unrescued_screen": (
             f"screen_unrescued_epochs on {src.name}: nmad_max_m={args.nmad_max_m} "
             f"blunder_m={args.blunder_m} blunder_frac_max={args.blunder_frac_max} "
-            f"min_px={args.min_px}; dropped {len(bad)} of {len(scr)} nocorr slices"
+            f"min_px={args.min_px} min_epochs_px={args.min_epochs_px}; "
+            f"dropped {len(bad)} of {len(scr)} nocorr slices"
         ),
     })
     enc = {v: {"zlib": True, "complevel": 4} for v in out.data_vars if out[v].ndim == 3}
