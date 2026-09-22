@@ -109,6 +109,10 @@ def main() -> int:
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--layers", type=int, default=4)
     ap.add_argument("--melt-scales", default="1,2,4,8")
+    ap.add_argument("--edge-km", type=float, default=3.0,
+                    help="also score an interior window this far from every edge (Elmer inflow and calving-front boundary layers dominate full-domain scores)")
+    ap.add_argument("--melt-t-scales", default="",
+                    help="time bands (yr) for a time-dependent melt b(x,y,t), e.g. 0.5,1,2,4; empty = steady melt; the map is the window mean")
     ap.add_argument("--xy-scales", default="0.5,1,2,4,8")
     ap.add_argument("--out-suffix", default="")
     ap.add_argument("--transfer", action="store_true")
@@ -133,6 +137,8 @@ def main() -> int:
                       sigma_h_m=args.sigma_h, sigma_r_myr=args.sigma_r, nu=(None if args.nu <= 0 else args.nu),
                       n_col_slices=args.col_slices, hidden=args.hidden, layers=args.layers,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
+                      melt_t_scales_yr=(tuple(float(s) for s in args.melt_t_scales.split(","))
+                                        if args.melt_t_scales else None),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")),
                       transfer=args.transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       transfer_bg_sigma_H=args.bg_sigma_H, batch_epochs=args.batch_epochs,
@@ -146,8 +152,10 @@ def main() -> int:
           + "".join(f"\n  bin {i}: H {b[0]:.0f} m, u ({b[1]:+.0f}, {b[2]:+.0f}) m/yr"
                     for i, b in enumerate(tb)))
 
-    def score(m, name, sd=None):
+    def score(m, name, sd=None, region=None):
         fin = np.isfinite(m) & np.isfinite(truth) & data.domain
+        if region is not None:
+            fin &= region
         e = m[fin] - truth[fin]
         line = (f"  {name:22s} nrmse {np.sqrt(np.mean(e ** 2)) / np.sqrt(np.mean(truth[fin] ** 2)):.3f}  "
                 f"corr {np.corrcoef(m[fin], truth[fin])[0, 1]:.3f}  bias {e.mean():+.2f} m/yr  rms {np.sqrt(np.mean(e ** 2)):.2f}")
@@ -163,6 +171,18 @@ def main() -> int:
     score(res.map_melt, "B-PINN MAP")
     if res.samples.shape[0] > 1:
         score(res.melt_mean, "B-PINN posterior mean", res.melt_sd)
+    if args.edge_km > 0:
+        X, Y = np.meshgrid(x, y)
+        e_m = 1000.0 * args.edge_km
+        inner = ((X >= x.min() + e_m) & (X <= x.max() - e_m)
+                 & (Y >= y.min() + e_m) & (Y <= y.max() - e_m))
+        print(f"=== interior window ({args.edge_km:g} km from every edge) ===")
+        for k in ("bench_eulerian", "bench_lagrangian"):
+            if k in z:
+                score(z[k], k.replace("bench_", "") + " (production)", region=inner)
+        score(res.map_melt, "B-PINN MAP", region=inner)
+        if res.samples.shape[0] > 1:
+            score(res.melt_mean, "B-PINN posterior mean", res.melt_sd, region=inner)
     truth_axis = str(z["truth_axis"]) if "truth_axis" in z else "xy"
     amp_axis = "y" if truth_axis == "y" else "x"
     print(f"amplitude along {amp_axis} (the truth's axis, {truth_axis!r}) "

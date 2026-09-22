@@ -65,6 +65,8 @@ def main() -> int:
     ap.add_argument("--batch-epochs", type=int, default=12)
     ap.add_argument("--lr", type=float, default=5e-4)
     ap.add_argument("--melt-scales", default="1,2,4,8")
+    ap.add_argument("--melt-t-scales", default="",
+                    help="time bands (yr) for a time-dependent melt b(x,y,t), e.g. 0.5,1,2,4; empty = steady melt; the map is the window mean")
     ap.add_argument("--xy-scales", default="0.5,1,2,4,8")
     ap.add_argument("--out-suffix", default="")
     ap.add_argument("--H-scale", type=float, default=100.0)
@@ -89,6 +91,8 @@ def main() -> int:
                       sigma_r_myr=args.sigma_r, transfer=not args.no_transfer, eta_bar=args.eta, alpha_scale=args.alpha, n_bins=args.n_bins, blend_px=args.blend_px,
                       batch_epochs=args.batch_epochs, epoch_planes=not args.no_planes, H_scale_m=args.H_scale, base_field=not args.no_base_field, b_scale_myr=args.b_scale, n_col_slices=args.col_slices, lr=args.lr,
                       melt_scales_km=tuple(float(s) for s in args.melt_scales.split(",")),
+                      melt_t_scales_yr=(tuple(float(s) for s in args.melt_t_scales.split(","))
+                                        if args.melt_t_scales else None),
                       xy_scales_km=tuple(float(s) for s in args.xy_scales.split(",")))
     t0 = time.time()
     res = fit_bpinn(data, cfg)

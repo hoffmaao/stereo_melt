@@ -17,7 +17,9 @@ hydrostatic) thickness stack, and a melt-rate field
 
 .. math::  \dot b_\varphi(x, y) = s_b\,\mathrm{MLP}_\varphi(\phi(x, y))
 
-(steady over the window; Shean sign, negative = melt). With ``base_field`` (default) the surrogate is
+(steady over the window by default; with ``melt_t_scales_yr`` it is
+:math:`\dot b_\varphi(x, y, t)` and the reported map is its window mean;
+negative = melt). With ``base_field`` (default) the surrogate is
 :math:`H_\theta = H_{\rm base}(x, y) + s_H\,\mathrm{MLP}_\theta`, where
 :math:`H_{\rm base}` is the lightly smoothed per-pixel temporal median of the
 observations sampled bilinearly (differentiable), so the network only has to
@@ -212,6 +214,10 @@ class BPINNConfig:
     melt_hidden: int = 64
     melt_layers: int = 3
     melt_scales_km: tuple = (1.0, 2.0, 4.0, 8.0)
+    # None = steady melt b(x, y). A tuple of time bands (yr) makes it b(x, y, t); the
+    # reported melt is then its window mean over [t0, t1].
+    melt_t_scales_yr: tuple | None = None
+    melt_t_samples: int = 32     # window-mean quadrature points when melt_t_scales_yr is set
     H_scale_m: float = 50.0
     base_field: bool = True
     base_smooth_px: float = 2.0
@@ -554,6 +560,10 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
     B_b = _fourier_matrix(k3, 2, cfg.n_fourier, cfg.melt_scales_km)
     in_H = 2 * B_xy.shape[1] + 2 * B_t.shape[1] + 3
     in_b = 2 * B_b.shape[1] + 2
+    melt_tv = cfg.melt_t_scales_yr is not None
+    if melt_tv:   # fold_in keeps the steady path's keys, hence its results, unchanged
+        B_bt = _fourier_matrix(jax.random.fold_in(k3, 1), 1, cfg.n_fourier, tuple(cfg.melt_t_scales_yr))
+        in_b += 2 * B_bt.shape[1] + 1
     xc, yc, tc = 0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (t0 + t1)
     Lx, Ly, Lt = max(x1 - x0, 1e-9), max(y1 - y0, 1e-9), max(t1 - t0, 1e-9)
 
@@ -581,11 +591,13 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         base = _sample2(base_g, x, y) if base_g is not None else data.H0
         return base + cfg.H_scale_m * _mlp(theta, f)[..., 0]
 
-    def b_net(phi, x, y):
+    def b_net(phi, x, y, t=None):
         u_km = jnp.stack([x - xc, y - yc], -1)
         u = jnp.stack([(x - xc) / Lx, (y - yc) / Ly], -1)
-        f = jnp.concatenate([_features(B_b, u_km), u], -1)
-        return cfg.b_scale_myr * _mlp(phi, f)[..., 0]
+        parts = [_features(B_b, u_km), u]
+        if melt_tv:
+            parts += [_features(B_bt, (t - tc)[..., None]), ((t - tc) / Lt)[..., None]]
+        return cfg.b_scale_myr * _mlp(phi, jnp.concatenate(parts, -1))[..., 0]
 
     def residual_parts(theta, phi, x, y, t):
         """Every term of the thickness equation at points (km, km, yr), unsummed."""
@@ -595,7 +607,7 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         Hy = jax.vmap(jax.grad(H_scalar, 1))(x, y, t)
         Ht = jax.vmap(jax.grad(H_scalar, 2))(x, y, t)          # m/yr
         u, v = _sample3(vx_g, x, y, t), _sample3(vy_g, x, y, t)
-        return dict(H=H, Hx=Hx, Hy=Hy, Ht=Ht, u=u, v=v, divu=_sample3(divu_g, x, y, t), a=_sample2(a_g, x, y), b=b_net(phi, x, y))
+        return dict(H=H, Hx=Hx, Hy=Hy, Ht=Ht, u=u, v=v, divu=_sample3(divu_g, x, y, t), a=_sample2(a_g, x, y), b=b_net(phi, x, y, t))
 
     def residual(theta, phi, x, y, t):
         """Thickness-equation residual at points (km, km, yr) → m/yr."""
@@ -917,7 +929,12 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
                 print(f"    step {it:6d}  loss {float(loss):.4e}  obs {float(parts[0]):.4e}  phys {float(parts[1]):.4e}", flush=True)
         return params, np.array(hist)
 
-    eval_b = jax.jit(lambda phi: b_net(phi, gx, gy).reshape(ny, nx))
+    if melt_tv:   # window-mean melt over [t0, t1]
+        t_q = jnp.linspace(t0, t1, max(int(cfg.melt_t_samples), 2))
+        eval_b = jax.jit(lambda phi: jax.lax.map(
+            lambda tq: b_net(phi, gx, gy, jnp.full_like(gx, tq)), t_q).mean(0).reshape(ny, nx))
+    else:
+        eval_b = jax.jit(lambda phi: b_net(phi, gx, gy).reshape(ny, nx))
     eval_H = jax.jit(lambda theta, xyt: H_net(theta, xyt[:, 0], xyt[:, 1], xyt[:, 2]))
 
     if cfg.n_steps <= 0:   # debug hook: residual parts at init
