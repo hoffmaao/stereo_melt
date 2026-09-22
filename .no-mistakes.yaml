@@ -22,3 +22,4 @@ test:
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_linear_perturbation.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_tilt_stack.py
     - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_unrescued_screen.py
+    - /home/hoffmaao/miniconda3/envs/stereo_melt/bin/python tests/gate_bpinn_trend_check.py
