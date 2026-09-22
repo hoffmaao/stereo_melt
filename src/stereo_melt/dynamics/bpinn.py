@@ -177,6 +177,24 @@ MIN_TREND_EPOCHS = 5
 # A steady stack -- the DEM-stack twins are steady by construction -- has an observed
 # median at the noise level, and a ratio against that would call a perfect fit a collapse.
 STEADY_TREND_MYR = 0.5
+# Fitted/observed trend ratio above which the surrogate is taken to have run away
+# (a time-dependent melt net can absorb dH/dt; the PIG trunk hit 4x).
+RUNAWAY_TREND_FACTOR = 2.0
+
+
+def trend_verdict(fit_med, obs_med):
+    """``'collapse'``, ``'runaway'`` or ``None`` for a fitted vs observed dH/dt median (m/yr).
+
+    Stands down (``None``) on a steady stack (``|obs_med| < STEADY_TREND_MYR``) or when
+    either value is not finite.
+    """
+    if not (np.isfinite(fit_med) and np.isfinite(obs_med)) or abs(obs_med) < STEADY_TREND_MYR:
+        return None
+    if abs(fit_med) < 0.2 * abs(obs_med):
+        return "collapse"
+    if abs(fit_med) > RUNAWAY_TREND_FACTOR * abs(obs_med):
+        return "runaway"
+    return None
 
 
 @dataclass
@@ -1025,7 +1043,8 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
         print(f"  [bpinn] collapse check stood down: the observed trend median {obs_med:+.3f} m/yr is "
               f"under the {STEADY_TREND_MYR:g} m/yr floor, so this stack is steady and a near-zero "
               f"fitted trend {fit_med:+.3f} m/yr is not evidence of collapse", flush=True)
-    if not steady and np.isfinite(obs_med) and np.isfinite(fit_med) and abs(fit_med) < 0.2 * abs(obs_med):
+    verdict = trend_verdict(fit_med, obs_med)
+    if verdict == "collapse":
         warnings.warn(
             f"B-PINN surrogate may have collapsed to a static field: over the {n_cmp} domain px "
             f"with >= {MIN_TREND_EPOCHS} epochs, the fitted dH/dt median {fit_med:+.3f} m/yr is "
@@ -1033,6 +1052,14 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
             f"over-weighted -- raise sigma_r_myr (currently {cfg.sigma_r_myr:g}) or lower "
             f"n_col_slices (currently {cfg.n_col_slices}). The melt map returned is then just "
             f"the steady budget of the base field.",
+            RuntimeWarning, stacklevel=2)
+    elif verdict == "runaway":
+        warnings.warn(
+            f"B-PINN surrogate trend has run away: over the {n_cmp} domain px with >= "
+            f"{MIN_TREND_EPOCHS} epochs, the fitted dH/dt median {fit_med:+.3f} m/yr exceeds "
+            f"{RUNAWAY_TREND_FACTOR:g}x the observed {obs_med:+.3f} m/yr. A time-dependent melt "
+            f"network (melt_t_scales_yr={cfg.melt_t_scales_yr}) can absorb dH/dt; do not quote "
+            f"this melt map.",
             RuntimeWarning, stacklevel=2)
     S = np.stack(samples)
     if cfg.transfer:
