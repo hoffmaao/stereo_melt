@@ -7,7 +7,8 @@
 
 Scores the MAP / posterior mean against the prescribed truth (nrmse, corr, bias,
 2-sigma coverage) next to the Eulerian / Lagrangian benchmarks packaged by
-prep_bpinn_twin.py, and reports the amplitude at the truth's channel wavelengths
+prep_bpinn_twin.py, over the full domain and again in an interior window
+(``--edge-km``), and reports the amplitude at the truth's channel wavelengths
 (1.0 / 1.5 km for the multixy twins), measured along the axis the prescribed
 melt varies in as recorded in the npz (``truth_axis``: x for the ``multicos``
 xy twins, y for a y-only twin).
@@ -28,9 +29,9 @@ once each way:
     run_bpinn_twin.py --tag multixy_pigreal_clean --transfer --sigma-h 0.5 \
         --no-planes --sigma-r 1 --col-slices 24 --steps 10000 --ensemble 1
 
-The recorded number is the single-member ``B-PINN MAP`` row, hence
-``--ensemble 1``. The default ``multixy_pigreal`` tag is the tilt-corrected,
-error-injected tier, which is noise-limited here (corr about 0).
+The recorded number is the single-member ``B-PINN MAP`` row of the full-domain
+block, hence ``--ensemble 1``. The default ``multixy_pigreal`` tag is the
+tilt-corrected, error-injected tier, which is noise-limited here (corr about 0).
 """
 from __future__ import annotations
 
