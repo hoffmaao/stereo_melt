@@ -183,13 +183,15 @@ RUNAWAY_TREND_FACTOR = 2.0
 
 
 def trend_verdict(fit_med, obs_med):
-    """``'collapse'``, ``'runaway'`` or ``None`` for a fitted vs observed dH/dt median (m/yr).
+    """``'sign'``, ``'collapse'``, ``'runaway'`` or ``None`` for a fitted vs observed dH/dt median (m/yr).
 
-    Stands down (``None``) on a steady stack (``|obs_med| < STEADY_TREND_MYR``) or when
+    ``'sign'``: both are at least ``STEADY_TREND_MYR`` and of opposite sign. Stands down (``None``) on a steady stack (``|obs_med| < STEADY_TREND_MYR``) or when
     either value is not finite.
     """
     if not (np.isfinite(fit_med) and np.isfinite(obs_med)) or abs(obs_med) < STEADY_TREND_MYR:
         return None
+    if abs(fit_med) >= STEADY_TREND_MYR and np.sign(fit_med) != np.sign(obs_med):
+        return "sign"
     if abs(fit_med) < 0.2 * abs(obs_med):
         return "collapse"
     if abs(fit_med) > RUNAWAY_TREND_FACTOR * abs(obs_med):
@@ -1040,11 +1042,16 @@ def fit_bpinn(data: BPINNData, cfg: BPINNConfig | None = None, truth=None) -> BP
           f"observed {obs_med:+.2f} m/yr", flush=True)
     steady = np.isfinite(obs_med) and abs(obs_med) < STEADY_TREND_MYR
     if steady:
-        print(f"  [bpinn] collapse check stood down: the observed trend median {obs_med:+.3f} m/yr is "
-              f"under the {STEADY_TREND_MYR:g} m/yr floor, so this stack is steady and a near-zero "
-              f"fitted trend {fit_med:+.3f} m/yr is not evidence of collapse", flush=True)
+        print(f"  [bpinn] trend check stood down: the observed trend median {obs_med:+.3f} m/yr is "
+              f"under the {STEADY_TREND_MYR:g} m/yr floor, so this stack is steady; fitted trend "
+              f"{fit_med:+.3f} m/yr", flush=True)
     verdict = trend_verdict(fit_med, obs_med)
-    if verdict == "collapse":
+    if verdict == "sign":
+        warnings.warn(
+            f"B-PINN surrogate trend has the opposite sign to the observed one: fitted dH/dt "
+            f"median {fit_med:+.3f} vs observed {obs_med:+.3f} m/yr. Do not quote this melt map.",
+            RuntimeWarning, stacklevel=2)
+    elif verdict == "collapse":
         warnings.warn(
             f"B-PINN surrogate may have collapsed to a static field: over the {n_cmp} domain px "
             f"with >= {MIN_TREND_EPOCHS} epochs, the fitted dH/dt median {fit_med:+.3f} m/yr is "

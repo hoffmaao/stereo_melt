@@ -2,7 +2,8 @@
 
 T1 healthy fit -> None · T2 collapse (fitted < 20 % of observed) · T3 runaway
 (fitted > RUNAWAY_TREND_FACTOR x observed; the PIG trunk gave 4x with a
-time-dependent melt net) · T4 steady stack stands down · T5 non-finite stands down.
+time-dependent melt net) · T4 steady stack stands down · T5 non-finite stands down ·
+T6 opposite sign.
 
 Run::
 
@@ -24,6 +25,7 @@ cases = [
     ("T3b just under the factor", (-5.27 * RUNAWAY_TREND_FACTOR * 0.99, -5.27), None),
     ("T4 steady stack stands down", (-0.0, 0.5 * STEADY_TREND_MYR), None),
     ("T5 non-finite stands down", (float("nan"), -5.27), None),
+    ("T6 opposite sign", (5.0, -5.27), "sign"),
 ]
 fails = [n for n, args, want in cases if trend_verdict(*args) != want]
 for n, args, want in cases:
