@@ -183,10 +183,10 @@ RUNAWAY_TREND_FACTOR = 2.0
 
 
 def trend_verdict(fit_med, obs_med):
-    """``'sign'``, ``'collapse'``, ``'runaway'`` or ``None`` for a fitted vs observed dH/dt median (m/yr).
+    """``'sign'``, ``'collapse'``, ``'runaway'`` or ``None`` for fitted vs observed dH/dt (m/yr).
 
-    ``'sign'``: both are at least ``STEADY_TREND_MYR`` and of opposite sign. Stands down (``None``) on a steady stack (``|obs_med| < STEADY_TREND_MYR``) or when
-    either value is not finite.
+    ``'sign'``: both are at least ``STEADY_TREND_MYR`` and of opposite sign. Stands down
+    (``None``) on a steady stack (``|obs_med| < STEADY_TREND_MYR``) or non-finite input.
     """
     if not (np.isfinite(fit_med) and np.isfinite(obs_med)) or abs(obs_med) < STEADY_TREND_MYR:
         return None
@@ -213,8 +213,9 @@ class BPINNConfig:
 
     1. the fitted surrogate ``dH/dt`` must be of the order of the observed
        thinning (about -3 to -6 m/yr on the PIG trunk; near 0 means collapse).
-       ``fit_bpinn`` prints both trends and raises a ``RuntimeWarning`` when the
-       fitted one falls under 20 % of the observed one. The ratio needs a stack
+       ``fit_bpinn`` prints both trends and raises a ``RuntimeWarning`` for any
+       :func:`trend_verdict` (opposite sign, under 20 %, or over
+       ``RUNAWAY_TREND_FACTOR`` x the observed one). The ratio needs a stack
        that is actually thinning, so the check stands down (and says so) when the
        observed median is under ``STEADY_TREND_MYR``, as on the steady twins;
     2. ``transfer=False`` must change the answer. If it does not, the observation
